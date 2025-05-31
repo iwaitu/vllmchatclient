@@ -11,7 +11,7 @@ namespace VllmChatClient.Test
         static int functionCallTime = 0;
         public Qwen3ChatTest()
         {
-            _client = new VllmQwen3ChatClient("https://localhost:8000/v1/{1}", "sk-96448b7e99da436d97fe173643518055", "qwen3");
+            _client = new VllmQwen3ChatClient("https://chatservice.nngeo.net/v1/{1}", "sk-96448b7e99da436d97fe173643518055", "qwen3");
         }
 
        

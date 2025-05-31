@@ -182,7 +182,8 @@ namespace Microsoft.Extensions.AI
             string buffer_name = string.Empty;
             string buffer_params = string.Empty;
             bool thinking = true;
-            bool detectedFunctionCall = false;
+            bool insideThink = false;   // 是否正在 <think> 中
+            bool insideToolCall = false;   // 是否正在 <tool_call> 中（用于兜底残缺情况）
             yield return new ReasoningChatResponseUpdate
             {
                 CreatedAt = DateTimeOffset.Now,
@@ -242,69 +243,49 @@ namespace Microsoft.Extensions.AI
 
                 if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
                 {
-                    ////////////////////////////////////////////////////////////////////
-                    // ① 预处理 & 累积
-                    ////////////////////////////////////////////////////////////////////
-
-                    if (noThinking && !string.IsNullOrEmpty(message.Content))
-                        message.Content = message.Content.Replace("<think>", "")
-                                                          .Replace("</think>", "");
-
                     buffer_msg += message.Content ?? string.Empty;
 
-                    ////////////////////////////////////////////////////////////////////
-                    // ② 旧格式 <tool_call> … </tool_call>
-                    ////////////////////////////////////////////////////////////////////
+                    var funcList = new List<VllmFunctionToolCall>();
 
-                    if (buffer_msg.Contains("<tool_call>", StringComparison.Ordinal))
-                    {
-                        var call = ToolcallParser.ParseToolCall(buffer_msg);
-                        if (call is not null)
-                        {
-                            yield return BuildToolCallUpdate(responseId, call);
-                            buffer_msg = string.Empty;     // 清掉已消费
-                            continue;                      // 继续读下一行
-                        }
-                    }
+                    // A) 已闭合的 <tool_call>…
+                    ToolcallParser.TryFlushClosedToolCallBlocks(ref buffer_msg, out var tcalls);
+                    funcList.AddRange(tcalls);
 
-                    ////////////////////////////////////////////////////////////////////
-                    // ③ 连写 JSON {"name":...}{"name":...}
-                    ////////////////////////////////////////////////////////////////////
-
+                    // B) 连写 JSON
                     var (jsonPieces, rest) = ToolcallParser.SliceJsonFragments(buffer_msg);
-                    buffer_msg = rest;                     // 只留下未闭合片段
+                    buffer_msg = rest;
+                    foreach (var json in jsonPieces)
+                        if (ToolcallParser.TryParseToolCallJson(json) is { } call)
+                            funcList.Add(call);
 
-                    if (jsonPieces.Count > 0)
+                    // C) 有工具调用 ⇒ 推送并继续读取后续 chunk
+                    if (funcList.Count > 0)
                     {
-                        foreach (var json in jsonPieces)
-                        {
-                            var call = ToolcallParser.TryParseToolCallJson(json);
-                            if (call is not null)
-                                yield return BuildToolCallUpdate(responseId, call);
-                        }
-                        continue;                          // 本行已处理完，读下一行
+                        foreach (var call in funcList)
+                            yield return BuildToolCallUpdate(responseId, call);
+
+                        buffer_msg = string.Empty; // 清空已消费部分
+                        continue;                  // 继续 while，等待 DONE 或最终文本
                     }
 
-                    ////////////////////////////////////////////////////////////////////
-                    // ④ 普通文本
-                    ////////////////////////////////////////////////////////////////////
+                    // D) 普通文本
+                    bool jsonIncomplete = ToolcallParser.GetBraceDepth(buffer_msg) > 0;
+                    bool inToolCallBlock = ToolcallParser.IsInsideIncompleteToolCall(buffer_msg);
+                    bool closingToolCall = message.Content?.Contains("</tool_call>", StringComparison.Ordinal) == true;
 
-                    if (!string.IsNullOrEmpty(message.Content))
+                    if (!jsonIncomplete && !inToolCallBlock && !closingToolCall &&
+                        funcList.Count == 0 &&                       // 本帧未输出工具调用
+                        !string.IsNullOrEmpty(message.Content))
                     {
-                        if (message.Content == "</think>")
-                        {
-                            thinking = false;
-                            yield return BuildTextUpdate(responseId, "</think>", thinking);
-                        }
-                        else
-                        {
-                            yield return BuildTextUpdate(responseId, message.Content, thinking);
-                        }
+                        yield return BuildTextUpdate(responseId, message.Content, thinking);
                     }
                 }
+
             }
         }
 
+
+       
         private ReasoningChatResponseUpdate BuildTextUpdate(
         string responseId, string text, bool thinking)
         {

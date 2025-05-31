@@ -188,42 +188,39 @@ namespace Microsoft.Extensions.AI
                 {
                     buffer_msg += message.Content ?? string.Empty;
 
-                    ////////////////////////////////////////////////////////////////////
-                    // ② 旧格式 <tool_call> … </tool_call>
-                    ////////////////////////////////////////////////////////////////////
+                    var funcList = new List<VllmFunctionToolCall>();
 
-                    if (buffer_msg.Contains("<tool_call>", StringComparison.Ordinal))
-                    {
-                        var call = ToolcallParser.ParseToolCall(buffer_msg);
-                        if (call is not null)
-                        {
-                            yield return BuildToolCallUpdate(responseId, call);
-                            buffer_msg = string.Empty;     // 清掉已消费
-                            continue;                      // 继续读下一行
-                        }
-                    }
+                    // A) 已闭合的 <tool_call>…
+                    ToolcallParser.TryFlushClosedToolCallBlocks(ref buffer_msg, out var tcalls);
+                    funcList.AddRange(tcalls);
 
-                    ////////////////////////////////////////////////////////////////////
-                    // ③ 连写 JSON {"name":...}{"name":...}
-                    ////////////////////////////////////////////////////////////////////
-
+                    // B) 连写 JSON
                     var (jsonPieces, rest) = ToolcallParser.SliceJsonFragments(buffer_msg);
-                    buffer_msg = rest;                     // 只留下未闭合片段
+                    buffer_msg = rest;
+                    foreach (var json in jsonPieces)
+                        if (ToolcallParser.TryParseToolCallJson(json) is { } call)
+                            funcList.Add(call);
 
-                    if (jsonPieces.Count > 0)
+                    // C) 有工具调用 ⇒ 推送并继续读取后续 chunk
+                    if (funcList.Count > 0)
                     {
-                        foreach (var json in jsonPieces)
-                        {
-                            var call = ToolcallParser.TryParseToolCallJson(json);
-                            if (call is not null)
-                                yield return BuildToolCallUpdate(responseId, call);
-                        }
-                        continue;                          // 本行已处理完，读下一行
+                        foreach (var call in funcList)
+                            yield return BuildToolCallUpdate(responseId, call);
+
+                        buffer_msg = string.Empty; // 清空已消费部分
+                        continue;                  // 继续 while，等待 DONE 或最终文本
                     }
 
-                    if (!string.IsNullOrEmpty(message.Content))
+                    // D) 普通文本
+                    bool jsonIncomplete = ToolcallParser.GetBraceDepth(buffer_msg) > 0;
+                    bool inToolCallBlock = ToolcallParser.IsInsideIncompleteToolCall(buffer_msg);
+                    bool closingToolCall = message.Content?.Contains("</tool_call>", StringComparison.Ordinal) == true;
+
+                    if (!jsonIncomplete && !inToolCallBlock && !closingToolCall &&
+                        funcList.Count == 0 &&                       // 本帧未输出工具调用
+                        !string.IsNullOrEmpty(message.Content))
                     {
-                        yield return BuildTextUpdate(responseId, message.Content);
+                        yield return BuildTextUpdate(responseId, message.Content, thinking);
                     }
                 }
             }

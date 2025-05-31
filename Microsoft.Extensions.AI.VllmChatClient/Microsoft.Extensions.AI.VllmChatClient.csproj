@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <PackageId>Ivilson.AI.VllmChatClient</PackageId>
+    <Version>1.2.5</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="McpDotNet.Extensions.AI" Version="1.1.0.1" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="9.3.0-preview.1.25161.3" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+</Project>

@@ -220,7 +220,7 @@ namespace Microsoft.Extensions.AI
                         funcList.Count == 0 &&                       // 本帧未输出工具调用
                         !string.IsNullOrEmpty(message.Content))
                     {
-                        yield return BuildTextUpdate(responseId, message.Content, thinking);
+                        yield return BuildTextUpdate(responseId, message.Content);
                     }
                 }
             }

@@ -186,45 +186,75 @@ namespace Microsoft.Extensions.AI
 
                 if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
                 {
-                    if (message.Content?.Length > 0 || update.Contents.Count == 0)
-                    {
-                        buffer_msg += message.Content;
+                    buffer_msg += message.Content ?? string.Empty;
 
-                        if (buffer_msg.StartsWith("<tool"))
+                    ////////////////////////////////////////////////////////////////////
+                    // ② 旧格式 <tool_call> … </tool_call>
+                    ////////////////////////////////////////////////////////////////////
+
+                    if (buffer_msg.Contains("<tool_call>", StringComparison.Ordinal))
+                    {
+                        var call = ToolcallParser.ParseToolCall(buffer_msg);
+                        if (call is not null)
                         {
-                            // 检查是否是完整的工具调用
-                            var functionCall = ToolcallParser.ParseToolCall(buffer_msg);
-                            if (functionCall != null)
-                            {
-                                update.Contents.Add(ToFunctionCallContent(functionCall));
-                                update.FinishReason = ChatFinishReason.ToolCalls;
-                                yield return update;
-                                yield break;
-                            }
-                        }
-                        else
-                        {
-                            if (closeBuff == false)
-                            {
-                                if (buffer_msg.Length > 5)
-                                {
-                                    closeBuff = true;
-                                    update.Contents.Insert(0, new TextContent(buffer_msg));
-                                    buffer_msg = string.Empty;
-                                }
-                            }
-                            else
-                            {
-                                update.Contents.Insert(0, new TextContent(message.Content));
-                            }
+                            yield return BuildToolCallUpdate(responseId, call);
+                            buffer_msg = string.Empty;     // 清掉已消费
+                            continue;                      // 继续读下一行
                         }
                     }
+
+                    ////////////////////////////////////////////////////////////////////
+                    // ③ 连写 JSON {"name":...}{"name":...}
+                    ////////////////////////////////////////////////////////////////////
+
+                    var (jsonPieces, rest) = ToolcallParser.SliceJsonFragments(buffer_msg);
+                    buffer_msg = rest;                     // 只留下未闭合片段
+
+                    if (jsonPieces.Count > 0)
+                    {
+                        foreach (var json in jsonPieces)
+                        {
+                            var call = ToolcallParser.TryParseToolCallJson(json);
+                            if (call is not null)
+                                yield return BuildToolCallUpdate(responseId, call);
+                        }
+                        continue;                          // 本行已处理完，读下一行
+                    }
+
+                    if (!string.IsNullOrEmpty(message.Content))
+                    {
+                        yield return BuildTextUpdate(responseId, message.Content);
+                    }
                 }
-                yield return update;
             }
         }
 
-        
+        private ChatResponseUpdate BuildTextUpdate(
+            string responseId, string text)
+        {
+            return new ReasoningChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                ModelId = _metadata.ModelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                Contents = new List<AIContent> { new TextContent(text) }
+            };
+        }
+
+
+        private ChatResponseUpdate BuildToolCallUpdate(string responseId, VllmFunctionToolCall call)
+        {
+            return new ChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                FinishReason = ChatFinishReason.ToolCalls,
+                ModelId = _metadata.ModelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                Contents = new List<AIContent> { ToFunctionCallContent(call) }
+            };
+        }
 
 
         /// <summary>
@@ -260,25 +290,37 @@ namespace Microsoft.Extensions.AI
         /// </summary>
         private static ChatMessage FromVllmMessage(VllmChatResponseMessage message)
         {
-            List<AIContent> contents = [];
+            var contents = new List<AIContent>();
 
-            if (message.Content?.Length > 0 || contents.Count == 0)
+            if (string.IsNullOrEmpty(message.Content))
+                return new ChatMessage(new ChatRole(message.Role), contents);
+
+            
+            var raw = message.Content;
+            var tcList = ToolcallParser.ParseToolCalls(raw, out var afterToolCalls);
+
+            foreach (var call in tcList)
+                contents.Add(ToFunctionCallContent(call));
+
+            // 连写 JSON 切片
+            var (jsonPieces, rest) = ToolcallParser.SliceJsonFragments(afterToolCalls);
+
+            foreach (var json in jsonPieces)
             {
-                var functionCall = ToolcallParser.ParseToolCall(message.Content);
-                if (functionCall != null)
-                {
-                    contents.Add(ToFunctionCallContent(functionCall));
-                }
-                else
-                {
-                    contents.Insert(0, new TextContent(message.Content));
-                }
+                var call = ToolcallParser.TryParseToolCallJson(json);
+                if (call != null)
+                    contents.Add(ToFunctionCallContent(call));
             }
 
-            return new ChatMessage(new(message.Role), contents);
+            // 纯文本
+            rest = rest.Trim();
+            if (!string.IsNullOrEmpty(rest))
+                contents.Add(new TextContent(rest));
+
+            return new ChatMessage(new ChatRole(message.Role), contents);
         }
 
-  
+
 
         /// <summary>
         /// 将工具调用转换为 FunctionCallContent 对象

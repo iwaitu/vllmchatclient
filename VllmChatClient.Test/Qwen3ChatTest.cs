@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace VllmChatClient.Test
 {
-    
+
     public class Qwen3ChatTest
     {
         private readonly IChatClient _client;
@@ -14,7 +14,7 @@ namespace VllmChatClient.Test
             _client = new VllmQwen3ChatClient("http://localhost:8000/v1/{1}", "", "qwen3");
         }
 
-       
+
 
         [Fact]
         public async Task ChatTest()
@@ -28,11 +28,11 @@ namespace VllmChatClient.Test
             {
                 NoThinking = true,
             };
-            var res = await _client.GetResponseAsync(messages,options);
+            var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
 
             Assert.Equal(1, res.Messages.Count);
-            
+
         }
 
         [Fact]
@@ -93,8 +93,8 @@ namespace VllmChatClient.Test
             var options = new Qwen3ChatOptions
             {
                 NoThinking = true,
-            };  
-            await foreach (var update in _client.GetStreamingResponseAsync(messages,options))
+            };
+            await foreach (var update in _client.GetStreamingResponseAsync(messages, options))
             {
                 res += update;
             }
@@ -114,7 +114,7 @@ namespace VllmChatClient.Test
             };
             Qwen3ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather),AIFunctionFactory.Create(Search)],
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)],
                 NoThinking = false
             };
             string res = string.Empty;
@@ -149,7 +149,7 @@ namespace VllmChatClient.Test
             };
             ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather),AIFunctionFactory.Create(Search)]
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
             };
             var res = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
@@ -176,14 +176,14 @@ namespace VllmChatClient.Test
                 {
                     anwser = "在青秀区方圆广场附近站前路1号。";
                 }
-                
+
                 var functionResult = new FunctionResultContent(functionCall.CallId, anwser);
                 var contentList = new List<AIContent>();
                 contentList.Add(functionResult);
                 var functionResultMessage = new ChatMessage(ChatRole.Tool, contentList);
                 messages.Add(functionResultMessage);
             }
-            
+
 
             var result = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(result);
@@ -194,6 +194,41 @@ namespace VllmChatClient.Test
                                    .FirstOrDefault()?.Text;
 
             Assert.False(string.IsNullOrWhiteSpace(answerText));
+        }
+
+        [Fact]
+        public async Task TestJsonOutput()
+        {
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用代码块。")
+            };
+            var options = new Qwen3ChatOptions
+            {
+                MaxOutputTokens = 100,
+                NoThinking = true,
+            };
+            var res = await _client.GetResponseAsync(messages, options);
+            Assert.NotNull(res);
+            Assert.Single(res.Messages);
+            var textContent = res.Messages[0].Contents.OfType<TextContent>().FirstOrDefault();
+            Assert.NotNull(textContent);
+            Assert.All(textContent.Text.Split('\n'), line =>
+            {
+                Assert.DoesNotContain("```", line); // 确保没有代码块
+                Assert.DoesNotContain("```json", line); // 确保没有json代码块
+            });
+            // 确保输出是有效的JSON格式
+            try
+            {
+                var json = System.Text.Json.JsonDocument.Parse(textContent.Text);
+                Assert.NotNull(json);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                Assert.Fail("输出的文本不是有效的JSON格式。");
+            }
         }
     }
 }

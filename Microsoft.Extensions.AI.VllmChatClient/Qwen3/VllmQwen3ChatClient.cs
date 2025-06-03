@@ -267,6 +267,11 @@ namespace Microsoft.Extensions.AI
                         buffer_msg = string.Empty; // 清空已消费部分
                         continue;                  // 继续 while，等待 DONE 或最终文本
                     }
+                    else
+                    {
+                        //还原文本消息
+                        buffer_msg += message.Content ?? string.Empty;
+                    }
 
                     // D) 普通文本
                     bool jsonIncomplete = ToolcallParser.GetBraceDepth(buffer_msg) > 0;
@@ -381,6 +386,7 @@ namespace Microsoft.Extensions.AI
                 var call = ToolcallParser.TryParseToolCallJson(json);
                 if (call != null)
                     contents.Add(ToFunctionCallContent(call));
+                rest = raw;
             }
 
             // ④ 纯文本

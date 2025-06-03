@@ -1,4 +1,4 @@
-### It can work for qwen3, qwq32b, gemma3, glm4, glm z1, deepseek-r1 on vllm==v0.8.5.
+### It can work for qwen3, qwq32b, gemma3, deepseek-r1 on vllm==v0.8.5.
 
 ## project on github : https://github.com/iwaitu/vllmchatclient
 
@@ -12,9 +12,7 @@
 1. VllmQwen3ChatClient
 2. VllmQwqChatClient
 3. VllmGemmaChatClient 
-4. VllmGlm4ChatClient 
-5. VllmGlmZ1ChatClient
-6. VllmDeepseekR1ChatClient
+4. VllmDeepseekR1ChatClient
 
 support stream function call .
 
@@ -132,5 +130,35 @@ private async Task<(string answer, string reasoning)> StreamChatResponseAsync(Li
 }
 
 var (answer, reasoning) = await StreamChatResponseAsync(messages, chatOptions);
+
+```
+
+for model deepseek r1:
+```csharp
+
+var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User,"你是谁？")
+            };
+            string res = string.Empty;
+            string think = string.Empty;
+            await foreach (ReasoningChatResponseUpdate update in _client.GetStreamingResponseAsync(messages))
+            {
+                var updateText = update.ToString();
+                if (update is ReasoningChatResponseUpdate)
+                {
+                    if (update.Thinking)
+                    {
+                        think += updateText;
+                    }
+                    else
+                    {
+                        res += updateText;
+                    }
+
+                }
+                
+            }
 
 ```

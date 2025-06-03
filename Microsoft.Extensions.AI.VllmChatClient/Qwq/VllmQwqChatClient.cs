@@ -2,13 +2,8 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Shared.Diagnostics;
-using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 using JsonSerializer = System.Text.Json.JsonSerializer;
-using McpDotNet.Protocol.Types;
-using System;
-using System.Reflection.Metadata;
-using System.Globalization;
 
 namespace Microsoft.Extensions.AI
 {
@@ -207,36 +202,75 @@ namespace Microsoft.Extensions.AI
 
                 if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
                 {
-                    if (message.Content?.Length > 0 || update.Contents.Count == 0)
+                    buffer_msg += message.Content ?? string.Empty;
+                    var buffer_copy = buffer_msg;
+                    var funcList = new List<VllmFunctionToolCall>();
+
+                    // A) 已闭合的 <tool_call>…
+                    ToolcallParser.TryFlushClosedToolCallBlocks(ref buffer_copy, out var tcalls);
+                    funcList.AddRange(tcalls);
+
+                    // B) 连写 JSON
+                    var (jsonPieces, rest) = ToolcallParser.SliceJsonFragments(buffer_copy);
+                    buffer_copy = rest;
+                    foreach (var json in jsonPieces)
                     {
-                        buffer_msg += message.Content;
-                        if (buffer_msg.Contains("<tool_call>"))
-                        {
-                            var functionCall = ToolcallParser.ParseToolCall(buffer_msg);
-                            if (functionCall != null)
-                            {
-                                update.Contents.Add(ToFunctionCallContent(functionCall));
-                                update.FinishReason = ChatFinishReason.ToolCalls;
-                                yield return update;
-                                yield break;
-                            }
-                        }
-                        else
-                        {
-                            if (message.Content == "</think>")
-                            {
-                                thinking = false;
-                                update.Contents.Insert(0, new TextContent("</think>\n"));
-                                yield return update;
-                                continue;
-                            }
-                            update.Contents.Insert(0, new TextContent(message.Content));
-                        }
+                        if (ToolcallParser.TryParseToolCallJson(json) is { } call)
+                            funcList.Add(call);
+                        buffer_copy += json ?? "";
+                    }
+                    // C) 有工具调用 ⇒ 推送并继续读取后续 chunk
+                    if (funcList.Count > 0)
+                    {
+                        foreach (var call in funcList)
+                            yield return BuildToolCallUpdate(responseId, call);
+
+                        buffer_copy = string.Empty; // 清空已消费部分
+                        continue;                  // 继续 while，等待 DONE 或最终文本
+                    }
+
+                    // D) 普通文本
+                    //bool jsonIncomplete = ToolcallParser.GetBraceDepth(buffer_copy) > 0;
+                    bool inToolCallBlock = ToolcallParser.IsInsideIncompleteToolCall(buffer_copy);
+                    bool isUnclosed = ToolcallParser.HasUnclosedToolCall(buffer_msg);
+
+                    if (!inToolCallBlock && !isUnclosed &&
+                        funcList.Count == 0 &&                       // 本帧未输出工具调用
+                        !string.IsNullOrEmpty(message.Content))
+                    {
+                        yield return BuildTextUpdate(responseId, message.Content,thinking);
                     }
                 }
-                update.Thinking = thinking;
-                yield return update;
             }
+        }
+
+        private ReasoningChatResponseUpdate BuildTextUpdate(
+        string responseId, string text, bool thinking)
+        {
+            return new ReasoningChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                ModelId = _metadata.ModelId,
+                ResponseId = responseId,
+                Thinking = thinking,
+                Role = ChatRole.Assistant,
+                Contents = new List<AIContent> { new TextContent(text) }
+            };
+        }
+
+
+        private ReasoningChatResponseUpdate BuildToolCallUpdate(string responseId, VllmFunctionToolCall call)
+        {
+            return new ReasoningChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                FinishReason = ChatFinishReason.ToolCalls,
+                ModelId = _metadata.ModelId,
+                ResponseId = responseId,
+                Thinking = false,
+                Role = ChatRole.Assistant,
+                Contents = new List<AIContent> { ToFunctionCallContent(call) }
+            };
         }
 
         /// <summary>

@@ -1,4 +1,4 @@
-### It can work for qwen3, qwq32b, gemma3, deepseek-r1 on vllm==v0.8.5.
+### It can work for qwen3, qwq32b, gemma3, deepseek-r1 on vllm.
 
 ## project on github : https://github.com/iwaitu/vllmchatclient
 

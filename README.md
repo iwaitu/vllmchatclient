@@ -2,6 +2,13 @@
 
 ## project on github : https://github.com/iwaitu/vllmchatclient
 
+---
+
+#### 最近更新
+- 更新版本并增强消息处理逻辑
+- 修复了无法输出 json 格式数据的问题
+---
+
 1. VllmQwen3ChatClient
 2. VllmQwqChatClient
 3. VllmGemmaChatClient 
@@ -12,7 +19,7 @@
 support stream function call .
 
 for model: qwq or qwen3 vllm deployment:
-```
+```bash
 docker run -it --gpus all -p 8000:8000 \
   -v /models/Qwen3-32B-FP8:/models/Qwen3-32B-FP8 \
   --restart always \
@@ -26,10 +33,11 @@ docker run -it --gpus all -p 8000:8000 \
   --tensor-parallel-size 2 \
   --gpu_memory_utilization 0.8 \
   --served-model-name "qwen3"
-```
+
+  ```
 
 for model: gemma3 vllm deployment:
-```
+```bash
 docker run -it --gpus all -p 8000:8000 \
   -v /models/gemma-3-27b-it-FP8-Dynamic:/models/gemma-3-27b-it-FP8-Dynamic \
   -v /home/lc/work/gemma3.jinja:/home/lc/work/gemma3.jinja \
@@ -47,6 +55,7 @@ docker run -it --gpus all -p 8000:8000 \
   --gpu_memory_utilization 0.8 \
   --served-model-name "gemma3" 
 ```
+
 Qwen3 model sample
 ```csharp
 [Description("Gets the weather")]
@@ -77,10 +86,8 @@ public async Task StreamChatFunctionCallTest()
 }
 ```
 
-QwQ model sample
+QwQ model sampleusing Microsoft.Extensions.AI
 ```csharp
-using Microsoft.Extensions.AI
-
 string apiurl = "http://localhost:8000/{0}/{1}";
 
 [Description("Gets the weather")]
@@ -125,4 +132,5 @@ private async Task<(string answer, string reasoning)> StreamChatResponseAsync(Li
 }
 
 var (answer, reasoning) = await StreamChatResponseAsync(messages, chatOptions);
+
 ```

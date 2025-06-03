@@ -73,7 +73,6 @@ namespace VllmChatClient.Test
             {
                 Tools = [AIFunctionFactory.Create(GetWeather)],
                 //NoThinking = true,
-                StopSequences = new List<string> { "你可以选择" }
 
             };
             var res = await client.GetResponseAsync(messages, chatOptions);
@@ -125,9 +124,60 @@ namespace VllmChatClient.Test
             Assert.True(res != null);
         }
 
+        [Fact]
+        public async Task StreamChatJsonoutput()
+        {
+            IChatClient client = new ChatClientBuilder(_client)
+                .UseFunctionInvocation()
+                .Build();
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用 codeblock。")
+            };
+            Qwen3ChatOptions chatOptions = new()
+            {
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)],
+                NoThinking = true
+            };
+            string res = string.Empty;
+            await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
+            {
+                res += update;
+            }
+            Assert.True(res != null);
+            var textContent = RemoveThinkTag(res);
+            Assert.NotNull(textContent);
+            Assert.All(textContent.Split('\n'), line =>
+            {
+                Assert.DoesNotContain("```", line); // 确保没有代码块
+                Assert.DoesNotContain("```json", line); // 确保没有json代码块
+            });
+            // 确保输出是有效的JSON格式
+            try
+            {
+                var json = System.Text.Json.JsonDocument.Parse(textContent);
+                Assert.NotNull(json);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                Assert.Fail("输出的文本不是有效的JSON格式。");
+            }
+        }
+
+        private static string RemoveThinkTag(string content)
+        {
+            // 移除 <think>...</think> 及其后连续的换行符
+            return System.Text.RegularExpressions.Regex.Replace(
+                content,
+                "<think>.*?</think>\\n*",
+                string.Empty,
+                System.Text.RegularExpressions.RegexOptions.Singleline);
+        }
+
 
         [Description("获取南宁的天气情况")]
-        static string GetWeather() => Random.Shared.NextDouble() > 0.1 ? "It's sunny" : "It's raining";
+        static string GetWeather() =>  "It's raining";
 
 
         [Description("Searh")]
@@ -202,7 +252,7 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用代码块。")
+                new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用 codeblock。")
             };
             var options = new Qwen3ChatOptions
             {

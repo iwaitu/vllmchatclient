@@ -275,7 +275,14 @@ namespace Microsoft.Extensions.AI
             return text;   // 整体都不 Trim，保留任何前导空格
         }
 
+        public static bool HasUnclosedToolCall(string input)
+        {
+            // 查找所有起始和结束标签位置
+            int openCount = Regex.Matches(input, @"<tool_call>").Count;
+            int closeCount = Regex.Matches(input, @"</tool_call>").Count;
 
+            return openCount != closeCount;
+        }
 
 
 

@@ -221,8 +221,16 @@ namespace Microsoft.Extensions.AI
                         funcList.Count == 0 &&                       // 本帧未输出工具调用
                         !string.IsNullOrEmpty(message.Content))
                     {
-                        if(!buffer_msg.StartsWith("<") || buffer_msg.Length > 10)
-                            yield return BuildTextUpdate(responseId, message.Content);
+                        if (buffer_msg.StartsWith("<"))
+                        {
+                            if(buffer_msg.Length > 11)
+                            {
+                                var msg = buffer_msg + message.Content;
+                                buffer_msg = "";
+                                yield return BuildTextUpdate(responseId, msg);
+                            }
+                        }
+                            
                     }
                 }
             }

@@ -223,12 +223,16 @@ namespace Microsoft.Extensions.AI
                     {
                         if (buffer_msg.StartsWith("<"))
                         {
-                            if(buffer_msg.Length > 11)
+                            if (buffer_msg.Length > 11)
                             {
                                 var msg = buffer_msg + message.Content;
                                 buffer_msg = "";
                                 yield return BuildTextUpdate(responseId, msg);
                             }
+                        }
+                        else
+                        {
+                            yield return BuildTextUpdate(responseId, message.Content);
                         }
                             
                     }

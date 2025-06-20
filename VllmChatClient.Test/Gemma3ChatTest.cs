@@ -31,6 +31,7 @@ namespace VllmChatClient.Test
             Assert.NotNull(res);
 
             Assert.Equal(1, res.Messages.Count);
+            Assert.True(res.Messages.FirstOrDefault()?.Text.Contains("菲菲"));
         }
 
         [Fact]
@@ -162,6 +163,8 @@ namespace VllmChatClient.Test
                 res += update;
             }
             Assert.True(res != null);
+            Assert.False(res.StartsWith("<"));
+            Assert.True(res.Contains("菲菲"));
         }
 
         [Fact]
@@ -186,6 +189,7 @@ namespace VllmChatClient.Test
                 res += update;
             }
             Assert.True(res != null);
+            Assert.False(res.StartsWith("<"));
             Assert.Contains("晴", res);    // 根据 GetWeather 假设结果校验
         }
 
@@ -227,6 +231,7 @@ namespace VllmChatClient.Test
                                    .FirstOrDefault()?.Text;
 
             Assert.False(string.IsNullOrWhiteSpace(answerText));
+
         }
 
         [Fact]
@@ -289,6 +294,7 @@ namespace VllmChatClient.Test
             }
             string res = sb.ToString();
             Assert.False(string.IsNullOrWhiteSpace(res));
+            Assert.False(res.StartsWith("<"));
             Assert.Contains("晴", res);    // 根据 GetWeather 假设结果校验
         }
 

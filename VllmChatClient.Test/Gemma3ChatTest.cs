@@ -10,6 +10,7 @@ namespace VllmChatClient.Test
     public class Gemma3ChatTest
     {
         private readonly IChatClient _client;
+        static int functionCallTime = 0;
         public Gemma3ChatTest()
         {
             _client = new VllmGemmaChatClient("http://localhost:8000/{0}/{1}", "sk-96448b7e99da436d97fe173643518055", "gemma3");
@@ -131,11 +132,11 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"在南宁，我需要带伞吗？"),
+                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？"),
             };
             ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather)]
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
             };
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
@@ -263,11 +264,11 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"南宁的天气如何？")
+                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
             };
             ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather)]
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
             };
             string res = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
@@ -287,31 +288,50 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"在南宁，我需要带伞吗？"),
+                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？"),
             };
             ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather)]
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
             };
             var res = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
             Assert.True(res.Messages.Count == 1);
-            Assert.True(res.Messages[0].Contents.Count == 1);
-            Assert.True(res.Messages[0].Contents[0] is FunctionCallContent);
-            var functionCall = res.Messages[0].Contents[0] as FunctionCallContent;
-            Assert.NotNull(functionCall);
-            Assert.Equal("GetWeather", functionCall.Name);
-            Assert.Equal("南宁", functionCall.Arguments["city"].ToString());
+            Assert.True(res.Messages[0].Contents.Count == 2);
 
-            messages.Add(res.Messages[0]);
-            var functionResult = new FunctionResultContent(functionCall.CallId, "It's sunny");
-            var contentList = new List<AIContent>();
-            contentList.Add(functionResult);
-            var functionResultMessage = new ChatMessage(ChatRole.Tool, contentList);
-            messages.Add(functionResultMessage);
+            foreach (var content in res.Messages[0].Contents)
+            {
+                var funcMsg = new ChatResponse();
+                var msgContent = new ChatMessage();
+                msgContent.Contents.Add(content);
+                funcMsg.Messages.Add(msgContent);
+                messages.AddMessages(funcMsg);
+
+                Assert.True(content is FunctionCallContent);
+                var functionCall = content as FunctionCallContent;
+                Assert.NotNull(functionCall);
+                var anwser = string.Empty;
+                if ("GetWeather" == functionCall.Name)
+                {
+                    anwser = "30度，天气晴朗。";
+                }
+                else
+                {
+                    anwser = "在青秀区方圆广场附近站前路1号。";
+                }
+
+                var functionResult = new FunctionResultContent(functionCall.CallId, anwser);
+                var contentList = new List<AIContent>();
+                contentList.Add(functionResult);
+                var functionResultMessage = new ChatMessage(ChatRole.Tool, contentList);
+                messages.Add(functionResultMessage);
+            }
+
+
             var result = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(result);
             Assert.Single(result.Messages);
+
             var answerText = result.Messages[0].Contents
                                    .OfType<TextContent>()
                                    .FirstOrDefault()?.Text;
@@ -384,6 +404,12 @@ namespace VllmChatClient.Test
             Assert.Contains("晴", res);    // 根据 GetWeather 假设结果校验
         }
 
+        [Description("Searh")]
+        static string Search([Description("需要搜索的问题")] string question)
+        {
+            functionCallTime += 1;
+            return "南宁市青秀区方圆广场北面站前路1号。";
+        }
 
         private static void AppendText(ChatResponseUpdate update, StringBuilder sb)
         {

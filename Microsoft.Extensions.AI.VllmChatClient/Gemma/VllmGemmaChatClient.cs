@@ -329,6 +329,8 @@ namespace Microsoft.Extensions.AI
                 var call = ToolcallParser.TryParseToolCallJson(json);
                 if (call != null)
                     contents.Add(ToFunctionCallContent(call));
+                else
+                    contents.Add(new TextContent(json));
             }
 
             // 纯文本

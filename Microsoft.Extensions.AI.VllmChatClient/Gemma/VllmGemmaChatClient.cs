@@ -1,5 +1,6 @@
 ﻿using McpDotNet.Protocol.Types;
 using Microsoft.Shared.Diagnostics;
+using Microsoft.VisualBasic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Net.Http.Json;
@@ -147,6 +148,7 @@ namespace Microsoft.Extensions.AI
             string buffer_name = string.Empty;
             string buffer_params = string.Empty;
             bool closeBuff = false;
+            var funcList = new List<VllmFunctionToolCall>();
 #if NET
             while ((await streamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is { } line)
 #else
@@ -188,7 +190,7 @@ namespace Microsoft.Extensions.AI
                 {
                     buffer_msg += message.Content ?? string.Empty;
                     var buffer_copy = buffer_msg;
-                    var funcList = new List<VllmFunctionToolCall>();
+                    
 
                     // A) 已闭合的 <tool_call>…
                     ToolcallParser.TryFlushClosedToolCallBlocks(ref buffer_copy, out var tcalls);
@@ -206,11 +208,8 @@ namespace Microsoft.Extensions.AI
                     // C) 有工具调用 ⇒ 推送并继续读取后续 chunk
                     if (funcList.Count > 0)
                     {
-                        foreach (var call in funcList)
-                            yield return BuildToolCallUpdate(responseId, call);
-
                         buffer_copy = string.Empty; // 清空已消费部分
-                        continue;                  // 继续 while，等待 DONE 或最终文本
+                        break;                  // 继续 while，等待 DONE 或最终文本
                     }
 
                     // D) 普通文本
@@ -222,8 +221,17 @@ namespace Microsoft.Extensions.AI
                         funcList.Count == 0 &&                       // 本帧未输出工具调用
                         !string.IsNullOrEmpty(message.Content))
                     {
-                        yield return BuildTextUpdate(responseId, message.Content);
+                        if(!buffer_msg.StartsWith("<") || buffer_msg.Length > 10)
+                            yield return BuildTextUpdate(responseId, message.Content);
                     }
+                }
+            }
+
+            if(funcList.Count>0)
+            {
+                foreach (var func in funcList)
+                {
+                    yield return BuildToolCallUpdate(responseId, func);
                 }
             }
         }

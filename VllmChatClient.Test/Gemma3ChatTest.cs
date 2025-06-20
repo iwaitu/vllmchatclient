@@ -11,7 +11,7 @@ namespace VllmChatClient.Test
         private readonly IChatClient _client;
         public Gemma3ChatTest()
         {
-            _client = new VllmGemmaChatClient("http://localhost:8000/{0}/{1}", "", "gemma3");
+            _client = new VllmGemmaChatClient("http://localhost:8000/{0}/{1}", "sk-96448b7e99da436d97fe173643518055", "gemma3");
         }
         private const string apiKey = "";
         [Description("获取指定地点的天气信息")]
@@ -186,6 +186,7 @@ namespace VllmChatClient.Test
                 res += update;
             }
             Assert.True(res != null);
+            Assert.Contains("晴", res);    // 根据 GetWeather 假设结果校验
         }
 
         [Fact]

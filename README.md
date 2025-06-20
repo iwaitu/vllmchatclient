@@ -1,4 +1,6 @@
-### It can work for qwen3, qwq32b, gemma3, deepseek-r1 on vllm.
+# C# vllm chat client
+
+It can work for qwen3, qwq32b, gemma3, deepseek-r1 on vllm.
 
 ## project on github : https://github.com/iwaitu/vllmchatclient
 

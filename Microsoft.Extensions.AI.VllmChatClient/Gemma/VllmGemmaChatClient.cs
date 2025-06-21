@@ -221,12 +221,12 @@ namespace Microsoft.Extensions.AI
                         funcList.Count == 0 &&                       // 本帧未输出工具调用
                         !string.IsNullOrEmpty(message.Content))
                     {
-                        if (buffer_msg.StartsWith("<"))
+                        if (buffer_copy.StartsWith("<"))
                         {
-                            if (buffer_msg.Length > 11)
+                            if (buffer_copy.Length > 11)
                             {
-                                var msg = buffer_msg + message.Content;
-                                buffer_msg = "";
+                                var msg = buffer_copy + message.Content;
+                                buffer_copy = "";
                                 yield return BuildTextUpdate(responseId, msg);
                             }
                         }

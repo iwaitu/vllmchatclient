@@ -287,7 +287,7 @@ namespace VllmChatClient.Test
 
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，性格活泼可爱。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？"),
             };
             ChatOptions chatOptions = new()
@@ -345,7 +345,7 @@ namespace VllmChatClient.Test
         {
             var messages = new List<ChatMessage>
             {
-                new(ChatRole.System,"你是一个智能助手，名字叫菲菲"),
+                new(ChatRole.System,"你是一个智能助手，名字叫菲菲，性格活泼可爱。"),
                 new(ChatRole.User  ,"南宁的天气如何？")
             };
 
@@ -400,7 +400,7 @@ namespace VllmChatClient.Test
             }
             string res = sb.ToString();
             Assert.False(string.IsNullOrWhiteSpace(res));
-            Assert.False(res.StartsWith("<"));
+            Assert.False(res?.Contains("<tool_call"));
             Assert.Contains("晴", res);    // 根据 GetWeather 假设结果校验
         }
 

@@ -184,6 +184,7 @@ namespace Microsoft.Extensions.AI
             bool thinking = true;
             bool insideThink = false;   // 是否正在 <think> 中
             bool insideToolCall = false;   // 是否正在 <tool_call> 中（用于兜底残缺情况）
+            string buff_toolcall = string.Empty;
             yield return new ReasoningChatResponseUpdate
             {
                 CreatedAt = DateTimeOffset.Now,
@@ -279,6 +280,15 @@ namespace Microsoft.Extensions.AI
                         funcList.Count == 0 &&                       // 本帧未输出工具调用
                         !string.IsNullOrEmpty(message.Content))
                     {
+                        if (message.Content == "<")
+                        {
+                            buff_toolcall += message.Content;
+                        }
+                        if (buff_toolcall.Length > 0 && buff_toolcall.Length < 11)
+                        {
+                            buff_toolcall += message.Content;
+                            continue;
+                        }
                         yield return BuildTextUpdate(responseId, message.Content, thinking);
                     }
                 }

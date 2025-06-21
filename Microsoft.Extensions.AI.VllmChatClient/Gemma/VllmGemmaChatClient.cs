@@ -147,6 +147,7 @@ namespace Microsoft.Extensions.AI
             string buffer_msg = string.Empty;
             string buffer_name = string.Empty;
             string buffer_params = string.Empty;
+            string buff_toolcall = string.Empty;
             bool closeBuff = false;
             var funcList = new List<VllmFunctionToolCall>();
 #if NET
@@ -164,6 +165,11 @@ namespace Microsoft.Extensions.AI
                 }
                 else if (jsonPart == "[DONE]")
                 {
+                    // 在流式结束时，若 buffer_msg 以 <tool_call 开头但未闭合，则丢弃，不输出为文本
+                    if (!string.IsNullOrWhiteSpace(buffer_msg) && buffer_msg.TrimStart().StartsWith("<tool_call") && !buffer_msg.Contains("</tool_call>"))
+                    {
+                        buffer_msg = string.Empty;
+                    }
                     break;
                 }
 
@@ -221,20 +227,16 @@ namespace Microsoft.Extensions.AI
                         funcList.Count == 0 &&                       // 本帧未输出工具调用
                         !string.IsNullOrEmpty(message.Content))
                     {
-                        if (buffer_copy.StartsWith("<"))
+                        if (message.Content == "<")
                         {
-                            if (buffer_copy.Length > 11)
-                            {
-                                var msg = buffer_copy + message.Content;
-                                buffer_copy = "";
-                                yield return BuildTextUpdate(responseId, msg);
-                            }
+                            buff_toolcall += message.Content;
                         }
-                        else
+                        if(buff_toolcall.Length> 0 && buff_toolcall.Length < 11)
                         {
-                            yield return BuildTextUpdate(responseId, message.Content);
+                            buff_toolcall += message.Content;
+                            continue;
                         }
-                            
+                        yield return BuildTextUpdate(responseId, message.Content);
                     }
                 }
             }
@@ -314,7 +316,7 @@ namespace Microsoft.Extensions.AI
             if (string.IsNullOrEmpty(message.Content))
                 return new ChatMessage(new ChatRole(message.Role), contents);
 
-            
+
             var raw = message.Content;
             var tcList = ToolcallParser.ParseToolCalls(raw, out var afterToolCalls);
 
@@ -430,7 +432,7 @@ namespace Microsoft.Extensions.AI
                         break;
 
                     case DataContent dataContent when dataContent.HasTopLevelMediaType("image"):
-                        var base64 = Convert.ToBase64String(dataContent.Data                            
+                        var base64 = Convert.ToBase64String(dataContent.Data
 #if NET
                        .Span);
 #else
@@ -513,4 +515,3 @@ namespace Microsoft.Extensions.AI
         }
     }
 }
-

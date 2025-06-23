@@ -99,7 +99,7 @@ namespace Microsoft.Extensions.AI
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
                 FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
-                ModelId = response.Model ?? options?.ModelId ?? _metadata.ModelId,
+                ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
                 ResponseId = response.Id,
                 Usage = ParseVllmChatResponseUsage(response),
             };
@@ -154,7 +154,7 @@ namespace Microsoft.Extensions.AI
             {
                 CreatedAt = DateTimeOffset.Now,
                 FinishReason = null,
-                ModelId = options?.ModelId ?? _metadata.ModelId,
+                ModelId = options?.ModelId ?? _metadata.DefaultModelId,
                 ResponseId = responseId,
                 Thinking = true,
                 Role = new ChatRole("assistant"),
@@ -186,7 +186,7 @@ namespace Microsoft.Extensions.AI
                 {
                     continue;
                 }
-                string? modelId = chunk.Model ?? _metadata.ModelId;
+                string? modelId = chunk.Model ?? _metadata.DefaultModelId;
 
                 ReasoningChatResponseUpdate update = new()
                 {
@@ -387,7 +387,7 @@ namespace Microsoft.Extensions.AI
             {
                 Format = ToVllmChatResponseFormat(options?.ResponseFormat),
                 Messages = messages.SelectMany(ToVllmChatRequestMessages).ToArray(),
-                Model = options?.ModelId ?? _metadata.ModelId ?? string.Empty,
+                Model = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty,
                 Stream = stream,
                 Tools = options?.ToolMode is not NoneChatToolMode && options?.Tools is { Count: > 0 } tools ? tools.OfType<AIFunction>().Select(ToVllmTool) : null,
             };

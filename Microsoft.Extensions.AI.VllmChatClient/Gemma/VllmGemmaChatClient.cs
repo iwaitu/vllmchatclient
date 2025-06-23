@@ -1,8 +1,7 @@
-﻿using McpDotNet.Protocol.Types;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
 using Microsoft.Shared.Diagnostics;
-using Microsoft.VisualBasic;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -101,7 +100,7 @@ namespace Microsoft.Extensions.AI
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
                 FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
-                ModelId = response.Model ?? options?.ModelId ?? _metadata.ModelId,
+                ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
                 ResponseId = response.Id,
                 Usage = ParseVllmChatResponseUsage(response),
             };
@@ -174,7 +173,7 @@ namespace Microsoft.Extensions.AI
                 }
 
                 var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmChatStreamResponse);
-                string? modelId = chunk.Model ?? _metadata.ModelId;
+                string? modelId = chunk.Model ?? _metadata.DefaultModelId;
                 if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
                 {
                     if (string.IsNullOrEmpty(buffer_name))
@@ -256,7 +255,7 @@ namespace Microsoft.Extensions.AI
             return new ReasoningChatResponseUpdate
             {
                 CreatedAt = DateTimeOffset.Now,
-                ModelId = _metadata.ModelId,
+                ModelId = _metadata.DefaultModelId,
                 ResponseId = responseId,
                 Role = ChatRole.Assistant,
                 Contents = new List<AIContent> { new TextContent(text) }
@@ -270,7 +269,7 @@ namespace Microsoft.Extensions.AI
             {
                 CreatedAt = DateTimeOffset.Now,
                 FinishReason = ChatFinishReason.ToolCalls,
-                ModelId = _metadata.ModelId,
+                ModelId = _metadata.DefaultModelId,
                 ResponseId = responseId,
                 Role = ChatRole.Assistant,
                 Contents = new List<AIContent> { ToFunctionCallContent(call) }
@@ -387,7 +386,7 @@ namespace Microsoft.Extensions.AI
             {
                 Format = ToVllmChatResponseFormat(options?.ResponseFormat),
                 Messages = msgs,
-                Model = options?.ModelId ?? _metadata.ModelId ?? string.Empty,
+                Model = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty,
                 Stream = stream,
                 Tools = options?.ToolMode is not NoneChatToolMode && options?.Tools is { Count: > 0 } tools ? tools.OfType<AIFunction>().Select(ToVllmTool) : null,
             };

@@ -1,3 +1,13 @@
+# vllmchatclient
+
+[![GitHub stars](https://img.shields.io/github/stars/iwaitu/vllmchatclient?style=social)](https://github.com/iwaitu/vllmchatclient/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/iwaitu/vllmchatclient?style=social)](https://github.com/iwaitu/vllmchatclient/network)
+[![GitHub issues](https://img.shields.io/github/issues/iwaitu/vllmchatclient)](https://github.com/iwaitu/vllmchatclient/issues)
+[![GitHub license](https://img.shields.io/github/license/iwaitu/vllmchatclient)](https://github.com/iwaitu/vllmchatclient/blob/main/LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/iwaitu/vllmchatclient)](https://github.com/iwaitu/vllmchatclient/commits/main)
+[![.NET](https://img.shields.io/badge/platform-.NET-blueviolet)](https://dotnet.microsoft.com/)
+
+
 # C# vllm chat client
 
 It can work for qwen3, qwq32b, gemma3, deepseek-r1 on vllm.

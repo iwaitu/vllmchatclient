@@ -27,12 +27,12 @@ It can work for qwen3, qwq32b, gemma3, deepseek-r1 on vllm.
 - 新增 VllmQwen2507ChatClient 和 VllmQwen2507ReasoningChatClient ，分别对应 qwen3-235b-a22b-instruct-2507 和 qwen3-235b-a22b-thinking-2507
 ---
 
-1. VllmQwen3ChatClient  （本地vllm 部署）
+1. VllmQwen3ChatClient  （本地vllm 部署，对应模型 qwen3-32b,qwen3-235b-a22b，支持思维链开关）
 2. VllmQwqChatClient    （本地vllm 部署）
 3. VllmGemmaChatClient  （本地vllm 部署）
 4. VllmDeepseekR1ChatClient （使用百炼平台官方接口）
-5. VllmQwen2507ChatClient   （使用百炼平台官方接口）
-6. VllmQwen2507ReasoningChatClient （使用百炼平台官方接口）
+5. VllmQwen2507ChatClient   （使用百炼平台官方接口, 对应模型 qwen3-235b-a22b-instruct-2507，无思维链）
+6. VllmQwen2507ReasoningChatClient （使用百炼平台官方接口, 对应模型 qwen3-235b-a22b-thinking-2507，有思维链）
 
 support stream function call .
 

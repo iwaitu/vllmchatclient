@@ -7,14 +7,15 @@ It can work for qwen3, qwq32b, gemma3, deepseek-r1 on vllm.
 ---
 
 #### 最近更新
-- 更新版本并增强消息处理逻辑
-- 修复了无法输出 json 格式数据的问题
+- 新增 VllmQwen2507ChatClient 和 VllmQwen2507ReasoningChatClient ，分别对应 qwen3-235b-a22b-instruct-2507 和 qwen3-235b-a22b-thinking-2507
 ---
 
-1. VllmQwen3ChatClient
-2. VllmQwqChatClient
-3. VllmGemmaChatClient 
-4. VllmDeepseekR1ChatClient
+1. VllmQwen3ChatClient  （本地vllm 部署）
+2. VllmQwqChatClient    （本地vllm 部署）
+3. VllmGemmaChatClient  （本地vllm 部署）
+4. VllmDeepseekR1ChatClient （使用百炼平台官方接口）
+5. VllmQwen2507ChatClient   （使用百炼平台官方接口）
+6. VllmQwen2507ReasoningChatClient （使用百炼平台官方接口）
 
 support stream function call .
 

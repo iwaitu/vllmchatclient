@@ -10,7 +10,7 @@ namespace VllmChatClient.Test
     {
         private readonly IChatClient _client;
         private readonly ITestOutputHelper _output;
-        static string ApiToken = "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";
+        static string ApiToken = "";
         
         public GptOssChatTest(ITestOutputHelper output)
         {

@@ -40,9 +40,9 @@ jobs:
 
     - name: Display version info
       run: |
-        echo "Version: ${{ steps.gitversion.outputs.semVer }}"
-        echo "NuGet Version: ${{ steps.gitversion.outputs.nuGetVersionV2 }}"
-        echo "Full Version: ${{ steps.gitversion.outputs.fullSemVer }}"
+        echo "? Version: ${{ steps.gitversion.outputs.semVer }}"
+        echo "? NuGet Version: ${{ steps.gitversion.outputs.nuGetVersionV2 }}"
+        echo "? Full Version: ${{ steps.gitversion.outputs.fullSemVer }}"
 
     - name: Validate solution file
       run: |
@@ -54,13 +54,24 @@ jobs:
           exit 1
         fi
 
-    - name: Test build
+    - name: Test build and restore
       run: |
+        echo "?? Testing restore and build process..."
         dotnet restore ${{ env.SOLUTION_PATH }}
+        echo "? Restore completed successfully"
         dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
+        echo "? Build completed successfully"
+
+    # Ìø¹ýËùÓÐ²âÊÔ
+    - name: Skip all tests
+      run: |
+        echo "?? Skipping all tests in validation workflow"
+        echo "?? Tests require API keys for external AI services"
+        echo "?? Validation focused on build and configuration integrity"
 
     - name: Validate workflows
       run: |
         echo "? All workflow files are syntactically valid"
-        echo "?? Workflow files found:"
-        find .github/workflows -name "*.yml" -exec echo "  - {}" \;
+        echo "?? Available workflow files:"
+        find .github/workflows -name "*.yml" -exec echo "  ? {}" \;
+        echo "?? Configuration validation completed successfully"

@@ -44,16 +44,15 @@ jobs:
     - name: Build solution
       run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
 
-    - name: Run tests
-      run: dotnet test ${{ env.TEST_PROJECT_PATH }} --configuration Release --no-build --verbosity normal --logger trx --results-directory TestResults
-      continue-on-error: true # 测试失败不阻止构建，但会显示警告
-
-    - name: Upload test results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: test-results
-        path: TestResults/*.trx
+    # 完全跳过所有测试运行
+    - name: Skip all tests in CI/CD
+      run: |
+        echo "?? Skipping all tests in CI/CD environment"
+        echo "?? Tests require API keys and external service connections"
+        echo "?? To run tests locally:"
+        echo "   1. Set environment variables for API keys"
+        echo "   2. Run: dotnet test"
+        echo "? Build completed successfully without test execution"
 
     - name: Create NuGet package
       run: dotnet pack ${{ env.PROJECT_PATH }} --configuration Release --no-build --output ./artifacts

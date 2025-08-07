@@ -144,76 +144,54 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
 
             if (options is GptOssChatOptions gptOssOptions)
             {
-                var reasoningContent = string.Empty;
-                switch (gptOssOptions.ReasoningLevel)
+                var reasoningLevel = gptOssOptions.ReasoningLevel switch
                 {
+                    GptOssReasoningLevel.Low => "low",
+                    GptOssReasoningLevel.Medium => "medium", 
+                    GptOssReasoningLevel.High => "high",
+                    _ => "medium"
+                };
 
-                    case GptOssReasoningLevel.Low:
+                // 构建符合GPT-OSS-120b格式的完整system message
+                var gptOssSystemMessage = $@"You are ChatGPT, a large language model trained by OpenAI.
+Knowledge cutoff: 2024-06
+Current date: {DateTime.UtcNow:yyyy-MM-dd}
+Reasoning: {reasoningLevel}
+# Valid channels: analysis, commentary, final. Channel must be included for every message.
+Calls to these tools must go to the commentary channel: 'functions'.";
+
+                // 检查是否已有system message
+                var systemMessageIndex = messagesList.FindIndex(m => m.Role == ChatRole.System);
+                
+                if (systemMessageIndex >= 0)
+                {
+                    // 如果有现有的system message，将其内容合并到GPT-OSS格式中
+                    var existingSystemMessage = messagesList[systemMessageIndex];
+                    var existingContent = string.Empty;
+                    
+                    foreach (var content in existingSystemMessage.Contents)
+                    {
+                        if (content is TextContent textContent)
                         {
-                            //轻量级推理
-                            reasoningContent = "Reasoning: low";
-                            break;
+                            existingContent += textContent.Text + "\n";
                         }
-                    case GptOssReasoningLevel.Medium:
-                        {
-                            // 基础推理，默认行为，无需修改
-                            reasoningContent = "Reasoning: medium";
-                            break;
-                        }
-                    case GptOssReasoningLevel.High:
-                        {
-                            // 高级推理，尝试启用更复杂的推理选项
-                            reasoningContent = "Reasoning: high";
-                            break;
-                        }
+                    }
+                    
+                    // 将原有内容作为指令添加到system message中
+                    if (!string.IsNullOrWhiteSpace(existingContent.Trim()))
+                    {
+                        gptOssSystemMessage += $"\n\n# Additional Instructions\n{existingContent.Trim()}";
+                    }
+                    
+                    // 替换原有的system message
+                    var newSystemMessage = new ChatMessage(ChatRole.System, new List<AIContent> { new TextContent(gptOssSystemMessage) });
+                    messagesList[systemMessageIndex] = newSystemMessage;
                 }
-
-                //将reasoningContent添加到systemprompt中
-                if (!string.IsNullOrEmpty(reasoningContent))
+                else
                 {
-                    var systemMessageIndex = messagesList.FindIndex(m => m.Role == ChatRole.System);
-
-                    if (systemMessageIndex >= 0)
-                    {
-                        // 找到 System 消息，在现有文本内容的末尾添加推理内容
-                        var systemMessage = messagesList[systemMessageIndex];
-                        var newContents = new List<AIContent>();
-
-                        // 遍历现有内容，找到文本内容并在末尾添加推理内容
-                        bool reasoningAdded = false;
-                        foreach (var content in systemMessage.Contents)
-                        {
-                            if (content is TextContent textContent && !reasoningAdded)
-                            {
-                                // 在现有文本内容的末尾添加推理内容
-                                var updatedText = textContent.Text + " " + reasoningContent;
-                                newContents.Add(new TextContent(updatedText));
-                                reasoningAdded = true;
-                            }
-                            else
-                            {
-                                // 保留其他类型的内容
-                                newContents.Add(content);
-                            }
-                        }
-
-                        // 如果没有找到文本内容，则添加一个新的文本内容
-                        if (!reasoningAdded)
-                        {
-                            newContents.Add(new TextContent(reasoningContent));
-                        }
-
-                        var newSystemMessage = new ChatMessage(ChatRole.System, newContents);
-                        messagesList[systemMessageIndex] = newSystemMessage;
-                    }
-                    else
-                    {
-                        // 如果没有 system 消消息，则在开头添加一个新的
-                        var newSystemMessage = new ChatMessage(ChatRole.System, new List<AIContent> { new TextContent(reasoningContent) });
-                        messagesList.Insert(0, newSystemMessage);
-                    }
-
-                    messages = messagesList;
+                    // 如果没有system message，在开头添加新的GPT-OSS格式system message
+                    var newSystemMessage = new ChatMessage(ChatRole.System, new List<AIContent> { new TextContent(gptOssSystemMessage) });
+                    messagesList.Insert(0, newSystemMessage);
                 }
             }
 

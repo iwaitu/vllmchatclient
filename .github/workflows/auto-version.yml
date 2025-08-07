@@ -1,0 +1,87 @@
+name: Auto Version Update
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+env:
+  PROJECT_PATH: 'Microsoft.Extensions.AI.VllmChatClient/Microsoft.Extensions.AI.VllmChatClient.csproj'
+
+jobs:
+  update-version:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip version]')"
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Install GitVersion
+      uses: gittools/actions/gitversion/setup@v0.10.2
+      with:
+        versionSpec: '5.x'
+
+    - name: Determine Version
+      uses: gittools/actions/gitversion/execute@v0.10.2
+      id: gitversion
+
+    - name: Update project version
+      shell: pwsh
+      run: |
+        $projectPath = "${{ env.PROJECT_PATH }}"
+        $newVersion = "${{ steps.gitversion.outputs.nuGetVersionV2 }}"
+        
+        Write-Host "Updating version to: $newVersion"
+        
+        # 读取并更新项目文件
+        $content = Get-Content $projectPath -Raw
+        $pattern = '<Version>[\d\.]+</Version>'
+        $replacement = "<Version>$newVersion</Version>"
+        $newContent = $content -replace $pattern, $replacement
+        
+        # 如果没有找到Version标签，则添加一个
+        if ($content -eq $newContent) {
+            $pattern = '(<PropertyGroup>)'
+            $replacement = "$1`n    <Version>$newVersion</Version>"
+            $newContent = $content -replace $pattern, $replacement
+        }
+        
+        Set-Content $projectPath $newContent -NoNewline
+        Write-Host "Project file updated successfully"
+
+    - name: Commit version update
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add ${{ env.PROJECT_PATH }}
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "chore: bump version to ${{ steps.gitversion.outputs.nuGetVersionV2 }} [skip ci]"
+          git push
+        fi
+
+    - name: Create Git Tag
+      if: github.event_name == 'workflow_dispatch'
+      run: |
+        git tag "v${{ steps.gitversion.outputs.nuGetVersionV2 }}"
+        git push origin "v${{ steps.gitversion.outputs.nuGetVersionV2 }}"

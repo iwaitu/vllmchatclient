@@ -52,7 +52,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmQwen3ChatClient` | Local vLLM | Qwen3-32B/235B | ✅ Toggle | ✅ Stream |
 | `VllmQwqChatClient` | Local vLLM | QwQ-32B | ✅ Full | ✅ Stream |
 | `VllmGemmaChatClient` | Local vLLM | Gemma3-27B | ❌ | ✅ Stream |
-| `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ✅ Stream |
+| `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
 | `VllmGlmZ1ChatClient` | Local vLLM | GLM-4 | ✅ Full | ✅ Stream |
 | `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
 | `VllmQwen2507ChatClient` | Cloud API | Qwen3-235B-2507 | ❌ | ✅ Stream |

@@ -13,7 +13,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4, GPT-OSS-120B
+- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4, GPT-OSS-120B/20B
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
 - ✅ **Multiple Deployment Options**: Local vLLM deployment and cloud API support
@@ -48,7 +48,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 | Client | Deployment | Model Support | Reasoning | Function Calls |
 |--------|------------|---------------|-----------|----------------|
-| `VllmGptOssChatClient` | OpenRouter/Cloud | GPT-OSS-120B | ✅ Full | ✅ Stream |
+| `VllmGptOssChatClient` | OpenRouter/Cloud | GPT-OSS-120B/20B | ✅ Full | ✅ Stream |
 | `VllmQwen3ChatClient` | Local vLLM | Qwen3-32B/235B | ✅ Toggle | ✅ Stream |
 | `VllmQwqChatClient` | Local vLLM | QwQ-32B | ✅ Full | ✅ Stream |
 | `VllmGemmaChatClient` | Local vLLM | Gemma3-27B | ❌ | ✅ Stream |

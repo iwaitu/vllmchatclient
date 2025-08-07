@@ -16,7 +16,7 @@ namespace VllmChatClient.Test
         {
             _output = output;
             // Use the actual GPT-OSS client for testing with OpenRouter
-            _client = new VllmGptOssChatClient("https://openrouter.ai/api/v1", ApiToken, "openai/gpt-oss-120b");
+            _client = new VllmGptOssChatClient("https://openrouter.ai/api/v1", ApiToken, "openai/gpt-oss-20b");
         }
 
         [Fact]

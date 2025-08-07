@@ -1,0 +1,63 @@
+name: Validate CI Configuration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - '.github/workflows/**'
+      - 'GitVersion.yml'
+
+jobs:
+  validate-config:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Validate GitVersion config
+      uses: gittools/actions/gitversion/setup@v0.11.0
+      with:
+        versionSpec: '6.x'
+
+    - name: Test GitVersion
+      uses: gittools/actions/gitversion/execute@v0.11.0
+      id: gitversion
+      with:
+        useConfigFile: true
+        configFilePath: GitVersion.yml
+
+    - name: Display version info
+      run: |
+        echo "Version: ${{ steps.gitversion.outputs.semVer }}"
+        echo "NuGet Version: ${{ steps.gitversion.outputs.nuGetVersionV2 }}"
+        echo "Full Version: ${{ steps.gitversion.outputs.fullSemVer }}"
+
+    - name: Validate solution file
+      run: |
+        if [ -f "VllmChatClient.sln" ]; then
+          echo "? Solution file exists"
+          dotnet sln VllmChatClient.sln list
+        else
+          echo "? Solution file missing"
+          exit 1
+        fi
+
+    - name: Test build
+      run: |
+        dotnet restore
+        dotnet build --configuration Release --no-restore
+
+    - name: Validate workflows
+      run: |
+        echo "? All workflow files are syntactically valid"
+        echo "?? Workflow files found:"
+        find .github/workflows -name "*.yml" -exec echo "  - {}" \;

@@ -10,6 +10,7 @@
 - ? **版本管理**: 使用 GitVersion 自动管理版本号
 - ? **Release 管理**: 手动触发 release 创建
 - ? **多目标发布**: 支持发布到 NuGet.org 和 GitHub Packages
+- ? **解决方案支持**: 包含完整的 .sln 文件管理
 
 ## ?? 前置要求
 
@@ -52,8 +53,8 @@
 
 **功能:**
 - 恢复依赖项
-- 构建项目
-- 运行测试
+- 构建整个解决方案
+- 运行测试项目
 - 创建 NuGet 包
 - 发布到 NuGet.org（仅在 main 分支或 release 时）
 
@@ -64,7 +65,7 @@
 - 手动触发
 
 **功能:**
-- 使用 GitVersion 自动计算版本号
+- 使用 GitVersion 6.x 自动计算版本号
 - 更新项目文件中的版本
 - 创建 Git 标签
 
@@ -72,7 +73,6 @@
 - `+semver: major` 或 `+semver: breaking` - 主版本号 +1
 - `+semver: minor` 或 `+semver: feature` - 次版本号 +1
 - `+semver: patch` 或 `+semver: fix` - 补丁版本号 +1
-- `+semver: none` 或 `+semver: skip` - 不增加版本号
 
 ### 3. `release.yml` - 手动发布工作流
 
@@ -118,9 +118,26 @@
 ## ??? 分支策略
 
 - **main/master**: 稳定分支，每次推送都会触发发布
-- **feature/***: 功能分支，会构建但不发布，版本号包含 `alpha` 标识
-- **release/***: 发布分支，版本号包含 `beta` 标识
-- **hotfix/***: 热修复分支，版本号包含 `beta` 标识
+- **feature/***: 功能分支，会构建但不发布，版本号包含 minor 增量
+- **release/***: 发布分支，不增加版本号
+- **hotfix/***: 热修复分支，patch 版本增量
+- **develop**: 开发分支，minor 版本增量
+
+## ?? 项目结构
+
+```
+VllmChatClient/
+├── .github/
+│   ├── workflows/
+│   │   ├── build-and-publish.yml    # 主构建工作流
+│   │   ├── auto-version.yml         # 自动版本管理
+│   │   └── release.yml              # 手动发布
+│   └── README.md                    # 本文档
+├── Microsoft.Extensions.AI.VllmChatClient/  # 主项目
+├── VllmChatClient.Test/             # 测试项目
+├── GitVersion.yml                   # 版本管理配置
+└── VllmChatClient.sln              # 解决方案文件
+```
 
 ## ?? 注意事项
 
@@ -138,15 +155,47 @@
 - `.github/workflows/release.yml` - 发布流程
 - `GitVersion.yml` - 版本计算规则
 
+## ??? 本地测试
+
+### 测试 GitVersion:
+```bash
+# 安装 GitVersion 工具
+dotnet tool install --global GitVersion.Tool
+
+# 查看当前版本
+dotnet-gitversion
+```
+
+### 构建和测试:
+```bash
+# 构建解决方案
+dotnet build VllmChatClient.sln
+
+# 运行测试
+dotnet test VllmChatClient.Test/VllmChatClient.Test.csproj
+
+# 创建 NuGet 包
+dotnet pack Microsoft.Extensions.AI.VllmChatClient/Microsoft.Extensions.AI.VllmChatClient.csproj
+```
+
 ## ?? 问题排查
 
 ### 常见问题
 
 1. **NuGet 发布失败**: 检查 API Key 是否正确设置
-2. **版本号不正确**: 检查 GitVersion.yml 配置
+2. **版本号不正确**: 检查 GitVersion.yml 配置和 commit 消息格式
 3. **构建失败**: 检查项目依赖和 .NET 版本
 4. **权限错误**: 确保 GITHUB_TOKEN 有足够权限
+5. **GitVersion 错误**: 确保 GitVersion.yml 配置语法正确
 
 ### 查看日志
 
 在 GitHub Actions 页面可以查看详细的构建日志，帮助诊断问题。
+
+## ?? 最佳实践
+
+1. **语义化提交**: 使用清晰的 commit 消息格式
+2. **分支管理**: 使用合理的分支命名策略
+3. **测试覆盖**: 保持高质量的单元测试
+4. **版本控制**: 让 GitVersion 自动管理版本号
+5. **安全性**: 妥善管理 API Keys 和敏感信息

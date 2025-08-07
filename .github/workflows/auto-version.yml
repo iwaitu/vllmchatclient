@@ -36,13 +36,16 @@ jobs:
         dotnet-version: '8.0.x'
 
     - name: Install GitVersion
-      uses: gittools/actions/gitversion/setup@v0.10.2
+      uses: gittools/actions/gitversion/setup@v0.11.0
       with:
-        versionSpec: '5.x'
+        versionSpec: '6.x'
 
     - name: Determine Version
-      uses: gittools/actions/gitversion/execute@v0.10.2
+      uses: gittools/actions/gitversion/execute@v0.11.0
       id: gitversion
+      with:
+        useConfigFile: true
+        configFilePath: GitVersion.yml
 
     - name: Update project version
       shell: pwsh
@@ -54,19 +57,22 @@ jobs:
         
         # 读取并更新项目文件
         $content = Get-Content $projectPath -Raw
-        $pattern = '<Version>[\d\.]+</Version>'
+        $pattern = '<Version>[\d\.]+([-\w]*)?</Version>'
         $replacement = "<Version>$newVersion</Version>"
         $newContent = $content -replace $pattern, $replacement
         
-        # 如果没有找到Version标签，则添加一个
+        # 如果没有找到Version标签，则在第一个PropertyGroup中添加一个
         if ($content -eq $newContent) {
-            $pattern = '(<PropertyGroup>)'
-            $replacement = "$1`n    <Version>$newVersion</Version>"
-            $newContent = $content -replace $pattern, $replacement
+            $propertyGroupPattern = '(<PropertyGroup[^>]*>)'
+            if ($content -match $propertyGroupPattern) {
+                $replacement = "$1`n    <Version>$newVersion</Version>"
+                $newContent = $content -replace $propertyGroupPattern, $replacement, 1
+            }
         }
         
         Set-Content $projectPath $newContent -NoNewline
         Write-Host "Project file updated successfully"
+        Write-Host "New version: $newVersion"
 
     - name: Commit version update
       run: |

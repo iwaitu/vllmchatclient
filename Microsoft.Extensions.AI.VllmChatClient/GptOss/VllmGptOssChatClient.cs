@@ -79,6 +79,9 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
             // 检查 messages 参数是否为 null
             _ = Throw.IfNull(messages);
 
+            // 使用 SetUpChatOptions 方法处理消息和选项
+            messages = SetUpChatOptions(messages, options);
+
             // 如果 _apiChatEndpoint 包含占位符，使用格式化；否则直接使用
             string apiEndpoint = _apiChatEndpoint.Contains("{0}") 
                 ? string.Format(_apiChatEndpoint, "v1", "chat/completions")
@@ -123,10 +126,107 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
                 null;
         }
 
+        /// <summary>
+        /// 设置聊天选项并处理 system prompt
+        /// </summary>
+        /// <param name="messages">原始消息列表</param>
+        /// <param name="options">聊天选项</param>
+        /// <returns>处理后的消息列表</returns>
+        private IEnumerable<ChatMessage> SetUpChatOptions(IEnumerable<ChatMessage> messages, ChatOptions? options)
+        {
+            // 验证 system messages 的数量
+            var messagesList = messages.ToList();
+            var systemMessages = messagesList.Where(m => m.Role == ChatRole.System).ToList();
+            if (systemMessages.Count > 1)
+            {
+                throw new ArgumentException("Messages 中只能包含一条 system message。", nameof(messages));
+            }
+
+            if (options is GptOssChatOptions gptOssOptions)
+            {
+                var reasoningContent = string.Empty;
+                switch (gptOssOptions.ReasoningLevel)
+                {
+
+                    case GptOssReasoningLevel.Low:
+                        {
+                            //轻量级推理
+                            reasoningContent = "Reasoning: low";
+                            break;
+                        }
+                    case GptOssReasoningLevel.Medium:
+                        {
+                            // 基础推理，默认行为，无需修改
+                            reasoningContent = "Reasoning: medium";
+                            break;
+                        }
+                    case GptOssReasoningLevel.High:
+                        {
+                            // 高级推理，尝试启用更复杂的推理选项
+                            reasoningContent = "Reasoning: high";
+                            break;
+                        }
+                }
+
+                //将reasoningContent添加到systemprompt中
+                if (!string.IsNullOrEmpty(reasoningContent))
+                {
+                    var systemMessageIndex = messagesList.FindIndex(m => m.Role == ChatRole.System);
+
+                    if (systemMessageIndex >= 0)
+                    {
+                        // 找到 System 消息，在现有文本内容的末尾添加推理内容
+                        var systemMessage = messagesList[systemMessageIndex];
+                        var newContents = new List<AIContent>();
+
+                        // 遍历现有内容，找到文本内容并在末尾添加推理内容
+                        bool reasoningAdded = false;
+                        foreach (var content in systemMessage.Contents)
+                        {
+                            if (content is TextContent textContent && !reasoningAdded)
+                            {
+                                // 在现有文本内容的末尾添加推理内容
+                                var updatedText = textContent.Text + " " + reasoningContent;
+                                newContents.Add(new TextContent(updatedText));
+                                reasoningAdded = true;
+                            }
+                            else
+                            {
+                                // 保留其他类型的内容
+                                newContents.Add(content);
+                            }
+                        }
+
+                        // 如果没有找到文本内容，则添加一个新的文本内容
+                        if (!reasoningAdded)
+                        {
+                            newContents.Add(new TextContent(reasoningContent));
+                        }
+
+                        var newSystemMessage = new ChatMessage(ChatRole.System, newContents);
+                        messagesList[systemMessageIndex] = newSystemMessage;
+                    }
+                    else
+                    {
+                        // 如果没有 system 消消息，则在开头添加一个新的
+                        var newSystemMessage = new ChatMessage(ChatRole.System, new List<AIContent> { new TextContent(reasoningContent) });
+                        messagesList.Insert(0, newSystemMessage);
+                    }
+
+                    messages = messagesList;
+                }
+            }
+
+            return messagesList;
+        }
+
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
             // 检查 messages 参数是否为 null
             _ = Throw.IfNull(messages);
+
+            // 使用 SetUpChatOptions 方法处理消息和选项
+            messages = SetUpChatOptions(messages, options);
 
             // 如果 _apiChatEndpoint 包含占位符，使用格式化；否则直接使用
             string apiEndpoint = _apiChatEndpoint.Contains("{0}") 

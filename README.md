@@ -127,6 +127,7 @@ var messages = new List<ChatMessage>
 var chatOptions = new ChatOptions
 {
     Temperature = 0.7f,
+    ReasoningLevel = GptOssReasoningLevel.Medium,    // Set reasoning level,controls depth of reasoning
     Tools = [AIFunctionFactory.Create(GetWeather)]
 };
 

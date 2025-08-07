@@ -21,4 +21,5 @@ namespace Microsoft.Extensions.AI;
 [JsonSerializable(typeof(VllmEmbeddingRequest))]
 [JsonSerializable(typeof(VllmEmbeddingResponse))]
 [JsonSerializable(typeof(VllmChatStreamResponse))]
+[JsonSerializable(typeof(VllmReasoningDetail))]
 internal sealed partial class JsonContext : JsonSerializerContext;

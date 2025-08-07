@@ -84,7 +84,6 @@ namespace VllmChatClient.Test
         [Description("地名地址搜索")]
         static string Search([Description("需要搜索的问题")] string question)
         {
-            functionCallTime += 1;
             return "南宁市青秀区方圆广场北面站前路1号。";
         }
 

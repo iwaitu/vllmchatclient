@@ -11,6 +11,7 @@ on:
 
 env:
   DOTNET_VERSION: '8.0.x'
+  SOLUTION_PATH: 'Microsoft.Extensions.AI.VllmChatClient.sln'
   PROJECT_PATH: 'Microsoft.Extensions.AI.VllmChatClient/Microsoft.Extensions.AI.VllmChatClient.csproj'
   TEST_PROJECT_PATH: 'VllmChatClient.Test/VllmChatClient.Test.csproj'
 
@@ -38,10 +39,10 @@ jobs:
           ${{ runner.os }}-nuget-
 
     - name: Restore solution dependencies
-      run: dotnet restore
+      run: dotnet restore ${{ env.SOLUTION_PATH }}
 
     - name: Build solution
-      run: dotnet build --configuration Release --no-restore
+      run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
 
     - name: Run tests
       run: dotnet test ${{ env.TEST_PROJECT_PATH }} --configuration Release --no-build --verbosity normal --logger trx --results-directory TestResults

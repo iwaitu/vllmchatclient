@@ -28,7 +28,7 @@ namespace VllmChatClient.Test
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
 
-            Assert.Equal(1, res.Messages.Count);
+            Assert.Single(res.Messages); // 使用 Assert.Single 替代 Assert.Equal(1, ...)
 
         }
 
@@ -45,7 +45,14 @@ namespace VllmChatClient.Test
 
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
-            var match = Regex.Match(res.Messages.FirstOrDefault()?.Text, @"\s*(\{.*?\}|\[.*?\])\s*", RegexOptions.Singleline);
+            
+            // 修复可能的 null 引用警告
+            var firstMessage = res.Messages.FirstOrDefault();
+            Assert.NotNull(firstMessage);
+            var messageText = firstMessage.Text;
+            Assert.NotNull(messageText);
+            
+            var match = Regex.Match(messageText, @"\s*(\{.*?\}|\[.*?\])\s*", RegexOptions.Singleline);
             Assert.True(match.Success);
             string json = match.Groups[1].Value;
             Assert.NotEmpty(json);
@@ -69,8 +76,12 @@ namespace VllmChatClient.Test
             };
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
-            Assert.True(res.Messages.Count == 3);
-            Assert.True(res.Messages.LastOrDefault()?.Text.Contains("下雨"));
+            Assert.Equal(3, res.Messages.Count);
+            
+            // 使用 Assert.Contains 替代 Assert.True(...Contains(...))
+            var lastMessage = res.Messages.LastOrDefault();
+            Assert.NotNull(lastMessage);
+            Assert.Contains("下雨", lastMessage.Text ?? string.Empty);
         }
 
 
@@ -90,7 +101,8 @@ namespace VllmChatClient.Test
                 res += update.Text;
 
             }
-            Assert.True(res != null);
+            Assert.NotNull(res);
+            Assert.NotEmpty(res);
         }
 
         [Fact]
@@ -114,7 +126,8 @@ namespace VllmChatClient.Test
                 res += update;
             }
 
-            Assert.True(res != null);
+            Assert.NotNull(res);
+            Assert.NotEmpty(res);
         }
 
         [Fact]
@@ -137,7 +150,9 @@ namespace VllmChatClient.Test
             {
                 res += update;
             }
-            Assert.True(res != null);
+            Assert.NotNull(res);
+            Assert.NotEmpty(res);
+            
             var textContent = res;
             Assert.NotNull(textContent);
             Assert.All(textContent.Split('\n'), line =>
@@ -185,8 +200,8 @@ namespace VllmChatClient.Test
             };
             var res = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
-            Assert.True(res.Messages.Count == 1);
-            Assert.True(res.Messages[0].Contents.Count == 1);
+            Assert.Single(res.Messages);
+            Assert.Single(res.Messages[0].Contents);
 
             foreach (var content in res.Messages[0].Contents)
             {
@@ -196,8 +211,8 @@ namespace VllmChatClient.Test
                 funcMsg.Messages.Add(msgContent);
                 messages.AddMessages(funcMsg);
 
-                Assert.True(content is FunctionCallContent);
-                var functionCall = content as FunctionCallContent;
+                Assert.IsType<FunctionCallContent>(content);
+                var functionCall = (FunctionCallContent)content;
                 Assert.NotNull(functionCall);
                 var anwser = string.Empty;
                 if ("GetWeather" == functionCall.Name)

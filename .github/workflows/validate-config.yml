@@ -8,6 +8,9 @@ on:
       - '.github/workflows/**'
       - 'GitVersion.yml'
 
+env:
+  SOLUTION_PATH: 'Microsoft.Extensions.AI.VllmChatClient.sln'
+
 jobs:
   validate-config:
     runs-on: ubuntu-latest
@@ -43,18 +46,18 @@ jobs:
 
     - name: Validate solution file
       run: |
-        if [ -f "VllmChatClient.sln" ]; then
-          echo "? Solution file exists"
-          dotnet sln VllmChatClient.sln list
+        if [ -f "${{ env.SOLUTION_PATH }}" ]; then
+          echo "? Solution file exists: ${{ env.SOLUTION_PATH }}"
+          dotnet sln ${{ env.SOLUTION_PATH }} list
         else
-          echo "? Solution file missing"
+          echo "? Solution file missing: ${{ env.SOLUTION_PATH }}"
           exit 1
         fi
 
     - name: Test build
       run: |
-        dotnet restore
-        dotnet build --configuration Release --no-restore
+        dotnet restore ${{ env.SOLUTION_PATH }}
+        dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
 
     - name: Validate workflows
       run: |

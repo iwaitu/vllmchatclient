@@ -1,27 +1,56 @@
-name: Auto Version Update
+# ?? 这个工作流已被禁用
+# GitVersion.MsBuild 会自动管理版本号，无需手动更新项目文件
+# 
+# 如果需要手动管理版本，请：
+# 1. 从项目文件中移除 GitVersion.MsBuild 包引用
+# 2. 在项目文件中添加 <Version>x.y.z</Version> 标签
+# 3. 重新启用此工作流
+
+name: Auto Version Update (DISABLED)
 
 on:
-  push:
-    branches: [ main, master ]
+  # 禁用所有触发器
   workflow_dispatch:
     inputs:
-      version_type:
-        description: 'Version bump type'
+      force_enable:
+        description: '强制启用此工作流 (输入 "ENABLE" 确认)'
         required: true
-        default: 'patch'
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
+        default: 'DISABLED'
+        type: string
 
 env:
   PROJECT_PATH: 'Microsoft.Extensions.AI.VllmChatClient/Microsoft.Extensions.AI.VllmChatClient.csproj'
 
 jobs:
+  disabled-notice:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.force_enable != 'ENABLE'
+    
+    steps:
+    - name: Workflow Disabled Notice
+      run: |
+        echo "?? 此工作流已被禁用"
+        echo ""
+        echo "?? 原因:"
+        echo "  - 项目已配置 GitVersion.MsBuild 自动版本管理"
+        echo "  - 版本号由 Git 历史和语义化提交消息自动计算"
+        echo "  - 手动版本更新可能与自动版本管理冲突"
+        echo ""
+        echo "?? 如何管理版本:"
+        echo "  - 使用语义化提交消息：'feat: +semver: minor'"
+        echo "  - GitVersion 会根据提交历史自动计算版本"
+        echo "  - 构建时 GitVersion.MsBuild 自动设置版本号"
+        echo ""
+        echo "?? 如果需要手动管理版本:"
+        echo "  1. 移除项目文件中的 GitVersion.MsBuild 包引用"
+        echo "  2. 添加 <Version>x.y.z</Version> 到项目文件"
+        echo "  3. 设置 force_enable 为 'ENABLE' 重新运行"
+        
+        exit 1
+
   update-version:
     runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[skip version]')"
+    if: github.event.inputs.force_enable == 'ENABLE'
     
     steps:
     - name: Checkout code
@@ -53,7 +82,13 @@ jobs:
         $projectPath = "${{ env.PROJECT_PATH }}"
         $newVersion = "${{ steps.gitversion.outputs.nuGetVersionV2 }}"
         
-        Write-Host "Updating version to: $newVersion"
+        Write-Host "?? 强制启用模式 - 更新版本到: $newVersion"
+        
+        # 检查版本是否为空
+        if ([string]::IsNullOrWhiteSpace($newVersion)) {
+            Write-Host "? 错误: GitVersion 输出的版本为空"
+            exit 1
+        }
         
         # 读取并更新项目文件
         $content = Get-Content $projectPath -Raw
@@ -65,14 +100,14 @@ jobs:
         if ($content -eq $newContent) {
             $propertyGroupPattern = '(<PropertyGroup[^>]*>)'
             if ($content -match $propertyGroupPattern) {
-                $replacement = "$1`n    <Version>$newVersion</Version>"
-                $newContent = $content -replace $propertyGroupPattern, $replacement, 1
+                $replacement = "`$1`n    <Version>$newVersion</Version>"
+                $newContent = $content -replace $propertyGroupPattern, $replacement
             }
         }
         
         Set-Content $projectPath $newContent -NoNewline
-        Write-Host "Project file updated successfully"
-        Write-Host "New version: $newVersion"
+        Write-Host "? 项目文件已更新"
+        Write-Host "??? 新版本: $newVersion"
 
     - name: Commit version update
       run: |
@@ -87,7 +122,6 @@ jobs:
         fi
 
     - name: Create Git Tag
-      if: github.event_name == 'workflow_dispatch'
       run: |
         git tag "v${{ steps.gitversion.outputs.nuGetVersionV2 }}"
         git push origin "v${{ steps.gitversion.outputs.nuGetVersionV2 }}"

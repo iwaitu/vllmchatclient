@@ -28,7 +28,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 🔥 Latest Updates
 
-### 🆕 New GPT-OSS-120B Support
+### 🆕 New GPT-OSS-20B/120B Support
 - **VllmGptOssChatClient** - Support for OpenAI's GPT-OSS-120B model with full reasoning capabilities
 - Advanced reasoning chain processing with `ReasoningChatResponseUpdate`
 - Compatible with OpenRouter and other GPT-OSS providers

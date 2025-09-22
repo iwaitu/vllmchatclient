@@ -9,9 +9,14 @@ namespace VllmChatClient.Test
     {
         private readonly IChatClient _client;
         static int functionCallTime = 0;
+        
         public Qwen3NextChatTests()
         {
-            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", "", "qwen3-next-80b-a3b-instruct");
+            var apiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY");
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking");
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
+            //_client = new VllmQwen3NextChatClient("http://localhost:8000/v1/{1}", apiKey, "qwen3-next-80b-a3b-instruct");
         }
 
 
@@ -27,10 +32,16 @@ namespace VllmChatClient.Test
             var options = new ChatOptions();
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
-
             Assert.Single(res.Messages); // 使用 Assert.Single 替代 Assert.Equal(1, ...)
+            if (res.ModelId.Contains("thinking"))
+            {
+                var reasonResponse = res as ReasoningChatResponse;
+                Assert.NotNull(reasonResponse.Reason);
+            }
+            
 
         }
+
 
         [Fact]
         public async Task ExtractTags()
@@ -95,10 +106,25 @@ namespace VllmChatClient.Test
             };
             string res = string.Empty;
             var options = new ChatOptions();
-
+            string reason = string.Empty;
             await foreach (var update in _client.GetStreamingResponseAsync(messages, options))
             {
-                res += update.Text;
+                bool isThinkingModel = update.ModelId.Contains("thinking") ? true : false;
+                if (isThinkingModel && update is ReasoningChatResponseUpdate reasoningUpdate)
+                {
+                    if (reasoningUpdate.Thinking)
+                    {
+                        reason += reasoningUpdate;
+                    }
+                    else
+                    {
+                        res += reasoningUpdate;
+                    }
+                }
+                else
+                {
+                    res += update;
+                }
 
             }
             Assert.NotNull(res);
@@ -115,15 +141,32 @@ namespace VllmChatClient.Test
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
+                //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
             ChatOptions chatOptions = new()
             {
                 Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
             };
             string res = string.Empty;
+            string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
-                res += update;
+                bool isThinkingModel = update?.ModelId?.Contains("thinking") ?? false;
+                if (isThinkingModel && update is ReasoningChatResponseUpdate reasoningUpdate)
+                {
+                    if (reasoningUpdate.Thinking)
+                    {
+                        reason += reasoningUpdate;
+                    }
+                    else
+                    {
+                        res += reasoningUpdate;
+                    }
+                }
+                else
+                {
+                    res += update;
+                }
             }
 
             Assert.NotNull(res);
@@ -146,9 +189,25 @@ namespace VllmChatClient.Test
                 //Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
             };
             string res = string.Empty;
+            string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
-                res += update;
+                bool isThinkingModel = update.ModelId.Contains("thinking") ? true : false;
+                if (isThinkingModel && update is ReasoningChatResponseUpdate reasoningUpdate)
+                {
+                    if (reasoningUpdate.Thinking)
+                    {
+                        reason += reasoningUpdate;
+                    }
+                    else
+                    {
+                        res += reasoningUpdate;
+                    }
+                }
+                else
+                {
+                    res += update;
+                }
             }
             Assert.NotNull(res);
             Assert.NotEmpty(res);

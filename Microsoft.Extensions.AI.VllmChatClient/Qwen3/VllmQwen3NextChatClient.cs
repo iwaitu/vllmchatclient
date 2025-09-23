@@ -85,13 +85,14 @@ namespace Microsoft.Extensions.AI
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
 
-            var ret = new ChatResponse(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!))
+            var ret = new ReasoningChatResponse(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!), response.Choices.FirstOrDefault()?.Message.ReasoningContent?.ToString())
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
                 FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
                 ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
                 ResponseId = response.Id,
                 Usage = ParseVllmChatResponseUsage(response),
+                
             };
             return ret;
         }

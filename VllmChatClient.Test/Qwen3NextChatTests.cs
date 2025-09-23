@@ -14,8 +14,8 @@ namespace VllmChatClient.Test
         {
             var apiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY");
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
-            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking");
-            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking");
+            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
             //_client = new VllmQwen3NextChatClient("http://localhost:8000/v1/{1}", apiKey, "qwen3-next-80b-a3b-instruct");
         }
 
@@ -26,13 +26,15 @@ namespace VllmChatClient.Test
         {
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲 /think"),
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲 "),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
             var options = new ChatOptions();
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
             Assert.Single(res.Messages); // 使用 Assert.Single 替代 Assert.Equal(1, ...)
+
+            Assert.True(res.Text.Contains("菲菲"));
             if (res.ModelId.Contains("thinking"))
             {
                 var reasonResponse = res as ReasoningChatResponse;
@@ -129,6 +131,7 @@ namespace VllmChatClient.Test
             }
             Assert.NotNull(res);
             Assert.NotEmpty(res);
+            Assert.True(res.Contains("菲菲"));
         }
 
         [Fact]

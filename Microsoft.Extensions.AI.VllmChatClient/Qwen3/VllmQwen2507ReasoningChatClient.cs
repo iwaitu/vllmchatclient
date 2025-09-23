@@ -75,7 +75,7 @@ namespace Microsoft.Extensions.AI
                 await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
             }
 
-            //var test = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var test = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var response = (await httpResponse.Content.ReadFromJsonAsync(
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
@@ -85,7 +85,7 @@ namespace Microsoft.Extensions.AI
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
 
-            return new(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!))
+            return new ReasoningChatResponse(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!), response.Choices.FirstOrDefault()?.Message.ReasoningContent.ToString())
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
                 FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
@@ -176,6 +176,8 @@ namespace Microsoft.Extensions.AI
                     continue;
                 }
                 string? modelId = chunk.Model ?? _metadata.DefaultModelId;
+
+                thinking = modelId.Contains("thinking") ? true : false;
 
                 if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
                 {

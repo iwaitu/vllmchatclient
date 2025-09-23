@@ -11,7 +11,7 @@ namespace Microsoft.Extensions.AI
         public ReasoningChatResponse(ChatMessage message, string reasoning)
             : base(message)
         {
-            Reason = reasoning ?? throw new ArgumentNullException(nameof(reasoning));
+            Reason = reasoning ?? "";
         }
         public string Reason { get; }
     }

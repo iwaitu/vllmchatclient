@@ -22,7 +22,7 @@ namespace VllmChatClient.Test
         {
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲 /think"),
+                new ChatMessage(ChatRole.System ,"我是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
             var options = new ChatOptions();
@@ -30,6 +30,7 @@ namespace VllmChatClient.Test
             Assert.NotNull(res);
 
             Assert.Single(res.Messages); // 使用 Assert.Single 替代 Assert.Equal(1, ...)
+            Assert.True(res.Text.Contains("菲菲"));
 
         }
 
@@ -104,6 +105,7 @@ namespace VllmChatClient.Test
             }
             Assert.NotNull(res);
             Assert.NotEmpty(res);
+            Assert.True(res.Contains("菲菲"));
         }
 
         [Fact]

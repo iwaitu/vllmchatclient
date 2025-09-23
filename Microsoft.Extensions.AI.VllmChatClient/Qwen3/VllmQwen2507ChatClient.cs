@@ -341,6 +341,19 @@ namespace Microsoft.Extensions.AI
             var contents = new List<AIContent>();
 
             if (string.IsNullOrEmpty(message.Content))
+            {
+                foreach (var toolcall in message.ToolCalls ?? [])
+                {
+                    contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
+                    {
+                        Name = toolcall.Function?.Name ?? "",
+                        Arguments = toolcall.Function?.Arguments?.ToString() ?? "{}"
+                    }));
+                }
+                var chatMessage = new ChatMessage(new ChatRole(message.Role), contents);
+            }
+
+            if (string.IsNullOrEmpty(message.Content))
                 return new ChatMessage(new ChatRole(message.Role), contents);
 
             // ① 去掉 <think> 标记

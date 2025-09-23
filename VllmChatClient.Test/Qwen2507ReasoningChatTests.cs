@@ -30,6 +30,8 @@ namespace VllmChatClient.Test
             Assert.NotNull(res);
 
             Assert.Equal(1, res.Messages.Count);
+            Assert.True(res.Text.Contains("菲菲"));
+
 
         }
 
@@ -81,7 +83,7 @@ namespace VllmChatClient.Test
         {
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.System ,"我是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
             string res = string.Empty;

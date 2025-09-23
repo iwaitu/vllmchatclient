@@ -199,7 +199,35 @@ namespace Microsoft.Extensions.AI
                     buffer_msg += message.Content ?? string.Empty;
                     var buffer_copy = buffer_msg;
                     var funcList = new List<VllmFunctionToolCall>();
+                    try
+                    {
+                        // 尝试反序列化来判断 buffer_params 是否为合法的 JSON
+                        if (!string.IsNullOrEmpty(buffer_params) && !string.IsNullOrEmpty(buffer_name))
+                        {
+                            // 使用 JsonConvert 验证 JSON 有效性
+                            JsonConvert.DeserializeObject(buffer_params);
 
+                            // 如果反序列化成功，创建 VllmFunctionToolCall
+                            var functionCall = new VllmFunctionToolCall
+                            {
+                                Name = buffer_name,
+                                Arguments = buffer_params
+                            };
+                            funcList.Add(functionCall);
+
+                            // 重置缓冲区，避免重复处理
+                            buffer_name = string.Empty;
+                            buffer_params = string.Empty;
+                        }
+                    }
+                    catch (JsonReaderException)
+                    {
+                        // JSON 格式无效，忽略此次尝试，继续累积参数
+                    }
+                    catch (Newtonsoft.Json.JsonException)
+                    {
+                        // JSON 格式无效，忽略此次尝试，继续累积参数
+                    }
                     // A) 已闭合的 <tool_call>…
                     ToolcallParser.TryFlushClosedToolCallBlocks(ref buffer_copy, out var tcalls);
                     funcList.AddRange(tcalls);

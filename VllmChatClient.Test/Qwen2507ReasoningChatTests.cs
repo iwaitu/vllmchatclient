@@ -11,7 +11,8 @@ namespace VllmChatClient.Test
         static int functionCallTime = 0;
         public Qwen2507ReasoningChatTests()
         {
-            _client = new VllmQwen2507ReasoningChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", "", "qwen3-235b-a22b-thinking-2507");
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            _client = new VllmQwen2507ReasoningChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-235b-a22b-thinking-2507");
         }
 
 

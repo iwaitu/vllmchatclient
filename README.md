@@ -13,7 +13,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4, GPT-OSS-120B/20B
+- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4, GPT-OSS-120B/20B, Qwen3-Next
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
 - ✅ **Multiple Deployment Options**: Local vLLM deployment and cloud API support
@@ -42,6 +42,11 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - **VllmQwen2507ChatClient** - For qwen3-235b-a22b-instruct-2507 (standard)
 - **VllmQwen2507ReasoningChatClient** - For qwen3-235b-a22b-thinking-2507 (with reasoning)
 
+### 🆕 Qwen3-Next 80B Models (Reasoning + Instruct)
+- **VllmQwen3NextChatClient** added.
+- Supports both `qwen3-next-80b-a3b-thinking` (reasoning output, exposes `ReasoningChatResponse` / streaming `ReasoningChatResponseUpdate`) and `qwen3-next-80b-a3b-instruct` (standard instruct style output without reasoning chain).
+- Unified API: switch model by passing the desired modelId in constructor or per-request via `ChatOptions.ModelId`.
+
 ---
 
 ## 🏗️ Supported Clients
@@ -50,6 +55,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 |--------|------------|---------------|-----------|----------------|
 | `VllmGptOssChatClient` | OpenRouter/Cloud | GPT-OSS-120B/20B | ✅ Full | ✅ Stream |
 | `VllmQwen3ChatClient` | Local vLLM | Qwen3-32B/235B | ✅ Toggle | ✅ Stream |
+| `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3-next-80b-a3b-(thinking|instruct) | ✅ (thinking model) | ✅ Stream |
 | `VllmQwqChatClient` | Local vLLM | QwQ-32B | ✅ Full | ✅ Stream |
 | `VllmGemmaChatClient` | Local vLLM | Gemma3-27B | ❌ | ✅ Stream |
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
@@ -156,6 +162,52 @@ await foreach (var update in gptOssClient.GetStreamingResponseAsync(messages, ch
 
 Console.WriteLine($"\n📝 Full Reasoning: {reasoning}");
 Console.WriteLine($"✅ Final Answer: {answer}");
+```
+
+### 🆕 Qwen3-Next 80B (Thinking vs Instruct)
+
+```csharp
+using Microsoft.Extensions.AI;
+
+// Choose model: reasoning variant or instruct variant
+var apiKey = "your-dashscope-api-key";
+// Reasoning (with thinking chain)
+IChatClient thinkingClient = new VllmQwen3NextChatClient(
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}",
+    apiKey,
+    "qwen3-next-80b-a3b-thinking");
+
+// Instruct (no reasoning chain)
+IChatClient instructClient = new VllmQwen3NextChatClient(
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}",
+    apiKey,
+    "qwen3-next-80b-a3b-instruct");
+
+var messages = new List<ChatMessage>
+{
+    new(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+    new(ChatRole.User,   "简单介绍下量子计算。")
+};
+
+// Reasoning streaming example
+await foreach (var update in thinkingClient.GetStreamingResponseAsync(messages))
+{
+    if (update is ReasoningChatResponseUpdate r)
+    {
+        if (r.Thinking)
+            Console.Write(r.Text);   // reasoning / thinking phase
+        else
+            Console.Write(r.Text);   // final answer phase
+    }
+    else
+    {
+        Console.Write(update.Text);
+    }
+}
+
+// Instruct (single response)
+var resp = await instructClient.GetResponseAsync(messages);
+Console.WriteLine(resp.Text);
 ```
 
 ### Qwen3 with Reasoning Toggle

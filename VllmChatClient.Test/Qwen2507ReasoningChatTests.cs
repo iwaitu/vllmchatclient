@@ -75,6 +75,8 @@ namespace VllmChatClient.Test
             };
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
+            Assert.True(res.Messages.Count == 1);
+            Assert.True(res.Messages[0].Contents.Count == 1);
         }
 
 

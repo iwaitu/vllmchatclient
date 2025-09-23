@@ -337,33 +337,33 @@ namespace Microsoft.Extensions.AI
                         Arguments = toolcall.Function?.Arguments?.ToString() ?? "{}"
                     }));
                 }
-                var chatMessage = new ChatMessage(new ChatRole(message.Role), contents);
             }
 
             // ① 去掉 <think> 标记
-            var raw = message.Content;
-
-            var tcList = ToolcallParser.ParseToolCalls(raw, out var afterToolCalls);
-
-            foreach (var call in tcList)
-                contents.Add(ToFunctionCallContent(call));
-
-            // ③ 连写 JSON 切片
-            var (jsonPieces, rest) = ToolcallParser.SliceJsonFragments(afterToolCalls);
-
-            foreach (var json in jsonPieces)
+            if (message.Content != null)
             {
-                var call = ToolcallParser.TryParseToolCallJson(json);
-                if (call != null)
-                    contents.Add(ToFunctionCallContent(call));
-            }
-            if (contents.Count == 0)
-                rest = raw;
-            // ④ 纯文本
-            rest = rest.Trim();
-            if (!string.IsNullOrEmpty(rest))
-                contents.Add(new TextContent(rest));
+                var raw = message.Content;
 
+                var tcList = ToolcallParser.ParseToolCalls(raw, out var afterToolCalls);
+
+                foreach (var call in tcList)
+                    contents.Add(ToFunctionCallContent(call));
+                // ③ 连写 JSON 切片
+                var (jsonPieces, rest) = ToolcallParser.SliceJsonFragments(afterToolCalls);
+
+                foreach (var json in jsonPieces)
+                {
+                    var call = ToolcallParser.TryParseToolCallJson(json);
+                    if (call != null)
+                        contents.Add(ToFunctionCallContent(call));
+                }
+                if (contents.Count == 0)
+                    rest = raw;
+                // ④ 纯文本
+                rest = rest.Trim();
+                if (!string.IsNullOrEmpty(rest))
+                    contents.Add(new TextContent(rest));
+            }
             return new ChatMessage(new ChatRole(message.Role), contents);
         }
 

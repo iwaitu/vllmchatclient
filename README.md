@@ -9,7 +9,7 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **QwQ-32B**, **Gemma3**, and **DeepSeek-R1** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, and **DeepSeek-R1** with advanced reasoning capabilities.
 
 ## 🚀 Features
 
@@ -55,14 +55,14 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 |--------|------------|---------------|-----------|----------------|
 | `VllmGptOssChatClient` | OpenRouter/Cloud | GPT-OSS-120B/20B | ✅ Full | ✅ Stream |
 | `VllmQwen3ChatClient` | Local vLLM | Qwen3-32B/235B | ✅ Toggle | ✅ Stream |
-| `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3-next-80b-a3b-(thinking|instruct) | ✅ (thinking model) | ✅ Stream |
+| `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3-next-80b-a3b-(thinking/instruct) | ✅ (thinking model) | ✅ Stream |
 | `VllmQwqChatClient` | Local vLLM | QwQ-32B | ✅ Full | ✅ Stream |
 | `VllmGemmaChatClient` | Local vLLM | Gemma3-27B | ❌ | ✅ Stream |
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
 | `VllmGlmZ1ChatClient` | Local vLLM | GLM-4 | ✅ Full | ✅ Stream |
 | `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
-| `VllmQwen2507ChatClient` | Cloud API | Qwen3-235B-2507 | ❌ | ✅ Stream |
-| `VllmQwen2507ReasoningChatClient` | Cloud API | Qwen3-235B-2507 | ✅ Full | ✅ Stream |
+| `VllmQwen2507ChatClient` | Cloud API | qwen3-235b-a22b-instruct-2507 | ❌ | ✅ Stream |
+| `VllmQwen2507ReasoningChatClient` | Cloud API | qwen3-235b-a22b-thinking-2507 | ✅ Full | ✅ Stream |
 
 ---
 

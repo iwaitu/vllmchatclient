@@ -206,7 +206,7 @@ namespace Microsoft.Extensions.AI
                         bool isJsonComplete = false;
                         try
                         {
-                            if (!string.IsNullOrEmpty(buffer_name))
+                            if (!string.IsNullOrEmpty(buffer_name)&& !string.IsNullOrEmpty(buffer_params))
                             {
                                 var obj = JsonConvert.DeserializeObject(buffer_params);
                                 isJsonComplete = ToolcallParser.GetBraceDepth(buffer_params) == 0;

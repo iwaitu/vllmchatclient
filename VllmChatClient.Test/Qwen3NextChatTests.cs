@@ -1,5 +1,7 @@
 ﻿using Microsoft.Extensions.AI;
 using System.ComponentModel;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace VllmChatClient.Test
@@ -14,8 +16,8 @@ namespace VllmChatClient.Test
         {
             var apiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY");
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
-            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking");
-            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking");
+            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
             //_client = new VllmQwen3NextChatClient("http://localhost:8000/v1/{1}", apiKey, "qwen3-next-80b-a3b-instruct");
         }
 
@@ -146,6 +148,72 @@ namespace VllmChatClient.Test
                 {
                     res += text.Text;
                 }
+            }
+
+            Assert.False(string.IsNullOrWhiteSpace(res));
+        }
+
+        [Fact]
+        public async Task StreamChatManualFunctionCallTest()
+        {
+            IChatClient client = new ChatClientBuilder(_client)
+                .UseFunctionInvocation()
+                .Build();
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
+                //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
+            };
+            ChatOptions chatOptions = new()
+            {
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
+            };
+            string res = string.Empty;
+            string reason = string.Empty;
+            await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
+            {
+                if(update.FinishReason == ChatFinishReason.ToolCalls)
+                {
+                    foreach (var fc in update.Contents.OfType<FunctionCallContent>())
+                    {
+                        Assert.NotNull(fc);
+                        messages.Add(new ChatMessage(ChatRole.Assistant, [fc]));
+
+                        string json = System.Text.Json.JsonSerializer.Serialize(
+                            fc.Arguments,
+                            new JsonSerializerOptions
+                            {
+                                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                            });
+                        if(fc.Name == "GetWeather")
+                        {
+                            var result = GetWeather();
+                            messages.Add(new ChatMessage(
+                                ChatRole.Tool,
+                                [new FunctionResultContent(fc.CallId, result)]));
+                            continue;
+                        }else if(fc.Name == "Search")
+                        {
+                            var args = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                            Assert.NotNull(args);
+                            Assert.True(args.ContainsKey("question"));
+                            var result = Search(args["question"]);
+                            messages.Add(new ChatMessage(
+                                ChatRole.Tool,
+                                [new FunctionResultContent(fc.CallId, result)]));
+                            continue;
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var text in update.Contents.OfType<TextContent>())
+                    {
+                        res += text.Text;
+                    }
+                }
+                    
             }
 
             Assert.False(string.IsNullOrWhiteSpace(res));

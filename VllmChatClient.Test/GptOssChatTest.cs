@@ -1,6 +1,8 @@
 ﻿using Microsoft.Extensions.AI;
 using Microsoft.Extensions.AI.VllmChatClient.GptOss;
 using System.ComponentModel;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Xunit.Abstractions;
 
@@ -10,13 +12,15 @@ namespace VllmChatClient.Test
     {
         private readonly IChatClient _client;
         private readonly ITestOutputHelper _output;
-        static string ApiToken = "";
-        
+        //private string ApiToken = Environment.GetEnvironmentVariable("OPEN_ROUTE_API_KEY");
+        private string ApiToken = Environment.GetEnvironmentVariable("VLLM_API_KEY");
+
         public GptOssChatTest(ITestOutputHelper output)
         {
             _output = output;
             // Use the actual GPT-OSS client for testing with OpenRouter
-            _client = new VllmGptOssChatClient("https://openrouter.ai/api/v1", ApiToken, "openai/gpt-oss-20b");
+            //_client = new VllmGptOssChatClient("https://openrouter.ai/api/v1", ApiToken, "openai/gpt-oss-120b");
+            _client = new VllmGptOssChatClient("http://localhost:8000/v1", ApiToken, "gpt-oss-120b");
         }
 
         [Fact]
@@ -27,8 +31,12 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
-
-            var res = await _client.GetResponseAsync(messages);
+            var options = new GptOssChatOptions
+            {
+                ReasoningLevel = GptOssReasoningLevel.Low,
+                Temperature = 0.5f
+            };
+            var res = await _client.GetResponseAsync(messages,options);
             Assert.NotNull(res);
 
             Assert.Equal(1, res.Messages.Count);
@@ -67,7 +75,7 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"我需要带伞吗？")
+                new ChatMessage(ChatRole.User,"我在南宁，今天下雨吗？")
             };
             ChatOptions chatOptions = new()
             {
@@ -75,31 +83,20 @@ namespace VllmChatClient.Test
             };
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
+
+            Assert.True(res.Text.Contains("下雨"));
         }
 
         [Description("获取南宁的天气情况")]
-        static string GetWeather() => "It's raining";
+        static string GetWeather([Description("城市名称")]string city) => $"{city} 气温35度，阳光明媚。.";
 
         [Description("地名地址搜索")]
-        static string Search([Description("需要搜索的问题")] string question)
+        static string Search([Description("需要搜索的目的地")] string question)
         {
             return "南宁市青秀区方圆广场北面站前路1号。";
         }
 
-        [Fact]
-        public void TestUrlConstruction()
-        {
-            // Test different endpoint formats
-            var client1 = new VllmGptOssChatClient("https://openrouter.ai/api/v1", "test-token", "gpt-oss-120b");
-            var client2 = new VllmGptOssChatClient("http://localhost:8000", "test-token", "gpt-oss-120b");
-            var client3 = new VllmGptOssChatClient("https://api.example.com/", "test-token", "gpt-oss-120b");
-
-            // These should compile without errors, indicating proper URL handling
-            Assert.NotNull(client1);
-            Assert.NotNull(client2);
-            Assert.NotNull(client3);
-        }
-
+        
         [Fact]
         public async Task StreamChatTest()
         {
@@ -138,7 +135,7 @@ namespace VllmChatClient.Test
 
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲，调用工具时仅输出工具名称和参数。如果可以通过工具查询获取结果，则仅使用工具返回的结果进行回复。"),
                 new ChatMessage(ChatRole.User, "南宁火车站在哪里？我出门需要带伞吗？")
             };
 
@@ -218,6 +215,81 @@ namespace VllmChatClient.Test
         }
 
         [Fact]
+        public async Task StreamChatManualFunctionCallTest()
+        {
+            IChatClient client = _client;
+                
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User,"用工具查询一下南宁火车站在哪里？")
+                //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
+            };
+            ChatOptions chatOptions = new()
+            {
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
+            };
+            string res = string.Empty;
+            string reason = string.Empty;
+            await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
+            {
+                if (update.FinishReason == ChatFinishReason.ToolCalls)
+                {
+                    foreach (var fc in update.Contents.OfType<FunctionCallContent>())
+                    {
+                        Assert.NotNull(fc);
+                        messages.Add(new ChatMessage(ChatRole.Assistant, [fc]));
+
+                        string json = JsonSerializer.Serialize(
+                            fc.Arguments,
+                            new JsonSerializerOptions
+                            {
+                                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                            });
+                        if (fc.Name == "GetWeather")
+                        {
+                            var result = GetWeather("南宁");
+                            messages.Add(new ChatMessage(
+                                ChatRole.Tool,
+                                [new FunctionResultContent(fc.CallId, result)]));
+                            continue;
+                        }
+                        else if (fc.Name == "Search")
+                        {
+                            var args = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                            Assert.NotNull(args);
+                            Assert.True(args.ContainsKey("question"));
+                            var result = Search(args["question"]);
+                            messages.Add(new ChatMessage(
+                                ChatRole.Tool,
+                                [new FunctionResultContent(fc.CallId, result)]));
+                            continue;
+                        }
+                    }
+                }
+                else
+                {
+                    if(update is ReasoningChatResponseUpdate reasoningUpdate)
+                    {
+                        if(reasoningUpdate.Thinking)
+                        {
+                            // 如果模型在思考，可以选择处理思考内容
+                            reason += reasoningUpdate.Reasoning;
+                        }
+                        else
+                        {
+                            res += reasoningUpdate.Text;
+                        }
+                    }
+                    
+                }
+
+            }
+
+            Assert.False(string.IsNullOrWhiteSpace(res));
+        }
+
+        [Fact]
         public async Task StreamChatJsonoutput()
         {
             var messages = new List<ChatMessage>
@@ -282,31 +354,7 @@ namespace VllmChatClient.Test
             }
         }
 
-        [Fact]
-        public void OptimizedAnalyzeReasoningStructureTest()
-        {
-            var client = new VllmGptOssChatClient("https://openrouter.ai/api/v1", ApiToken, "gpt-oss-120b");
-            
-            // 使用反射访问私有方法来测试
-            var method = typeof(VllmGptOssChatClient).GetMethod("AnalyzeReasoningStructure", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            
-            Assert.NotNull(method);
-            
-            // 测试字符串输入
-            var result = (ValueTuple<bool, string, string>)method.Invoke(null, new object[] { "Test reasoning" })!;
-            Assert.True(result.Item1); // hasReasoning
-            Assert.Equal("Test reasoning", result.Item2); // reasoningText
-            Assert.Equal("standard", result.Item3); // reasoningType
-            
-            // 测试 null 输入
-            var nullResult = (ValueTuple<bool, string, string>)method.Invoke(null, new object[] { null! })!;
-            Assert.False(nullResult.Item1); // hasReasoning should be false
-            Assert.Equal("", nullResult.Item2); // reasoningText should be empty
-            Assert.Equal("unknown", nullResult.Item3); // reasoningType should be unknown
-            
-            Assert.True(true); // 如果能执行到这里说明方法优化成功且无调试输出
-        }
+        
 
         [Description("获取当前时间")]
         static string GetCurrentTime() => DateTime.Now.ToString("yyyy年MM月dd日 HH:mm:ss");

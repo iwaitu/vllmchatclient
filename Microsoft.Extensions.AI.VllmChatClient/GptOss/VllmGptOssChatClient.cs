@@ -126,6 +126,21 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
                 null;
         }
 
+
+        /// <summary>
+        /// 检查每一条消息，如果该条消息是工具调用的信息，则将Text 内容设置为空.
+        /// </summary>
+        /// <param name="messages"></param>
+        /// <returns></returns>
+        private IEnumerable<ChatMessage> ClearMessages(IEnumerable<ChatMessage> messages)
+        {
+            foreach (var msg in messages)
+            {
+
+            }
+            return messages;
+        }
+
         /// <summary>
         /// 设置聊天选项并处理 system prompt
         /// </summary>
@@ -418,6 +433,7 @@ Calls to these tools must go to the commentary channel: 'functions'.";
                                 if (activeFunctionCalls.Count == 0)
                                 {
                                     hasActiveToolCalls = false;
+                                    break;
                                 }
                             }
                         }
@@ -576,7 +592,8 @@ Calls to these tools must go to the commentary channel: 'functions'.";
                 contents.Add(ToFunctionCallContent(functionCall));
             }
 
-            if (string.IsNullOrEmpty(message.Content))
+            
+            if (contents.Count>0)
                 return new ChatMessage(new ChatRole(message.Role), contents);
 
             var raw = message.Content.Trim();

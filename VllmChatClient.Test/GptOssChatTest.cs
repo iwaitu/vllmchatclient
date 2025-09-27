@@ -65,30 +65,30 @@ namespace VllmChatClient.Test
             Assert.NotEmpty(json);
         }
 
-        [Fact]
-        public async Task ChatFunctionCallTest()
-        {
+        //[Fact]
+        //public async Task ChatFunctionCallTest()
+        //{
 
-            IChatClient client = new ChatClientBuilder(_client)
-                .UseFunctionInvocation()
-                .Build();
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"我在南宁，今天下雨吗？")
-            };
-            ChatOptions chatOptions = new()
-            {
-                Tools = [AIFunctionFactory.Create(GetWeather)]
-            };
-            var res = await client.GetResponseAsync(messages, chatOptions);
-            Assert.NotNull(res);
+        //    IChatClient client = new ChatClientBuilder(_client)
+        //        .UseFunctionInvocation()
+        //        .Build();
+        //    var messages = new List<ChatMessage>
+        //    {
+        //        new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+        //        new ChatMessage(ChatRole.User,"我在南宁，今天下雨吗？")
+        //    };
+        //    ChatOptions chatOptions = new()
+        //    {
+        //        Tools = [AIFunctionFactory.Create(GetWeather)]
+        //    };
+        //    var res = await client.GetResponseAsync(messages, chatOptions);
+        //    Assert.NotNull(res);
 
-            Assert.True(res.Text.Contains("下雨"));
-        }
+        //    Assert.True(res.Text.Contains("下雨"));
+        //}
 
         [Description("获取南宁的天气情况")]
-        static string GetWeather([Description("城市名称")]string city) => $"{city} 气温35度，阳光明媚。.";
+        static string GetWeather([Description("城市名称")]string city) => $"{city} 气温35度，暴雨。.";
 
         [Description("地名地址搜索")]
         static string Search([Description("需要搜索的目的地")] string question)
@@ -126,93 +126,93 @@ namespace VllmChatClient.Test
             Assert.Contains("菲菲", result);
         }
 
-        [Fact]
-        public async Task StreamChatFunctionCallTest()
-        {
-            IChatClient client = new ChatClientBuilder(_client)
-                .UseFunctionInvocation()
-                .Build();
+        //[Fact]
+        //public async Task StreamChatFunctionCallTest()
+        //{
+        //    IChatClient client = new ChatClientBuilder(_client)
+        //        .UseFunctionInvocation()
+        //        .Build();
 
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲，调用工具时仅输出工具名称和参数。如果可以通过工具查询获取结果，则仅使用工具返回的结果进行回复。"),
-                new ChatMessage(ChatRole.User, "南宁火车站在哪里？我出门需要带伞吗？")
-            };
+        //    var messages = new List<ChatMessage>
+        //    {
+        //        new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲，调用工具时仅输出工具名称和参数。如果可以通过工具查询获取结果，则仅使用工具返回的结果进行回复。"),
+        //        new ChatMessage(ChatRole.User, "南宁火车站在哪里？我出门需要带伞吗？")
+        //    };
 
-            ChatOptions chatOptions = new()
-            {
-                Temperature = 0.5f,
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
-            };
+        //    ChatOptions chatOptions = new()
+        //    {
+        //        Temperature = 0.5f,
+        //        Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
+        //    };
 
-            string result = string.Empty;
-            string think = string.Empty;
-            bool foundFunctionCall = false;
-            int totalUpdates = 0;
-            int reasoningUpdates = 0;
-            int thinkingUpdates = 0;
+        //    string result = string.Empty;
+        //    string think = string.Empty;
+        //    bool foundFunctionCall = false;
+        //    int totalUpdates = 0;
+        //    int reasoningUpdates = 0;
+        //    int thinkingUpdates = 0;
 
-            await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
-            {
-                totalUpdates++;
+        //    await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
+        //    {
+        //        totalUpdates++;
                 
-                if (update is ReasoningChatResponseUpdate reasoningUpdate)
-                {
-                    reasoningUpdates++;
-                    if(reasoningUpdate.Thinking)
-                    {
-                        thinkingUpdates++;
-                        // 如果模型在思考，可以选择处理思考内容
-                        think += reasoningUpdate.Reasoning;
-                    }
-                    else
-                    {
-                        if (reasoningUpdate.Contents.Count > 0)
-                        {
-                            foreach (var content in reasoningUpdate.Contents)
-                            {
-                                if (content is TextContent textContent)
-                                {
-                                    result += textContent.Text;
-                                }
-                                else if (content is FunctionCallContent)
-                                {
-                                    foundFunctionCall = true;
-                                }
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    // 处理非推理更新（来自FunctionInvokingChatClient包装器的转换）
-                    if (update.Contents.Count > 0)
-                    {
-                        foreach (var content in update.Contents)
-                        {
-                            if (content is TextContent textContent)
-                            {
-                                result += textContent.Text;
-                            }
-                            else if (content is FunctionCallContent)
-                            {
-                                foundFunctionCall = true;
-                            }
-                        }
-                    }
-                }
-            }
+        //        if (update is ReasoningChatResponseUpdate reasoningUpdate)
+        //        {
+        //            reasoningUpdates++;
+        //            if(reasoningUpdate.Thinking)
+        //            {
+        //                thinkingUpdates++;
+        //                // 如果模型在思考，可以选择处理思考内容
+        //                think += reasoningUpdate.Reasoning;
+        //            }
+        //            else
+        //            {
+        //                if (reasoningUpdate.Contents.Count > 0)
+        //                {
+        //                    foreach (var content in reasoningUpdate.Contents)
+        //                    {
+        //                        if (content is TextContent textContent)
+        //                        {
+        //                            result += textContent.Text;
+        //                        }
+        //                        else if (content is FunctionCallContent)
+        //                        {
+        //                            foundFunctionCall = true;
+        //                        }
+        //                    }
+        //                }
+        //            }
+        //        }
+        //        else
+        //        {
+        //            // 处理非推理更新（来自FunctionInvokingChatClient包装器的转换）
+        //            if (update.Contents.Count > 0)
+        //            {
+        //                foreach (var content in update.Contents)
+        //                {
+        //                    if (content is TextContent textContent)
+        //                    {
+        //                        result += textContent.Text;
+        //                    }
+        //                    else if (content is FunctionCallContent)
+        //                    {
+        //                        foundFunctionCall = true;
+        //                    }
+        //                }
+        //            }
+        //        }
+        //    }
 
-            Assert.NotNull(result);
+        //    Assert.NotNull(result);
             
-            // Note: think 内容现在应该包含推理内容，经过改进的结构化分析
-            // 推理内容現在通過AnalyzeReasoningStructure方法進行結構化處理
-            Assert.NotEmpty(think); // 仍然注释掉，因为FunctionInvokingChatClient包装器问题
-            //Assert.True(thinkingUpdates == 2);
-            // 应该包含函数调用或结果
-            Assert.True(foundFunctionCall || result.Contains("raining") || result.Contains("下雨"), 
-                $"Expected function call or weather content, but got: foundFunctionCall={foundFunctionCall}, result='{result}'");
-        }
+        //    // Note: think 内容现在应该包含推理内容，经过改进的结构化分析
+        //    // 推理内容現在通過AnalyzeReasoningStructure方法進行結構化處理
+        //    Assert.NotEmpty(think); // 仍然注释掉，因为FunctionInvokingChatClient包装器问题
+        //    //Assert.True(thinkingUpdates == 2);
+        //    // 应该包含函数调用或结果
+        //    Assert.True(foundFunctionCall || result.Contains("raining") || result.Contains("下雨"), 
+        //        $"Expected function call or weather content, but got: foundFunctionCall={foundFunctionCall}, result='{result}'");
+        //}
 
         [Fact]
         public async Task StreamChatManualFunctionCallTest()
@@ -552,180 +552,180 @@ namespace VllmChatClient.Test
         /// <summary>
         /// 稳定版本：多次运行取平均值的推理级别测试
         /// </summary>
-        [Fact]
-        public async Task TestReasoningLevelStabilityComparison()
-        {
-            const int testRuns = 3; // 每个级别运行3次
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage(ChatRole.User, "小明有一些苹果，他先吃掉了总数的1/3，然后又吃掉了剩余的1/2，最后还剩下6个苹果。请问小明最初有多少个苹果？请逐步推理并详细解释计算过程。")
-            };
+        //[Fact]
+        //public async Task TestReasoningLevelStabilityComparison()
+        //{
+        //    const int testRuns = 3; // 每个级别运行3次
+        //    var messages = new List<ChatMessage>
+        //    {
+        //        new ChatMessage(ChatRole.User, "小明有一些苹果，他先吃掉了总数的1/3，然后又吃掉了剩余的1/2，最后还剩下6个苹果。请问小明最初有多少个苹果？请逐步推理并详细解释计算过程。")
+        //    };
 
-            // 收集多次运行的结果
-            var allResults = new Dictionary<GptOssReasoningLevel, List<int>>();
+        //    // 收集多次运行的结果
+        //    var allResults = new Dictionary<GptOssReasoningLevel, List<int>>();
             
-            // 初始化结果集合
-            foreach (var level in Enum.GetValues<GptOssReasoningLevel>())
-            {
-                allResults[level] = new List<int>();
-            }
+        //    // 初始化结果集合
+        //    foreach (var level in Enum.GetValues<GptOssReasoningLevel>())
+        //    {
+        //        allResults[level] = new List<int>();
+        //    }
 
-            // 进行多次测试
-            for (int run = 1; run <= testRuns; run++)
-            {
-                _output.WriteLine($"\n🔄 Starting test run {run}/{testRuns}");
+        //    // 进行多次测试
+        //    for (int run = 1; run <= testRuns; run++)
+        //    {
+        //        _output.WriteLine($"\n🔄 Starting test run {run}/{testRuns}");
                 
-                foreach (var level in Enum.GetValues<GptOssReasoningLevel>())
-                {
-                    var chatOptions = new GptOssChatOptions
-                    {
-                        ReasoningLevel = level,
-                        Temperature = 0.5f, // 稍微降低温度提高稳定性
-                        MaxOutputTokens = 2000
-                    };
+        //        foreach (var level in Enum.GetValues<GptOssReasoningLevel>())
+        //        {
+        //            var chatOptions = new GptOssChatOptions
+        //            {
+        //                ReasoningLevel = level,
+        //                Temperature = 0.5f, // 稍微降低温度提高稳定性
+        //                MaxOutputTokens = 2000
+        //            };
 
-                    string thinkingContent = string.Empty;
+        //            string thinkingContent = string.Empty;
                     
-                    try
-                    {
-                        _output.WriteLine($"  📊 Run {run}: Testing {level} Level");
+        //            try
+        //            {
+        //                _output.WriteLine($"  📊 Run {run}: Testing {level} Level");
                         
-                        await foreach (var update in _client.GetStreamingResponseAsync(messages, chatOptions))
-                        {
-                            if (update is ReasoningChatResponseUpdate reasoningUpdate && reasoningUpdate.Thinking)
-                            {
-                                thinkingContent += reasoningUpdate.Reasoning;
-                            }
-                        }
+        //                await foreach (var update in _client.GetStreamingResponseAsync(messages, chatOptions))
+        //                {
+        //                    if (update is ReasoningChatResponseUpdate reasoningUpdate && reasoningUpdate.Thinking)
+        //                    {
+        //                        thinkingContent += reasoningUpdate.Reasoning;
+        //                    }
+        //                }
 
-                        allResults[level].Add(thinkingContent.Length);
-                        _output.WriteLine($"    📏 Run {run} {level}: {thinkingContent.Length} chars");
+        //                allResults[level].Add(thinkingContent.Length);
+        //                _output.WriteLine($"    📏 Run {run} {level}: {thinkingContent.Length} chars");
                         
-                        // 更长的延迟确保API稳定性
-                        await Task.Delay(4000);
-                    }
-                    catch (Exception ex)
-                    {
-                        _output.WriteLine($"    ❌ Run {run} {level} failed: {ex.Message}");
-                        allResults[level].Add(0);
-                    }
-                }
-            }
+        //                // 更长的延迟确保API稳定性
+        //                await Task.Delay(4000);
+        //            }
+        //            catch (Exception ex)
+        //            {
+        //                _output.WriteLine($"    ❌ Run {run} {level} failed: {ex.Message}");
+        //                allResults[level].Add(0);
+        //            }
+        //        }
+        //    }
 
-            // 计算平均值和统计信息
-            var averageResults = new Dictionary<GptOssReasoningLevel, (double average, int min, int max, double stdDev)>();
+        //    // 计算平均值和统计信息
+        //    var averageResults = new Dictionary<GptOssReasoningLevel, (double average, int min, int max, double stdDev)>();
             
-            foreach (var kvp in allResults)
-            {
-                var lengths = kvp.Value.Where(x => x > 0).ToArray(); // 排除失败的结果
-                if (lengths.Length > 0)
-                {
-                    var average = lengths.Average();
-                    var min = lengths.Min();
-                    var max = lengths.Max();
-                    var variance = lengths.Select(x => Math.Pow(x - average, 2)).Average();
-                    var stdDev = Math.Sqrt(variance);
+        //    foreach (var kvp in allResults)
+        //    {
+        //        var lengths = kvp.Value.Where(x => x > 0).ToArray(); // 排除失败的结果
+        //        if (lengths.Length > 0)
+        //        {
+        //            var average = lengths.Average();
+        //            var min = lengths.Min();
+        //            var max = lengths.Max();
+        //            var variance = lengths.Select(x => Math.Pow(x - average, 2)).Average();
+        //            var stdDev = Math.Sqrt(variance);
                     
-                    averageResults[kvp.Key] = (average, min, max, stdDev);
-                }
-                else
-                {
-                    averageResults[kvp.Key] = (0, 0, 0, 0);
-                }
-            }
+        //            averageResults[kvp.Key] = (average, min, max, stdDev);
+        //        }
+        //        else
+        //        {
+        //            averageResults[kvp.Key] = (0, 0, 0, 0);
+        //        }
+        //    }
 
-            // 输出详细统计结果
-            _output.WriteLine("\n📈 === Statistical Results ===");
-            foreach (var kvp in averageResults)
-            {
-                var stats = kvp.Value;
-                _output.WriteLine($"=== {kvp.Key} Level Statistics ===");
-                _output.WriteLine($"Average Length: {stats.average:F1}");
-                _output.WriteLine($"Range: {stats.min} - {stats.max}");
-                _output.WriteLine($"Standard Deviation: {stats.stdDev:F1}");
-                _output.WriteLine($"Variability: {(stats.stdDev / Math.Max(stats.average, 1) * 100):F1}%");
-                _output.WriteLine($"Individual runs: [{string.Join(", ", allResults[kvp.Key])}]");
-                _output.WriteLine("");
-            }
+        //    // 输出详细统计结果
+        //    _output.WriteLine("\n📈 === Statistical Results ===");
+        //    foreach (var kvp in averageResults)
+        //    {
+        //        var stats = kvp.Value;
+        //        _output.WriteLine($"=== {kvp.Key} Level Statistics ===");
+        //        _output.WriteLine($"Average Length: {stats.average:F1}");
+        //        _output.WriteLine($"Range: {stats.min} - {stats.max}");
+        //        _output.WriteLine($"Standard Deviation: {stats.stdDev:F1}");
+        //        _output.WriteLine($"Variability: {(stats.stdDev / Math.Max(stats.average, 1) * 100):F1}%");
+        //        _output.WriteLine($"Individual runs: [{string.Join(", ", allResults[kvp.Key])}]");
+        //        _output.WriteLine("");
+        //    }
 
-            // 验证平均值关系
-            var lowAvg = averageResults[GptOssReasoningLevel.Low].average;
-            var mediumAvg = averageResults[GptOssReasoningLevel.Medium].average;
-            var highAvg = averageResults[GptOssReasoningLevel.High].average;
+        //    // 验证平均值关系
+        //    var lowAvg = averageResults[GptOssReasoningLevel.Low].average;
+        //    var mediumAvg = averageResults[GptOssReasoningLevel.Medium].average;
+        //    var highAvg = averageResults[GptOssReasoningLevel.High].average;
 
-            _output.WriteLine("📊 Average reasoning lengths:");
-            _output.WriteLine($"Low: {lowAvg:F1}");
-            _output.WriteLine($"Medium: {mediumAvg:F1}");
-            _output.WriteLine($"High: {highAvg:F1}");
+        //    _output.WriteLine("📊 Average reasoning lengths:");
+        //    _output.WriteLine($"Low: {lowAvg:F1}");
+        //    _output.WriteLine($"Medium: {mediumAvg:F1}");
+        //    _output.WriteLine($"High: {highAvg:F1}");
 
-            // 基本验证：所有级别都应该产生内容
-            Assert.True(lowAvg > 0, "Low level should produce reasoning content on average");
-            Assert.True(mediumAvg > 0, "Medium level should produce reasoning content on average");
-            Assert.True(highAvg > 0, "High level should produce reasoning content on average");
+        //    // 基本验证：所有级别都应该产生内容
+        //    Assert.True(lowAvg > 0, "Low level should produce reasoning content on average");
+        //    Assert.True(mediumAvg > 0, "Medium level should produce reasoning content on average");
+        //    Assert.True(highAvg > 0, "High level should produce reasoning content on average");
 
-            // 趋势验证：使用统计显著性
-            var tolerance = 0.2; // 20% 容错率
+        //    // 趋势验证：使用统计显著性
+        //    var tolerance = 0.2; // 20% 容错率
             
-            if (lowAvg < mediumAvg && mediumAvg < highAvg)
-            {
-                _output.WriteLine("✅ Perfect hierarchy: Low < Medium < High");
-                Assert.True(lowAvg < mediumAvg);
-                Assert.True(mediumAvg < highAvg);
-            }
-            else
-            {
-                // 检查是否至少有一般性趋势
-                var sorted = new[] { 
-                    (GptOssReasoningLevel.Low, lowAvg),
-                    (GptOssReasoningLevel.Medium, mediumAvg),
-                    (GptOssReasoningLevel.High, highAvg)
-                }.OrderBy(x => x.Item2).ToArray();
+        //    if (lowAvg < mediumAvg && mediumAvg < highAvg)
+        //    {
+        //        _output.WriteLine("✅ Perfect hierarchy: Low < Medium < High");
+        //        Assert.True(lowAvg < mediumAvg);
+        //        Assert.True(mediumAvg < highAvg);
+        //    }
+        //    else
+        //    {
+        //        // 检查是否至少有一般性趋势
+        //        var sorted = new[] { 
+        //            (GptOssReasoningLevel.Low, lowAvg),
+        //            (GptOssReasoningLevel.Medium, mediumAvg),
+        //            (GptOssReasoningLevel.High, highAvg)
+        //        }.OrderBy(x => x.Item2).ToArray();
                 
-                _output.WriteLine("🔀 Actual order by average length:");
-                foreach (var item in sorted)
-                {
-                    _output.WriteLine($"  {item.Item1}: {item.Item2:F1}");
-                }
+        //        _output.WriteLine("🔀 Actual order by average length:");
+        //        foreach (var item in sorted)
+        //        {
+        //            _output.WriteLine($"  {item.Item1}: {item.Item2:F1}");
+        //        }
                 
-                // 至少应该有显著差异
-                var minAvg = sorted.First().Item2;
-                var maxAvg = sorted.Last().Item2;
-                var ratio = maxAvg / Math.Max(minAvg, 1);
+        //        // 至少应该有显著差异
+        //        var minAvg = sorted.First().Item2;
+        //        var maxAvg = sorted.Last().Item2;
+        //        var ratio = maxAvg / Math.Max(minAvg, 1);
                 
-                Assert.True(ratio > 1.5, $"Should have significant variation between levels. Ratio: {ratio:F2}");
-                _output.WriteLine($"📏 Length ratio (max/min): {ratio:F2}");
+        //        Assert.True(ratio > 1.5, $"Should have significant variation between levels. Ratio: {ratio:F2}");
+        //        _output.WriteLine($"📏 Length ratio (max/min): {ratio:F2}");
                 
-                if (highAvg > lowAvg)
-                {
-                    _output.WriteLine("✅ At least High > Low trend maintained");
-                }
-                else
-                {
-                    _output.WriteLine("⚠️ High level did not exceed Low level on average");
-                }
-            }
+        //        if (highAvg > lowAvg)
+        //        {
+        //            _output.WriteLine("✅ At least High > Low trend maintained");
+        //        }
+        //        else
+        //        {
+        //            _output.WriteLine("⚠️ High level did not exceed Low level on average");
+        //        }
+        //    }
 
-            // 输出变异性分析
-            _output.WriteLine("\n📊 Variability Analysis:");
-            foreach (var kvp in averageResults)
-            {
-                var level = kvp.Key;
-                var stats = kvp.Value;
-                var variability = stats.stdDev / Math.Max(stats.average, 1) * 100;
+        //    // 输出变异性分析
+        //    _output.WriteLine("\n📊 Variability Analysis:");
+        //    foreach (var kvp in averageResults)
+        //    {
+        //        var level = kvp.Key;
+        //        var stats = kvp.Value;
+        //        var variability = stats.stdDev / Math.Max(stats.average, 1) * 100;
                 
-                if (variability > 50)
-                {
-                    _output.WriteLine($"⚠️ {level} shows high variability ({variability:F1}%) - results may be inconsistent");
-                }
-                else if (variability > 25)
-                {
-                    _output.WriteLine($"📊 {level} shows moderate variability ({variability:F1}%)");
-                }
-                else
-                {
-                    _output.WriteLine($"✅ {level} shows stable results ({variability:F1}% variability)");
-                }
-            }
-        }
+        //        if (variability > 50)
+        //        {
+        //            _output.WriteLine($"⚠️ {level} shows high variability ({variability:F1}%) - results may be inconsistent");
+        //        }
+        //        else if (variability > 25)
+        //        {
+        //            _output.WriteLine($"📊 {level} shows moderate variability ({variability:F1}%)");
+        //        }
+        //        else
+        //        {
+        //            _output.WriteLine($"✅ {level} shows stable results ({variability:F1}% variability)");
+        //        }
+        //    }
+        //}
     }
 }

@@ -142,6 +142,21 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
         }
 
         /// <summary>
+        /// 默认系统提示词
+        /// </summary>
+        private static readonly string DefaultSystemPrompt = @"你必须遵循以下硬性规则：
+1) 当且仅当需要调用工具解决用户问题时，当前轮消息必须只返回工具调用（tool_calls），并将 content 置空或不返回任何自然语言。
+2) 如果不需要调用工具，当前轮消息不得返回任何工具调用，仅以自然语言回答。
+3) 不得在包含 tool_calls 的同一条消息中加入解释、道歉、前后缀、思考过程或任何自然语言。
+4) 若需要多个工具，请按需要返回多个 tool_calls；除 tool_calls 外不得返回其它字段内容（content 为空）。
+5) 若无法确定是否需要工具，先不调用工具，直接向用户询问澄清（此时只能自然语言，无 tool_calls）。";
+
+        /// <summary>
+        /// 检查系统消息是否已包含默认提示词的关键标识
+        /// </summary>
+        private static readonly string DefaultPromptMarker = "你必须遵循以下硬性规则：";
+
+        /// <summary>
         /// 设置聊天选项并处理 system prompt
         /// </summary>
         /// <param name="messages">原始消息列表</param>
@@ -157,57 +172,86 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
                 throw new ArgumentException("Messages 中只能包含一条 system message。", nameof(messages));
             }
 
-            if (options is GptOssChatOptions gptOssOptions)
+            // 检查是否已有system message
+            var systemMessageIndex = messagesList.FindIndex(m => m.Role == ChatRole.System);
+            bool hasExistingSystemMessage = systemMessageIndex >= 0;
+            bool alreadyHasDefaultPrompt = false;
+
+            // 如果已有系统消息，检查是否已包含默认提示词
+            if (hasExistingSystemMessage)
             {
-                var reasoningLevel = gptOssOptions.ReasoningLevel switch
-                {
-                    GptOssReasoningLevel.Low => "low",
-                    GptOssReasoningLevel.Medium => "medium", 
-                    GptOssReasoningLevel.High => "high",
-                    _ => "medium"
-                };
-
-                // 构建符合GPT-OSS-120b格式的完整system message
-                var gptOssSystemMessage = $@"You are ChatGPT, a large language model trained by OpenAI.
-Knowledge cutoff: 2024-06
-Current date: {DateTime.UtcNow:yyyy-MM-dd}
-Reasoning: {reasoningLevel}
-# Valid channels: analysis, commentary, final. Channel must be included for every message.
-Calls to these tools must go to the commentary channel: 'functions'.";
-
-                // 检查是否已有system message
-                var systemMessageIndex = messagesList.FindIndex(m => m.Role == ChatRole.System);
+                var existingSystemMessage = messagesList[systemMessageIndex];
+                var existingContent = string.Empty;
                 
-                if (systemMessageIndex >= 0)
+                foreach (var content in existingSystemMessage.Contents)
                 {
-                    // 如果有现有的system message，将其内容合并到GPT-OSS格式中
-                    var existingSystemMessage = messagesList[systemMessageIndex];
-                    var existingContent = string.Empty;
-                    
-                    foreach (var content in existingSystemMessage.Contents)
+                    if (content is TextContent textContent)
                     {
-                        if (content is TextContent textContent)
+                        existingContent += textContent.Text + "\n";
+                    }
+                }
+                
+                // 检查是否已包含默认提示词标识
+                alreadyHasDefaultPrompt = existingContent.Contains(DefaultPromptMarker);
+                
+                // 如果还没有默认提示词，则添加
+                if (!alreadyHasDefaultPrompt)
+                {
+                    var defaultSystemMessage = DefaultSystemPrompt;
+                    
+                    // 如果是 GptOssChatOptions，添加推理级别信息
+                    if (options is GptOssChatOptions gptOssOptions)
+                    {
+                        var reasoningLevel = gptOssOptions.ReasoningLevel switch
                         {
-                            existingContent += textContent.Text + "\n";
-                        }
+                            GptOssReasoningLevel.Low => "low",
+                            GptOssReasoningLevel.Medium => "medium", 
+                            GptOssReasoningLevel.High => "high",
+                            _ => "medium"
+                        };
+
+                        defaultSystemMessage += $"\nReasoning: {reasoningLevel}";
                     }
                     
-                    // 将原有内容作为指令添加到system message中
+                    // 构建完整的系统消息：默认系统消息 + 用户的系统消息
+                    var combinedSystemMessage = defaultSystemMessage;
                     if (!string.IsNullOrWhiteSpace(existingContent.Trim()))
                     {
-                        gptOssSystemMessage += $"\n\n# Additional Instructions\n{existingContent.Trim()}";
+                        combinedSystemMessage += $"\n\n# Additional Instructions\n{existingContent.Trim()}";
                     }
                     
                     // 替换原有的system message
-                    var newSystemMessage = new ChatMessage(ChatRole.System, new List<AIContent> { new TextContent(gptOssSystemMessage) });
+                    var newSystemMessage = new ChatMessage(ChatRole.System, new List<AIContent> { new TextContent(combinedSystemMessage) });
                     messagesList[systemMessageIndex] = newSystemMessage;
                 }
-                else
+            }
+            else
+            {
+                // 如果没有system message，在开头添加默认系统消息
+                var defaultSystemMessage = DefaultSystemPrompt;
+                
+                // 如果是 GptOssChatOptions，添加推理级别信息
+                if (options is GptOssChatOptions gptOssOptions)
                 {
-                    // 如果没有system message，在开头添加新的GPT-OSS格式system message
-                    var newSystemMessage = new ChatMessage(ChatRole.System, new List<AIContent> { new TextContent(gptOssSystemMessage) });
-                    messagesList.Insert(0, newSystemMessage);
+                    var reasoningLevel = gptOssOptions.ReasoningLevel switch
+                    {
+                        GptOssReasoningLevel.Low => "low",
+                        GptOssReasoningLevel.Medium => "medium", 
+                        GptOssReasoningLevel.High => "high",
+                        _ => "medium"
+                    };
+
+                    defaultSystemMessage += $"\nReasoning: {reasoningLevel}";
                 }
+                
+                var newSystemMessage = new ChatMessage(ChatRole.System, new List<AIContent> { new TextContent(defaultSystemMessage) });
+                messagesList.Insert(0, newSystemMessage);
+            }
+
+            // 如果是 GptOssChatOptions 并且有工具，设置工具模式
+            if (options is GptOssChatOptions && options.Tools?.Count > 0)
+            {
+                options.ToolMode = ChatToolMode.Auto;
             }
 
             return messagesList;

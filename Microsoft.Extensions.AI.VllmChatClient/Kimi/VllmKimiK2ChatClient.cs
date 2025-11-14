@@ -1,13 +1,18 @@
 ﻿using Microsoft.Shared.Diagnostics;
-using System.Net.Http.Json;
-using System.Text.RegularExpressions;
-using System.Text.Json;
 using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 
-namespace Microsoft.Extensions.AI
+namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
 {
-    public class VllmQwen3NextChatClient : IChatClient
+    public class VllmKimiK2ChatClient : IChatClient
     {
         private static readonly JsonElement _schemalessJsonResponseFormatValue = JsonDocument.Parse("\"json\"").RootElement;
 
@@ -23,7 +28,7 @@ namespace Microsoft.Extensions.AI
 
         /// <summary>用于与工具调用参数和结果相关的序列化活动的 JsonSerializerOptions 对象</summary>
         private JsonSerializerOptions _toolCallJsonSerializerOptions = AIJsonUtilities.DefaultOptions;
-        public VllmQwen3NextChatClient(string endpoint, string? token = null, string? modelId = "qwen3", HttpClient? httpClient = null)
+        public VllmKimiK2ChatClient(string endpoint, string? token = null, string? modelId = "kimi-k2-thinking", HttpClient? httpClient = null)
         {
             _ = Throw.IfNull(endpoint);
             if (modelId is not null)
@@ -75,7 +80,7 @@ namespace Microsoft.Extensions.AI
                 await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
             }
 
-            //var test = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var test = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var response = (await httpResponse.Content.ReadFromJsonAsync(
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
@@ -92,7 +97,7 @@ namespace Microsoft.Extensions.AI
                 ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
                 ResponseId = response.Id,
                 Usage = ParseVllmChatResponseUsage(response),
-                
+
             };
             return ret;
         }
@@ -137,7 +142,7 @@ namespace Microsoft.Extensions.AI
             string buffer_msg = string.Empty;
             string buffer_name = string.Empty;
             string buffer_params = string.Empty;
-            bool thinking = false; 
+            bool thinking = true;
             string buff_toolcall = string.Empty;
             yield return new ChatResponseUpdate
             {
@@ -148,6 +153,7 @@ namespace Microsoft.Extensions.AI
                 Role = new ChatRole("assistant"),
                 Contents = new List<AIContent>(),
             };
+
 #if NET
             while ((await streamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is { } line)
 #else
@@ -175,8 +181,7 @@ namespace Microsoft.Extensions.AI
                     continue;
                 }
                 string? modelId = chunk.Model ?? _metadata.DefaultModelId;
-
-                thinking = modelId.Contains("thinking") ? true : false;
+                thinking = modelId.Contains("thinking");
 
                 if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
                 {
@@ -187,14 +192,6 @@ namespace Microsoft.Extensions.AI
                     buffer_params += chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Arguments?.ToString() ?? "";
                 }
 
-                ChatResponseUpdate update = new()
-                {
-                    CreatedAt = DateTimeOffset.FromUnixTimeSeconds(chunk.Created).UtcDateTime,
-                    FinishReason = ToFinishReason(chunk.Choices.FirstOrDefault()?.FinishReason),
-                    ModelId = modelId,
-                    ResponseId = responseId,
-                    Role = chunk.Choices.FirstOrDefault()?.Delta.Role is not null ? new ChatRole(chunk.Choices.FirstOrDefault()?.Delta?.Role) : null,
-                };
 
                 if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
                 {
@@ -207,18 +204,19 @@ namespace Microsoft.Extensions.AI
                         yield return BuildTextUpdate(responseId, message.ReasoningContent, thinking);
                         continue;
                     }
+                    thinking = false;
 
                     foreach (var call in message.ToolCalls ?? [])
                     {
                         bool isJsonComplete = false;
                         try
                         {
-                            if (!string.IsNullOrEmpty(buffer_name)&& !string.IsNullOrEmpty(buffer_params))
+                            if (!string.IsNullOrEmpty(buffer_name) && !string.IsNullOrEmpty(buffer_params))
                             {
                                 var obj = JsonConvert.DeserializeObject(buffer_params);
                                 isJsonComplete = ToolcallParser.GetBraceDepth(buffer_params) == 0;
                             }
-                            
+
                         }
                         catch (Exception)
                         {
@@ -226,7 +224,7 @@ namespace Microsoft.Extensions.AI
 
                         if (isJsonComplete)
                         {
-                            funcList.Add( new VllmFunctionToolCall
+                            funcList.Add(new VllmFunctionToolCall
                             {
                                 Name = buffer_name,
                                 Arguments = buffer_params
@@ -273,7 +271,7 @@ namespace Microsoft.Extensions.AI
 
 
         private ChatResponseUpdate BuildTextUpdate(
-        string responseId, string text,bool thinking = false)
+        string responseId, string text, bool thinking = false)
         {
             if (thinking)
             {
@@ -282,8 +280,8 @@ namespace Microsoft.Extensions.AI
                     CreatedAt = DateTimeOffset.Now,
                     ModelId = _metadata.DefaultModelId,
                     ResponseId = responseId,
-                    Role = ChatRole.Assistant,
                     Thinking = thinking,
+                    Role = ChatRole.Assistant,
                     Contents = new List<AIContent> { new TextContent(text) }
                 };
             }
@@ -299,7 +297,6 @@ namespace Microsoft.Extensions.AI
                     Contents = new List<AIContent> { new TextContent(text) }
                 };
             }
-            
         }
 
 
@@ -353,7 +350,7 @@ namespace Microsoft.Extensions.AI
 
             if (string.IsNullOrEmpty(message.Content))
             {
-                foreach(var toolcall in message.ToolCalls ?? [])
+                foreach (var toolcall in message.ToolCalls ?? [])
                 {
                     contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
                     {

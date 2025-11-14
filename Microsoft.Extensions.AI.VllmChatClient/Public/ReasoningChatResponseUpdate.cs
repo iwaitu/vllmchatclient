@@ -10,7 +10,7 @@ namespace Microsoft.Extensions.AI
     public class ReasoningChatResponseUpdate : ChatResponseUpdate
     {
         public bool Thinking { get; set; } = true;
-        public string Reasoning { get; set; }
-        public string Anwser { get; set; }
+        public string Reasoning { get; set; } = "";
+        public string Anwser { get; set; } = "";
     }
 }

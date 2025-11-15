@@ -9,11 +9,11 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, and **DeepSeek-R1** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **Kimi K2** with advanced reasoning capabilities.
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4, GPT-OSS-120B/20B, Qwen3-Next
+- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4, GPT-OSS-120B/20B, Qwen3-Next, Kimi K2
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
 - ✅ **Multiple Deployment Options**: Local vLLM deployment and cloud API support
@@ -47,6 +47,12 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - Supports both `qwen3-next-80b-a3b-thinking` (reasoning output, exposes `ReasoningChatResponse` / streaming `ReasoningChatResponseUpdate`) and `qwen3-next-80b-a3b-instruct` (standard instruct style output without reasoning chain).
 - Unified API: switch model by passing the desired modelId in constructor or per-request via `ChatOptions.ModelId`.
 
+### 🆕 Kimi K2 Support
+- **VllmKimiK2ChatClient** added.
+- Supports `kimi-k2-thinking` (reasoning output) and future instruct variants.
+- Seamless reasoning streaming via `ReasoningChatResponseUpdate` (thinking vs final answer segments).
+- Full function invocation support (automatic or manual tool call handling).
+
 ---
 
 ## 🏗️ Supported Clients
@@ -63,6 +69,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
 | `VllmQwen2507ChatClient` | Cloud API | qwen3-235b-a22b-instruct-2507 | ❌ | ✅ Stream |
 | `VllmQwen2507ReasoningChatClient` | Cloud API | qwen3-235b-a22b-thinking-2507 | ✅ Full | ✅ Stream |
+| `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) | ✅ (thinking model) | ✅ Stream |
 
 ---
 
@@ -208,6 +215,54 @@ await foreach (var update in thinkingClient.GetStreamingResponseAsync(messages))
 // Instruct (single response)
 var resp = await instructClient.GetResponseAsync(messages);
 Console.WriteLine(resp.Text);
+```
+
+### 🆕 Kimi K2 (Thinking Model Streaming + Function Calls)
+
+```csharp
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.AI.VllmChatClient.Kimi;
+
+[Description("获取南宁的天气情况")]
+static string GetWeather() => "现在正在下雨。";
+
+IChatClient kimiClient = new VllmKimiK2ChatClient(
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}",
+    Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY"),
+    "kimi-k2-thinking");
+
+IChatClient client = new ChatClientBuilder(kimiClient)
+    .UseFunctionInvocation()
+    .Build();
+
+var messages = new List<ChatMessage>
+{
+    new(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+    new(ChatRole.User, "南宁火车站在哪里？我出门需要带伞吗？")
+};
+
+ChatOptions options = new()
+{
+    Tools = [AIFunctionFactory.Create(GetWeather)]
+};
+
+string reasoning = string.Empty;
+string answer = string.Empty;
+await foreach (var update in client.GetStreamingResponseAsync(messages, options))
+{
+    if (update is ReasoningChatResponseUpdate r)
+    {
+        if (r.Thinking)
+            reasoning += r.Text; // thinking phase
+        else
+            answer += r.Text; // final answer phase
+    }
+    else
+    {
+        answer += update.Text;
+    }
+}
+Console.WriteLine($"Reasoning: {reasoning}\nAnswer: {answer}");
 ```
 
 ### Qwen3 with Reasoning Toggle

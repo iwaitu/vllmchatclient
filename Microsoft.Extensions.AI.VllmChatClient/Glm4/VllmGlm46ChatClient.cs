@@ -10,9 +10,10 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 
-namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
+namespace Microsoft.Extensions.AI.VllmChatClient.Glm4
 {
-    public class VllmKimiK2ChatClient : IChatClient
+
+    public class VllmGlm46ChatClient : IChatClient
     {
         private static readonly JsonElement _schemalessJsonResponseFormatValue = JsonDocument.Parse("\"json\"").RootElement;
 
@@ -28,7 +29,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
 
         /// <summary>用于与工具调用参数和结果相关的序列化活动的 JsonSerializerOptions 对象</summary>
         private JsonSerializerOptions _toolCallJsonSerializerOptions = AIJsonUtilities.DefaultOptions;
-        public VllmKimiK2ChatClient(string endpoint, string? token = null, string? modelId = "kimi-k2-thinking", HttpClient? httpClient = null)
+        public VllmGlm46ChatClient(string endpoint, string? token = null, string? modelId = "glm-4.6", HttpClient? httpClient = null)
         {
             _ = Throw.IfNull(endpoint);
             if (modelId is not null)
@@ -80,7 +81,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                 await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
             }
 
-            var test = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            //var test = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var response = (await httpResponse.Content.ReadFromJsonAsync(
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
@@ -89,14 +90,12 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
             {
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
-
             var responseMessage = response.Choices.FirstOrDefault()?.Message;
             string reason = string.Empty;
             if (responseMessage != null)
             {
                 reason = responseMessage.ReasoningContent?.ToString() ?? string.Empty;
             }
-
             var ret = new ReasoningChatResponse(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!), reason)
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
@@ -188,7 +187,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                     continue;
                 }
                 string? modelId = chunk.Model ?? _metadata.DefaultModelId;
-                thinking = modelId.Contains("thinking");
+                thinking = true;
 
                 if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
                 {

@@ -1,19 +1,26 @@
 ﻿using Microsoft.Extensions.AI;
+using Microsoft.Extensions.AI.VllmChatClient.Glm4;
 using Microsoft.Extensions.AI.VllmChatClient.Kimi;
+using Microsoft.VisualStudio.TestPlatform.CommunicationUtilities;
+using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Xunit.Abstractions;
 
 namespace VllmChatClient.Test
 {
-
-    public class KimiK2Tests
+    
+    public class Glm46Tests
     {
         private readonly IChatClient _client;
         private readonly ITestOutputHelper _output;
-        private const string MODEL = "kimi-k2-thinking";
+        private const string MODEL = "glm-4.6";
         static int functionCallTime = 0;
 
         [Description("获取南宁的天气情况")]
@@ -27,11 +34,11 @@ namespace VllmChatClient.Test
             return "南宁市青秀区方圆广场北面站前路1号。";
         }
 
-        public KimiK2Tests(ITestOutputHelper output)
+        public Glm46Tests(ITestOutputHelper output)
         {
             _output = output; // 修复 CS8618: 正确初始化 _output 字段
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
-            _client = new VllmKimiK2ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
+            _client = new VllmGlm46ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
         }
 
         [Fact]
@@ -80,13 +87,14 @@ namespace VllmChatClient.Test
                     {
                         anwser += reasoningMessage.Text;
                     }
+                    
                 }
                 else
                 {
                     anwser += message.Text;
                 }
             }
-            
+
             Assert.False(string.IsNullOrEmpty(reason));
             Assert.False(string.IsNullOrEmpty(anwser));
             Assert.Contains("菲菲", anwser);
@@ -272,10 +280,7 @@ namespace VllmChatClient.Test
                     {
                         res += reasoningMessage.Text;
                     }
-                }
-                else
-                {
-                    res += update.Text;
+
                 }
             }
             Assert.False(string.IsNullOrWhiteSpace(res));

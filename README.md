@@ -9,11 +9,11 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **Kimi K2** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **Kimi K2**, **GLM 4.6** with advanced reasoning capabilities.
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4, GPT-OSS-120B/20B, Qwen3-Next, Kimi K2
+- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4 / 4.6, GPT-OSS-120B/20B, Qwen3-Next, Kimi K2
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
 - ✅ **Multiple Deployment Options**: Local vLLM deployment and cloud API support
@@ -27,6 +27,11 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 🔥 Latest Updates
+
+### 🆕 GLM 4.6 Thinking Model Support
+- **VllmGlm46ChatClient** added with full reasoning (thinking) stream separation.
+- Supports `glm-4.6` thinking style output (Reasoning + final answer phases).
+- Compatible with existing tool/function invocation pipeline.
 
 ### 🆕 New GPT-OSS-20B/120B Support
 - **VllmGptOssChatClient** - Support for OpenAI's GPT-OSS-120B model with full reasoning capabilities
@@ -67,6 +72,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
 | `VllmGlmZ1ChatClient` | Local vLLM | GLM-4 | ✅ Full | ✅ Stream |
 | `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
+| `VllmGlm46ChatClient` | Local/Cloud OpenAI compatible | glm-4.6 | ✅ Full | ✅ Stream |
 | `VllmQwen2507ChatClient` | Cloud API | qwen3-235b-a22b-instruct-2507 | ❌ | ✅ Stream |
 | `VllmQwen2507ReasoningChatClient` | Cloud API | qwen3-235b-a22b-thinking-2507 | ✅ Full | ✅ Stream |
 | `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) | ✅ (thinking model) | ✅ Stream |
@@ -115,6 +121,42 @@ docker run -it --gpus all -p 8000:8000 \
 ---
 
 ## 💻 Usage Examples
+
+### 🆕 GLM 4.6 Thinking Stream Example
+
+```csharp
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.AI.VllmChatClient.Glm4;
+
+IChatClient glm46 = new VllmGlm46ChatClient(
+    "http://localhost:8000/{0}/{1}", // or your OpenAI-compatible endpoint
+    null,
+    "glm-4.6");
+
+var messages = new List<ChatMessage>
+{
+    new(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+    new(ChatRole.User, "解释一下快速排序的思想并举一个简单例子。")
+};
+
+string reasoning = string.Empty;
+string answer = string.Empty;
+await foreach (var update in glm46.GetStreamingResponseAsync(messages))
+{
+    if (update is ReasoningChatResponseUpdate r)
+    {
+        if (r.Thinking)
+            reasoning += r.Text; // reasoning phase
+        else
+            answer += r.Text;    // final answer phase
+    }
+    else
+    {
+        answer += update.Text;
+    }
+}
+Console.WriteLine($"Reasoning: {reasoning}\nAnswer: {answer}");
+```
 
 ### 🆕 GPT-OSS-120B with Reasoning (OpenRouter)
 

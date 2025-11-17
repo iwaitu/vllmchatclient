@@ -80,7 +80,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                 await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
             }
 
-            var test = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            //var test = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var response = (await httpResponse.Content.ReadFromJsonAsync(
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
@@ -96,7 +96,11 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
             {
                 reason = responseMessage.ReasoningContent?.ToString() ?? string.Empty;
             }
-
+            var texts = (responseMessage?.Content ?? string.Empty).Split("</think>");
+            if (texts.Length > 1)
+            {
+                reason += texts[0].Trim();
+            }
             var ret = new ReasoningChatResponse(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!), reason)
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
@@ -389,6 +393,10 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                     rest = raw;
                 // ④ 纯文本
                 rest = rest.Trim();
+                if(rest.IndexOf("</think>") > 0)
+                {
+                    rest = rest.Substring(rest.IndexOf("</think>") + 8).Trim();
+                } 
                 if (!string.IsNullOrEmpty(rest))
                     contents.Add(new TextContent(rest));
             }

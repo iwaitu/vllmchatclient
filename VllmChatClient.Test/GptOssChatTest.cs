@@ -12,15 +12,15 @@ namespace VllmChatClient.Test
     {
         private readonly IChatClient _client;
         private readonly ITestOutputHelper _output;
-        //private string ApiToken = Environment.GetEnvironmentVariable("OPEN_ROUTE_API_KEY");
-        private string ApiToken = Environment.GetEnvironmentVariable("VLLM_API_KEY");
+        private string ApiToken = Environment.GetEnvironmentVariable("OPEN_ROUTE_API_KEY");
+        //private string ApiToken = Environment.GetEnvironmentVariable("VLLM_API_KEY");
 
         public GptOssChatTest(ITestOutputHelper output)
         {
             _output = output;
             // Use the actual GPT-OSS client for testing with OpenRouter
-            //_client = new VllmGptOssChatClient("https://openrouter.ai/api/v1", ApiToken, "openai/gpt-oss-120b");
-            _client = new VllmGptOssChatClient("http://localhost:8000/v1", ApiToken, "gpt-oss-120b");
+            _client = new VllmGptOssChatClient("https://openrouter.ai/api/v1", ApiToken, "openai/gpt-oss-120b");
+            //_client = new VllmGptOssChatClient("http://localhost:8000/v1", ApiToken, "gpt-oss-120b");
         }
 
         [Fact]
@@ -37,6 +37,15 @@ namespace VllmChatClient.Test
                 Temperature = 0.5f
             };
             var res = await _client.GetResponseAsync(messages,options);
+            if(res is ReasoningChatResponse response)
+            {
+                _output.WriteLine("=== Reasoning Content ===");
+                _output.WriteLine(response.Reason);
+                _output.WriteLine("=== End of Reasoning ===");
+                _output.WriteLine("=== Final Response ===");
+                _output.WriteLine(response.Text);
+
+            }
             Assert.NotNull(res);
 
             Assert.Equal(1, res.Messages.Count);
@@ -106,24 +115,36 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User, "你是谁？")
             };
 
+            string reason = string.Empty;
             string result = string.Empty;
             await foreach (var update in _client.GetStreamingResponseAsync(messages))
             {
-                if (update.Contents.Count > 0)
+                if(update is ReasoningChatResponseUpdate reasoningUpdate)
                 {
-                    foreach (var content in update.Contents)
+                    if(reasoningUpdate.Thinking)
                     {
-                        if (content is TextContent textContent)
-                        {
-                            result += textContent.Text;
-                        }
+                        // 如果模型在思考，可以选择处理思考内容
+                        reason += reasoningUpdate.Reasoning;
                     }
+                    else
+                    {
+                        result += reasoningUpdate.Text;
+                    }
+                }
+                else
+                {
+                    result += update.Text;
                 }
             }
 
             Assert.NotNull(result);
             Assert.NotEmpty(result);
             Assert.Contains("菲菲", result);
+            _output.WriteLine("=== Reasoning Content ===");
+            _output.WriteLine(reason);
+            _output.WriteLine("=== End of Reasoning ===");
+            _output.WriteLine("=== Final Response ===");
+            _output.WriteLine(result);
         }
 
         //[Fact]

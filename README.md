@@ -26,6 +26,14 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ---
 
+## 本次更新
+
+- 新增 GLM 4.6 思考模型支持：`VllmGlm46ChatClient`，支持推理分段流式输出（思考/答案）与函数调用。
+- 在“支持的客户端”表新增 `VllmGlm46ChatClient` 条目。
+- 新增 GLM 4.6 使用示例（见下文“GLM 4.6 Thinking Stream Example”）。
+
+---
+
 ## 🔥 Latest Updates
 
 ### 🆕 GLM 4.6 Thinking Model Support

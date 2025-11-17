@@ -144,7 +144,12 @@ namespace VllmChatClient.Test
             var lastMessage = res.Messages.LastOrDefault();
             Assert.NotNull(lastMessage);
             var lastText = lastMessage.Contents.OfType<TextContent>().FirstOrDefault()?.Text ?? string.Empty;
-            Assert.True(lastText.Contains("下雨") || lastText.Contains("雨"), $"Unexpected reply: '{lastText}'");
+            if(res is ReasoningChatResponse reasoningResponse)
+            {
+                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
+            }
+            Assert.True(res.Text.Contains("下雨") || res.Text.Contains("雨"), $"Unexpected reply: '{lastText}'");
+            _output.WriteLine($"Response: {res.Text}");
         }
 
         [Fact]

@@ -107,7 +107,10 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
 
-            return new(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!))
+            var responseMessage = response.Choices.FirstOrDefault()?.Message;
+            
+
+            return new ReasoningChatResponse(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!), response.Choices.FirstOrDefault()?.Message?.Reasoning ?? "")
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
                 FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
@@ -641,6 +644,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
                 return new ChatMessage(new ChatRole(message.Role), contents);
 
             var raw = message.Content.Trim();
+
             if (!string.IsNullOrEmpty(raw))
                 contents.Add(new TextContent(raw));
             return new ChatMessage(new ChatRole(message.Role), contents);

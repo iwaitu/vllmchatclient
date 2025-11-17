@@ -84,8 +84,18 @@ namespace Microsoft.Extensions.AI
             {
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
-
-            var ret = new ReasoningChatResponse(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!), response.Choices.FirstOrDefault()?.Message.ReasoningContent?.ToString())
+            var responseMessage = response.Choices.FirstOrDefault()?.Message;
+            string reason = string.Empty;
+            if (responseMessage != null)
+            {
+                reason = responseMessage.ReasoningContent?.ToString() ?? string.Empty;
+            }
+            var texts = (responseMessage?.Content ?? string.Empty).Split("</think>");
+            if (texts.Length > 1)
+            {
+                reason += texts[0].Trim();
+            }
+            var ret = new ReasoningChatResponse(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!), reason)
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
                 FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
@@ -385,6 +395,10 @@ namespace Microsoft.Extensions.AI
                     rest = raw;
                 // ④ 纯文本
                 rest = rest.Trim();
+                if (rest.IndexOf("</think>") > 0)
+                {
+                    rest = rest.Substring(rest.IndexOf("</think>") + 8).Trim();
+                }
                 if (!string.IsNullOrEmpty(rest))
                     contents.Add(new TextContent(rest));
             }

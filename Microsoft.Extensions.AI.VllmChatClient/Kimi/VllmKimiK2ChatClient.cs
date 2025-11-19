@@ -226,7 +226,8 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                         thinking = false;
                         continue;
                     }
-                    buffer_msg += message.Content ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(message.Content) && string.IsNullOrWhiteSpace(message.ReasoningContent)) continue;
+                    buffer_msg += message.Content;
                     var buffer_copy = buffer_msg;
                     var funcList = new List<VllmFunctionToolCall>();
 
@@ -238,6 +239,10 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                         }
                         else
                         {
+                            if (!string.IsNullOrWhiteSpace(message.Content))
+                            {
+                                thinking = false;
+                            }
                             yield return BuildTextUpdate(responseId, message.Content, thinking);
                         }
                         continue;

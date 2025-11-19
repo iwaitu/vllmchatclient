@@ -38,8 +38,10 @@ namespace VllmChatClient.Test
         public KimiK2Tests(ITestOutputHelper output)
         {
             _output = output; // 修复 CS8618: 正确初始化 _output 字段
-            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
-            _client = new VllmKimiK2ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
+            //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            //_client = new VllmKimiK2ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_KIMI_API_KEY");
+            _client = new VllmKimiK2ChatClient("https://api.moonshot.cn/v1/{1}", cloud_apiKey, MODEL);
         }
 
         [Fact]
@@ -273,9 +275,9 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task StreamChatManualFunctionCallTest()
         {
-            IChatClient client = new ChatClientBuilder(_client)
-                .UseFunctionInvocation()
-                .Build();
+            //IChatClient client = new ChatClientBuilder(_client)
+            //    .UseFunctionInvocation()
+            //    .Build();
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
@@ -288,7 +290,7 @@ namespace VllmChatClient.Test
             };
             string res = string.Empty;
             string reason = string.Empty;
-            await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
+            await foreach (var update in _client.GetStreamingResponseAsync(messages, chatOptions))
             {
                 if (update.FinishReason == ChatFinishReason.ToolCalls)
                 {
@@ -340,9 +342,9 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task StreamChatJsonoutput()
         {
-            IChatClient client = new ChatClientBuilder(_client)
-                .UseFunctionInvocation()
-                .Build();
+            //IChatClient client = new ChatClientBuilder(_client)
+            //    .UseFunctionInvocation()
+            //    .Build();
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲。"),
@@ -354,7 +356,7 @@ namespace VllmChatClient.Test
             };
             string res = string.Empty;
             string reason = string.Empty;
-            await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
+            await foreach (var update in _client.GetStreamingResponseAsync(messages, chatOptions))
             {
                 if (update is ReasoningChatResponseUpdate reasoningMessage)
                 {
@@ -461,13 +463,19 @@ namespace VllmChatClient.Test
             }
 
             Assert.NotNull(res);
-            Assert.Single(res.Messages);
-
-            var answerText = res.Messages[0].Contents
-                                   .OfType<TextContent>()
-                                   .FirstOrDefault()?.Text;
-
+            string answerText = string.Empty;
+            if (res is ReasoningChatResponse reasoningResponse)
+            {
+                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
+                _output.WriteLine($"Response: {reasoningResponse.Text}");
+            }
+            else
+            {
+                _output.WriteLine($"Response: {res.Text}");
+            }
+            answerText = res.Text;
             Assert.False(string.IsNullOrWhiteSpace(answerText));
+            Assert.True(answerText.Contains( "100米") == true);
         }
 
         [Fact]

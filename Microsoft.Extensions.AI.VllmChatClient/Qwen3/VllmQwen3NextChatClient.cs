@@ -147,7 +147,7 @@ namespace Microsoft.Extensions.AI
             string buffer_msg = string.Empty;
             string buffer_name = string.Empty;
             string buffer_params = string.Empty;
-            bool thinking = false; 
+            bool thinking = _metadata.DefaultModelId?.Contains("thinking") == true; 
             string buff_toolcall = string.Empty;
             yield return new ChatResponseUpdate
             {
@@ -186,7 +186,7 @@ namespace Microsoft.Extensions.AI
                 }
                 string? modelId = chunk.Model ?? _metadata.DefaultModelId;
 
-                thinking = modelId.Contains("thinking") ? true : false;
+                
 
                 if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
                 {

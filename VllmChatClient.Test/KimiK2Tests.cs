@@ -15,6 +15,7 @@ namespace VllmChatClient.Test
         private readonly ITestOutputHelper _output;
         private const string MODEL = "kimi-k2-thinking";
         static int functionCallTime = 0;
+        
 
         [Description("获取南宁的天气情况")]
         static string GetWeather() => "现在正在下雨。";
@@ -25,6 +26,13 @@ namespace VllmChatClient.Test
         {
             functionCallTime += 1;
             return "南宁市青秀区方圆广场北面站前路1号。";
+        }
+
+        [Description("搜索周边的书店")]
+        static string FindBookStore([Description("需要搜索的具体地址/门牌号")] string dest)
+        {
+            functionCallTime += 1;
+            return "附近100米有一家爱民书店。";
         }
 
         public KimiK2Tests(ITestOutputHelper output)
@@ -121,7 +129,7 @@ namespace VllmChatClient.Test
         }
 
         [Fact]
-        public async Task ChatFunctionCallTest()
+        public async Task ChatSerialFunctionCallTest()
         {
 
             IChatClient client = new ChatClientBuilder(_client)
@@ -130,11 +138,11 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
-                new ChatMessage(ChatRole.User,"我需要带伞吗？")
+                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")               //串行调用两个函数
             };
             ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather)]
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
             };
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
@@ -148,12 +156,44 @@ namespace VllmChatClient.Test
             {
                 _output.WriteLine($"Reason: {reasoningResponse.Reason}");
             }
-            Assert.True(res.Text.Contains("下雨") || res.Text.Contains("雨"), $"Unexpected reply: '{lastText}'");
+            Assert.True(res.Text.Contains("爱民书店") || res.Text.Contains("100米"), $"Unexpected reply: '{lastText}'");  //串行任务
             _output.WriteLine($"Response: {res.Text}");
         }
 
         [Fact]
-        public async Task StreamChatFunctionCallTest()
+        public async Task ChatParallelFunctionCallTest()
+        {
+
+            IChatClient client = new ChatClientBuilder(_client)
+                .UseFunctionInvocation()
+                .Build();
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲。"),
+                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")               //并行调用两个函数
+            };
+            ChatOptions chatOptions = new()
+            {
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
+            };
+            var res = await client.GetResponseAsync(messages, chatOptions);
+            Assert.NotNull(res);
+            Assert.True(res.Messages.Count >= 1);
+
+            // 最后一条回复通常是助手文本，包含天气信息
+            var lastMessage = res.Messages.LastOrDefault();
+            Assert.NotNull(lastMessage);
+            var lastText = lastMessage.Contents.OfType<TextContent>().FirstOrDefault()?.Text ?? string.Empty;
+            if (res is ReasoningChatResponse reasoningResponse)
+            {
+                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
+            }
+            Assert.True(res.Text.Contains("下雨") || res.Text.Contains("雨"), $"Unexpected reply: '{lastText}'");  //并行任务
+            _output.WriteLine($"Response: {res.Text}");
+        }
+
+        [Fact]
+        public async Task StreamChatParallelFunctionCallTest()
         {
             IChatClient client = new ChatClientBuilder(_client)
                 .UseFunctionInvocation()
@@ -166,19 +206,68 @@ namespace VllmChatClient.Test
             };
             ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
             };
             string res = string.Empty;
             string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
-                foreach (var text in update.Contents.OfType<TextContent>())
+                if (update is ReasoningChatResponseUpdate reasoningMessage)
                 {
-                    res += text.Text;
+                    if (reasoningMessage.Thinking)
+                    {
+                        reason += reasoningMessage.Text;
+                    }
+                    else
+                    {
+                        res += reasoningMessage.Text;
+                    }
                 }
             }
 
             Assert.False(string.IsNullOrWhiteSpace(res));
+            Assert.True(res.Contains("下雨") || res.Contains("雨"), $"Unexpected reply: '{res}'");  //并行任务
+            _output.WriteLine($"Reason: {reason}");
+            _output.WriteLine($"Response: {res}");
+        }
+
+        [Fact]
+        public async Task StreamChatSerialFunctionCallTest()
+        {
+            IChatClient client = new ChatClientBuilder(_client)
+                .UseFunctionInvocation()
+                .Build();
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")
+                //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
+            };
+            ChatOptions chatOptions = new()
+            {
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
+            };
+            string res = string.Empty;
+            string reason = string.Empty;
+            await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
+            {
+                if(update is ReasoningChatResponseUpdate reasoningMessage)
+                {
+                    if (reasoningMessage.Thinking)
+                    {
+                        reason += reasoningMessage.Text;
+                    }
+                    else
+                    {
+                        res += reasoningMessage.Text;
+                    }
+                }
+            }
+
+            _output.WriteLine($"Reason: {reason}");
+            _output.WriteLine($"Response: {res}");
+            Assert.False(string.IsNullOrWhiteSpace(res));
+            Assert.True(res.Contains("爱民书店") || res.Contains("100米"), $"Unexpected reply: '{res}'");  //串行任务
         }
 
         [Fact]
@@ -315,52 +404,66 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
-                new ChatMessage(ChatRole.User,"南宁火车站在哪里？"),
+                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。"),
             };
             ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search),AIFunctionFactory.Create(FindBookStore)]
             };
             var res = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
 
-            // 至少应包含一个函数调用
-            var functionCalls = res.Messages[0].Contents.OfType<FunctionCallContent>().ToList();
-            Assert.NotEmpty(functionCalls);
-
-            foreach (var functionCall in functionCalls)
+            while(res.FinishReason == ChatFinishReason.ToolCalls)
             {
-                var funcMsg = new ChatResponse();
-                var msgContent = new ChatMessage();
-                msgContent.Contents.Add(functionCall);
-                funcMsg.Messages.Add(msgContent);
-                messages.AddMessages(funcMsg);
+                var functionCalls = res.Messages[0].Contents.OfType<FunctionCallContent>().ToList();
+                Assert.NotEmpty(functionCalls);
 
-                Assert.NotNull(functionCall);
-                var anwser = string.Empty;
-                if ("GetWeather" == functionCall.Name)
+                foreach (var functionCall in functionCalls)
                 {
-                    anwser = "30度，天气晴朗。";
-                }
-                else
-                {
-                    anwser = "在青秀区方圆广场附近站前路1号。";
-                }
+                    var funcMsg = new ChatResponse();
+                    var msgContent = new ChatMessage();
+                    msgContent.Contents.Add(functionCall);
+                    funcMsg.Messages.Add(msgContent);
+                    messages.AddMessages(funcMsg);
 
-                var functionResult = new FunctionResultContent(functionCall.CallId, anwser);
-                var contentList = new List<AIContent>();
-                contentList.Add(functionResult);
-                var functionResultMessage = new ChatMessage(ChatRole.Tool, contentList);
-                messages.Add(functionResultMessage);
+                    Assert.NotNull(functionCall);
+                    var anwser = string.Empty;
+                    if ("GetWeather" == functionCall.Name)
+                    {
+                        anwser = "30度，天气晴朗。";
+                    }
+                    else if ("FindBookStore" == functionCall.Name)
+                    {
+                        var args = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(
+                            System.Text.Json.JsonSerializer.Serialize(
+                                functionCall.Arguments,
+                                new JsonSerializerOptions
+                                {
+                                    Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                                }));
+                        Assert.NotNull(args);
+                        Assert.True(args.ContainsKey("dest"));
+                        anwser = FindBookStore(args["dest"]);
+                    }
+                    else if ("Search" == functionCall.Name)
+                    {
+                        anwser = "在青秀区方圆广场附近站前路1号。";
+                    }
+
+                    var functionResult = new FunctionResultContent(functionCall.CallId, anwser);
+                    var contentList = new List<AIContent>();
+                    contentList.Add(functionResult);
+                    var functionResultMessage = new ChatMessage(ChatRole.Tool, contentList);
+                    messages.Add(functionResultMessage);
+                }
+                res = await _client.GetResponseAsync(messages, chatOptions);
             }
 
+            Assert.NotNull(res);
+            Assert.Single(res.Messages);
 
-            var result = await _client.GetResponseAsync(messages, chatOptions);
-            Assert.NotNull(result);
-            Assert.Single(result.Messages);
-
-            var answerText = result.Messages[0].Contents
+            var answerText = res.Messages[0].Contents
                                    .OfType<TextContent>()
                                    .FirstOrDefault()?.Text;
 

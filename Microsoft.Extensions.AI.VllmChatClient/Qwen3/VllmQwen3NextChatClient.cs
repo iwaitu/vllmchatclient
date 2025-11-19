@@ -361,16 +361,13 @@ namespace Microsoft.Extensions.AI
         {
             var contents = new List<AIContent>();
 
-            if (string.IsNullOrEmpty(message.Content))
+            foreach (var toolcall in message.ToolCalls ?? [])
             {
-                foreach(var toolcall in message.ToolCalls ?? [])
+                contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
                 {
-                    contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
-                    {
-                        Name = toolcall.Function?.Name ?? "",
-                        Arguments = toolcall.Function?.Arguments?.ToString() ?? "{}"
-                    }));
-                }
+                    Name = toolcall.Function?.Name ?? "",
+                    Arguments = toolcall.Function?.Arguments?.ToString() ?? "{}"
+                }));
             }
 
             // ① 去掉 <think> 标记

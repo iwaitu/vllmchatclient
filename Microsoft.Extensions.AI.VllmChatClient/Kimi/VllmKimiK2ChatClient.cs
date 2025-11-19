@@ -101,7 +101,23 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
             {
                 reason += texts[0].Trim();
             }
-            var ret = new ReasoningChatResponse(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!), reason)
+            var retMessage = FromVllmMessage(response.Choices.FirstOrDefault()?.Message!);
+            //判断retMessage中是否包含toolcall内容，如果包含，则返回true
+            bool hasToolCall = retMessage.Contents.Any(c => c is FunctionCallContent);
+            //如果包含toolcall内容，则将FinishReason 设置为ToolCalls
+            if (hasToolCall)
+            {
+                return new ReasoningChatResponse(retMessage, reason)
+                {
+                    CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
+                    FinishReason = ChatFinishReason.ToolCalls,
+                    ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
+                    ResponseId = response.Id,
+                    Usage = ParseVllmChatResponseUsage(response),
+                };
+            }
+
+            return new ReasoningChatResponse(retMessage, reason)
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
                 FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
@@ -110,7 +126,6 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                 Usage = ParseVllmChatResponseUsage(response),
 
             };
-            return ret;
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null)
@@ -153,10 +168,10 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
             string buffer_msg = string.Empty;
             string buffer_name = string.Empty;
             string buffer_params = string.Empty;
-            bool thinking = true;
+            bool thinking = _metadata.DefaultModelId?.Contains("thinking") == true;
             string buff_toolcall = string.Empty;
             yield return new ChatResponseUpdate
-            {
+            {   
                 CreatedAt = DateTimeOffset.Now,
                 FinishReason = null,
                 ModelId = options?.ModelId ?? _metadata.DefaultModelId,
@@ -192,7 +207,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                     continue;
                 }
                 string? modelId = chunk.Model ?? _metadata.DefaultModelId;
-                thinking = modelId.Contains("thinking");
+                
 
                 if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
                 {
@@ -206,16 +221,28 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
 
                 if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
                 {
+                    if (message.Content != null && message.Content.Contains("</think>"))
+                    {
+                        thinking = false;
+                        continue;
+                    }
                     buffer_msg += message.Content ?? string.Empty;
                     var buffer_copy = buffer_msg;
                     var funcList = new List<VllmFunctionToolCall>();
 
-                    if (message.ReasoningContent != null)
+                    if ((message.ReasoningContent != null || thinking == true) && message.ToolCalls == null)
                     {
-                        yield return BuildTextUpdate(responseId, message.ReasoningContent, thinking);
+                        if (message.ReasoningContent != null)
+                        {
+                            yield return BuildTextUpdate(responseId, message.ReasoningContent, thinking);
+                        }
+                        else
+                        {
+                            yield return BuildTextUpdate(responseId, message.Content, thinking);
+                        }
                         continue;
                     }
-                    thinking = false;
+                    
 
                     foreach (var call in message.ToolCalls ?? [])
                     {
@@ -253,6 +280,8 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                         buffer_copy = string.Empty; // 清空已消费部分
                         continue;                  // 继续 while，等待 DONE 或最终文本
                     }
+
+                    
 
                     // D) 普通文本
                     //bool jsonIncomplete = ToolcallParser.GetBraceDepth(buffer_copy) > 0;
@@ -359,16 +388,13 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
         {
             var contents = new List<AIContent>();
 
-            if (string.IsNullOrEmpty(message.Content))
+            foreach (var toolcall in message.ToolCalls ?? [])
             {
-                foreach (var toolcall in message.ToolCalls ?? [])
+                contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
                 {
-                    contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
-                    {
-                        Name = toolcall.Function?.Name ?? "",
-                        Arguments = toolcall.Function?.Arguments?.ToString() ?? "{}"
-                    }));
-                }
+                    Name = toolcall.Function?.Name ?? "",
+                    Arguments = toolcall.Function?.Arguments?.ToString() ?? "{}"
+                }));
             }
 
             // ① 去掉 <think> 标记

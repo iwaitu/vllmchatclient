@@ -31,6 +31,8 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - 新增 GLM 4.6 思考模型支持：`VllmGlm46ChatClient`，支持推理分段流式输出（思考/答案）与函数调用。
 - 在“支持的客户端”表新增 `VllmGlm46ChatClient` 条目。
 - 新增 GLM 4.6 使用示例（见下文“GLM 4.6 Thinking Stream Example”）。
+- 强化 Qwen3-Next 能力：新增“串行/并行函数调用”示例、手动工具编排的流式调用示例、以及严格的 JSON 纯文本输出（无 codeblock）示例。
+- 新增标签提取示例（基于 JSON 解析与正则匹配）。
 
 ---
 
@@ -55,10 +57,11 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - **VllmQwen2507ChatClient** - For qwen3-235b-a22b-instruct-2507 (standard)
 - **VllmQwen2507ReasoningChatClient** - For qwen3-235b-a22b-thinking-2507 (with reasoning)
 
-### 🆕 Qwen3-Next 80B Models (Reasoning + Instruct)
+### 🆕 Qwen3-Next 80B (Thinking vs Instruct)
 - **VllmQwen3NextChatClient** added.
 - Supports both `qwen3-next-80b-a3b-thinking` (reasoning output, exposes `ReasoningChatResponse` / streaming `ReasoningChatResponseUpdate`) and `qwen3-next-80b-a3b-instruct` (standard instruct style output without reasoning chain).
 - Unified API: switch model by passing the desired modelId in constructor or per-request via `ChatOptions.ModelId`.
+- New examples: Serial/Parallel tool calls, manual tool orchestration in streaming, JSON-only output formatting.
 
 ### 🆕 Kimi K2 Support
 - **VllmKimiK2ChatClient** added.
@@ -267,52 +270,95 @@ var resp = await instructClient.GetResponseAsync(messages);
 Console.WriteLine(resp.Text);
 ```
 
-### 🆕 Kimi K2 (Thinking Model Streaming + Function Calls)
+### 🆕 Qwen3-Next Advanced Function Calls (Serial / Parallel / Manual Streaming)
 
 ```csharp
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.AI.VllmChatClient.Kimi;
 
 [Description("获取南宁的天气情况")]
 static string GetWeather() => "现在正在下雨。";
 
-IChatClient kimiClient = new VllmKimiK2ChatClient(
+[Description("Searh")]
+static string Search([Description("需要搜索的问题")] string question) => "南宁市青秀区方圆广场北面站前路1号。";
+
+IChatClient baseClient = new VllmQwen3NextChatClient(
     "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}",
     Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY"),
-    "kimi-k2-thinking");
+    "qwen3-next-80b-a3b-thinking");
 
-IChatClient client = new ChatClientBuilder(kimiClient)
+IChatClient client = new ChatClientBuilder(baseClient)
     .UseFunctionInvocation()
     .Build();
 
 var messages = new List<ChatMessage>
 {
-    new(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+    new(ChatRole.System, "你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
     new(ChatRole.User, "南宁火车站在哪里？我出门需要带伞吗？")
 };
 
-ChatOptions options = new()
+ChatOptions opts = new()
 {
-    Tools = [AIFunctionFactory.Create(GetWeather)]
+    Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
 };
 
-string reasoning = string.Empty;
-string answer = string.Empty;
-await foreach (var update in client.GetStreamingResponseAsync(messages, options))
+// Parallel tool calls example (also supports serial depending on prompt)
+await foreach (var update in client.GetStreamingResponseAsync(messages, opts))
 {
     if (update is ReasoningChatResponseUpdate r)
     {
-        if (r.Thinking)
-            reasoning += r.Text; // thinking phase
-        else
-            answer += r.Text; // final answer phase
+        Console.Write(r.Text);
+    }
+    else
+    {
+        Console.Write(update.Text);
+    }
+}
+
+// Manual streaming tool orchestration
+messages = new()
+{
+    new(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+    new(ChatRole.User, "南宁火车站在哪里？我出门需要带伞吗？")
+};
+string answer = string.Empty;
+await foreach (var update in client.GetStreamingResponseAsync(messages, opts))
+{
+    if (update.FinishReason == ChatFinishReason.ToolCalls)
+    {
+        foreach (var fc in update.Contents.OfType<FunctionCallContent>())
+        {
+            messages.Add(new ChatMessage(ChatRole.Assistant, [fc]));
+            if (fc.Name == "GetWeather")
+            {
+                messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(fc.CallId, GetWeather())]));
+            }
+            else if (fc.Name == "Search")
+            {
+                messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(fc.CallId, Search("南宁火车站"))]));
+            }
+        }
     }
     else
     {
         answer += update.Text;
     }
 }
-Console.WriteLine($"Reasoning: {reasoning}\nAnswer: {answer}");
+Console.WriteLine(answer);
+```
+
+### 🆕 JSON-only Output (No Code Block)
+
+```csharp
+using Microsoft.Extensions.AI;
+
+var messages = new List<ChatMessage>
+{
+    new(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+    new(ChatRole.User, "请输出json格式的问候语，不要使用 codeblock。")
+};
+var options = new ChatOptions { MaxOutputTokens = 100 };
+var resp = await baseClient.GetResponseAsync(messages, options);
+var text = resp.Text; // Ensure no ``` code blocks and extract JSON via regex if needed
 ```
 
 ### Qwen3 with Reasoning Toggle
@@ -324,11 +370,11 @@ using Microsoft.Extensions.AI;
 static string GetWeather() => Random.Shared.NextDouble() > 0.1 ? "It's sunny" : "It's raining";
 
 IChatClient vllmclient = new VllmQwen3ChatClient("http://localhost:8000/{0}/{1}", null, "qwen3");
-IChatClient client = new ChatClientBuilder(vllmclient)
+IChatClient client2 = new ChatClientBuilder(vllmclient)
     .UseFunctionInvocation()
     .Build();
 
-var messages = new List<ChatMessage>
+var messages2 = new List<ChatMessage>
 {
     new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
     new ChatMessage(ChatRole.User, "今天天气如何？")
@@ -341,7 +387,7 @@ Qwen3ChatOptions chatOptions = new()
 };
 
 string res = string.Empty;
-await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
+await foreach (var update in client2.GetStreamingResponseAsync(messages2, chatOptions))
 {
     res += update.Text;
 }
@@ -355,15 +401,15 @@ using Microsoft.Extensions.AI;
 [Description("Gets the weather")]
 static string GetWeather() => Random.Shared.NextDouble() > 0.5 ? "It's sunny" : "It's raining";
 
-IChatClient vllmclient = new VllmQwqChatClient("http://localhost:8000/{0}/{1}", null, "qwq");
+IChatClient vllmclient2 = new VllmQwqChatClient("http://localhost:8000/{0}/{1}", null, "qwq");
 
-var messages = new List<ChatMessage>
+var messages3 = new List<ChatMessage>
 {
     new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
     new ChatMessage(ChatRole.User, "今天天气如何？")
 };
 
-ChatOptions chatOptions = new()
+ChatOptions chatOptions2 = new()
 {
     Tools = [AIFunctionFactory.Create(GetWeather)]
 };
@@ -375,7 +421,7 @@ private async Task<(string answer, string reasoning)> StreamChatResponseAsync(
     string answer = string.Empty;
     string reasoning = string.Empty;
     
-    await foreach (var update in vllmclient.GetStreamingResponseAsync(messages, chatOptions))
+    await foreach (var update in vllmclient2.GetStreamingResponseAsync(messages, chatOptions))
     {
         if (update is ReasoningChatResponseUpdate reasoningUpdate)
         {
@@ -396,7 +442,7 @@ private async Task<(string answer, string reasoning)> StreamChatResponseAsync(
     return (answer, reasoning);
 }
 
-var (answer, reasoning) = await StreamChatResponseAsync(messages, chatOptions);
+var (answer3, reasoning3) = await StreamChatResponseAsync(messages3, chatOptions2);
 ```
 
 ### DeepSeek-R1 with Reasoning
@@ -404,21 +450,21 @@ var (answer, reasoning) = await StreamChatResponseAsync(messages, chatOptions);
 ```csharp
 using Microsoft.Extensions.AI;
 
-IChatClient client = new VllmDeepseekR1ChatClient(
+IChatClient client3 = new VllmDeepseekR1ChatClient(
     "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", 
     "your-api-key", 
     "deepseek-r1");
 
-var messages = new List<ChatMessage>
+var messages4 = new List<ChatMessage>
 {
     new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
     new ChatMessage(ChatRole.User, "你是谁？")
 };
 
-string res = string.Empty;
+string res4 = string.Empty;
 string think = string.Empty;
 
-await foreach (ReasoningChatResponseUpdate update in client.GetStreamingResponseAsync(messages))
+await foreach (ReasoningChatResponseUpdate update in client3.GetStreamingResponseAsync(messages4))
 {
     if (update.Thinking)
     {
@@ -426,7 +472,7 @@ await foreach (ReasoningChatResponseUpdate update in client.GetStreamingResponse
     }
     else
     {
-        res += update.Text;
+        res4 += update.Text;
     }
 }
 ```
@@ -467,13 +513,13 @@ static string Search([Description("Search query")] string query)
     return "Location found: Beijing, China";
 }
 
-ChatOptions options = new()
+ChatOptions options2 = new()
 {
     Tools = [AIFunctionFactory.Create(Search)],
     Temperature = 0.7f
 };
 
-await foreach (var update in client.GetStreamingResponseAsync(messages, options))
+await foreach (var update in client.GetStreamingResponseAsync(messages, options2))
 {
     // Handle function calls and responses in real-time
     foreach (var content in update.Contents)

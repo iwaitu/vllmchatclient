@@ -9,11 +9,11 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **Kimi K2**, **GLM 4.6** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **Kimi K2**, **GLM 4.6**, **Gemini 3** with advanced reasoning capabilities.
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4 / 4.6, GPT-OSS-120B/20B, Qwen3-Next, Kimi K2
+- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4 / 4.6, GPT-OSS-120B/20B, Qwen3-Next, Kimi K2, Gemini 3
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
 - ✅ **Multiple Deployment Options**: Local vLLM deployment and cloud API support
@@ -33,6 +33,12 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - 新增 GLM 4.6 使用示例（见下文“GLM 4.6 Thinking Stream Example”）。
 - 强化 Qwen3-Next 能力：新增“串行/并行函数调用”示例、手动工具编排的流式调用示例、以及严格的 JSON 纯文本输出（无 codeblock）示例。
 - 新增标签提取示例（基于 JSON 解析与正则匹配）。
+- 新增 Gemini 3 支持（`VllmGemini3ChatClient`）：
+  - 文本与流式响应、推理级别 Normal/Low
+  - 工具调用（单个/并行/自动执行/流式）完整测试通过
+  - 新增调试测试：`Gemini3Test`、`GeminiDebugTest`（含多轮 thoughtSignature 调试）
+  - 新增文档：`docs/Gemini3ReasoningExplanation.md`、`docs/Gemini3FunctionCallSupport.md`、`docs/Gemini3DebugTestGuide.md`、`docs/Gemini3FunctionCallDebugGuide.md`、`docs/Gemini3FunctionCallTestResults.md`
+  - 说明：基于当前测试，函数调用无需显式回传 thoughtSignature，仍可正常完成多轮调用（详见文档）
 
 ---
 
@@ -69,6 +75,12 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - Seamless reasoning streaming via `ReasoningChatResponseUpdate` (thinking vs final answer segments).
 - Full function invocation support (automatic or manual tool call handling).
 
+### 🆕 Gemini 3 Support & Tool Calling
+- **VllmGemini3ChatClient** added (Google Gemini API)。
+- Features: text & streaming, ReasoningLevel (Normal/Low), full tool calling (single / parallel / automatic / streaming)。
+- Tests: `Gemini3Test` 全部通过（含多轮与并行工具调用）、`GeminiDebugTest` 覆盖原生 API 思维签名与多轮函数调用调试。
+- Docs: 详见 `docs/Gemini3*` 文档合集。
+
 ---
 
 ## 🏗️ Supported Clients
@@ -80,6 +92,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3-next-80b-a3b-(thinking/instruct) | ✅ (thinking model) | ✅ Stream |
 | `VllmQwqChatClient` | Local vLLM | QwQ-32B | ✅ Full | ✅ Stream |
 | `VllmGemmaChatClient` | Local vLLM | Gemma3-27B | ❌ | ✅ Stream |
+| `VllmGemini3ChatClient` | Cloud API (Google Gemini) | gemini-3-pro-preview | Signature (hidden) | ✅ Stream |
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
 | `VllmGlmZ1ChatClient` | Local vLLM | GLM-4 | ✅ Full | ✅ Stream |
 | `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
@@ -87,6 +100,8 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmQwen2507ChatClient` | Cloud API | qwen3-235b-a22b-instruct-2507 | ❌ | ✅ Stream |
 | `VllmQwen2507ReasoningChatClient` | Cloud API | qwen3-235b-a22b-thinking-2507 | ✅ Full | ✅ Stream |
 | `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) | ✅ (thinking model) | ✅ Stream |
+
+> 注：Gemini 3 的推理采用加密的 thought signature，不输出可读推理文本；函数调用在当前测试中无需显式回传签名亦可完成多轮调用。
 
 ---
 
@@ -555,7 +570,7 @@ await foreach (var update in client.GetStreamingResponseAsync(messages, options2
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit issues, feature requests, or pull requests.
+Contributions are welcome! Please feel free to submit issues, feature requests, or pull requests。
 
 ---
 

@@ -226,29 +226,31 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                         thinking = false;
                         continue;
                     }
-                    if (string.IsNullOrWhiteSpace(message.Content) && string.IsNullOrWhiteSpace(message.ReasoningContent)) continue;
+
                     buffer_msg += message.Content;
                     var buffer_copy = buffer_msg;
                     var funcList = new List<VllmFunctionToolCall>();
 
-                    if ((message.ReasoningContent != null || thinking == true) && message.ToolCalls == null)
+                    if ( !(string.IsNullOrWhiteSpace(message.Content) && string.IsNullOrWhiteSpace(message.ReasoningContent)))
                     {
-                        if (message.ReasoningContent != null)
+                        if ((message.ReasoningContent != null || thinking == true) && message.ToolCalls == null)
                         {
-                            yield return BuildTextUpdate(responseId, message.ReasoningContent, thinking);
-                        }
-                        else
-                        {
-                            if (!string.IsNullOrWhiteSpace(message.Content))
+                            if (message.ReasoningContent != null)
                             {
-                                thinking = false;
+                                yield return BuildTextUpdate(responseId, message.ReasoningContent, thinking);
                             }
-                            yield return BuildTextUpdate(responseId, message.Content, thinking);
+                            else
+                            {
+                                if (!string.IsNullOrWhiteSpace(message.Content))
+                                {
+                                    thinking = false;
+                                }
+                                yield return BuildTextUpdate(responseId, message.Content, thinking);
+                            }
+                            continue;
                         }
-                        continue;
                     }
                     
-
                     foreach (var call in message.ToolCalls ?? [])
                     {
                         bool isJsonComplete = false;
@@ -277,6 +279,10 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                         }
                     }
 
+                    // A) 已闭合的 <tool_call>…
+                    ToolcallParser.TryFlushClosedToolCallBlocks(ref buffer_copy, out var tcalls);
+                    funcList.AddRange(tcalls);
+
                     if (funcList.Count > 0)
                     {
                         foreach (var call in funcList)
@@ -289,7 +295,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                     
 
                     // D) 普通文本
-                    //bool jsonIncomplete = ToolcallParser.GetBraceDepth(buffer_copy) > 0;
+                    bool jsonIncomplete = ToolcallParser.GetBraceDepth(buffer_copy) > 0;
                     bool inToolCallBlock = ToolcallParser.IsInsideIncompleteToolCall(buffer_copy);
                     bool isUnclosed = ToolcallParser.HasUnclosedToolCall(buffer_msg);
 
@@ -297,7 +303,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                         funcList.Count == 0 &&                       // 本帧未输出工具调用
                         !string.IsNullOrEmpty(message.Content))
                     {
-                        if (message.Content == "<")
+                        if (message.Content == "<tool")
                         {
                             buff_toolcall += message.Content;
                         }

@@ -38,10 +38,10 @@ namespace VllmChatClient.Test
         public KimiK2Tests(ITestOutputHelper output)
         {
             _output = output; // 修复 CS8618: 正确初始化 _output 字段
-            //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
-            //_client = new VllmKimiK2ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
-            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_KIMI_API_KEY");
-            _client = new VllmKimiK2ChatClient("https://api.moonshot.cn/v1/{1}", cloud_apiKey, MODEL);
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            _client = new VllmKimiK2ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
+            //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_KIMI_API_KEY");
+            //_client = new VllmKimiK2ChatClient("https://api.moonshot.cn/{0}/{1}", cloud_apiKey, MODEL);
         }
 
         [Fact]
@@ -202,7 +202,7 @@ namespace VllmChatClient.Test
                 .Build();
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
@@ -241,7 +241,7 @@ namespace VllmChatClient.Test
                 .Build();
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };

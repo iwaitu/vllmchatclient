@@ -1,6 +1,9 @@
 ﻿using Microsoft.Extensions.AI;
 using System.ComponentModel;
+using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using Xunit.Abstractions;
 
 namespace VllmChatClient.Test
 {
@@ -9,19 +12,115 @@ namespace VllmChatClient.Test
     {
         private readonly IChatClient _client;
         static int functionCallTime = 0;
-        public Qwen3ChatTest()
+        private readonly ITestOutputHelper _output;
+
+        // 端点和密钥配置
+        
+        private const string Endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}";
+        private string ApiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY") ?? "";
+        //private const string ModelId = "Qwen/Qwen3-32B";
+        private const string ModelId = "qwen3-32b";
+
+
+        public Qwen3ChatTest(ITestOutputHelper testOutput)
         {
-            _client = new VllmQwen3ChatClient("http://localhost:8000/v1/{1}", "", "qwen3");
+            _client = new VllmQwen3ChatClient(Endpoint, ApiKey, ModelId);
+            _output = testOutput;
         }
 
-
+        /// <summary>
+        /// 使用 HttpClient 直接测试端点和 API Key 是否可用
+        /// </summary>
+        [Fact]
+        public async Task TestEndpointWithHttpClient()
+        {
+            // 构建实际的 API 端点 URL
+            string apiUrl = string.Format(Endpoint, "v1", "chat/completions");
+            
+            using var httpClient = new HttpClient();
+            
+            // 设置授权头
+            httpClient.DefaultRequestHeaders.Authorization = 
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ApiKey);
+            
+            // 构建简单的聊天请求
+            var requestPayload = new
+            {
+                model = ModelId,
+                messages = new[]
+                {
+                    new { role = "user", content = "你好" }
+                },
+                stream = false,
+                temperature = 0.7
+            };
+            
+            try
+            {
+                // 发送 POST 请求
+                var response = await httpClient.PostAsJsonAsync(apiUrl, requestPayload);
+                
+                // 验证响应状态
+                Assert.True(response.IsSuccessStatusCode, 
+                    $"API 请求失败。状态码: {response.StatusCode}, 原因: {response.ReasonPhrase}");
+                
+                // 读取响应内容
+                var responseContent = await response.Content.ReadAsStringAsync();
+                Assert.NotEmpty(responseContent);
+                
+                // 解析 JSON 响应
+                using var jsonDoc = JsonDocument.Parse(responseContent);
+                var root = jsonDoc.RootElement;
+                
+                // 验证响应结构
+                Assert.True(root.TryGetProperty("choices", out var choices), "响应缺少 'choices' 字段");
+                Assert.True(choices.GetArrayLength() > 0, "choices 数组为空");
+                
+                // 提取回复内容
+                var firstChoice = choices[0];
+                Assert.True(firstChoice.TryGetProperty("message", out var message), "缺少 'message' 字段");
+                Assert.True(message.TryGetProperty("content", out var content), "缺少 'content' 字段");
+                
+                var replyText = content.GetString();
+                Assert.False(string.IsNullOrWhiteSpace(replyText), "模型回复内容为空");
+                
+                // 输出测试结果（用于调试）
+                Console.WriteLine($"✓ 端点连接成功: {apiUrl}");
+                Console.WriteLine($"✓ API Key 验证通过");
+                Console.WriteLine($"✓ 模型回复: {replyText}");
+                
+                // 验证回复包含常见的问候语关键词
+                var containsGreeting = replyText.Contains("你好") || 
+                                       replyText.Contains("您好") || 
+                                       replyText.Contains("Hi") ||
+                                       replyText.Contains("Hello") ||
+                                       replyText.Contains("帮助") ||
+                                       replyText.Contains("什么") ||
+                                       replyText.Contains("菲菲");
+                
+                Assert.True(containsGreeting, 
+                    $"模型回复似乎不是有效的问候响应。实际回复: {replyText}");
+            }
+            catch (HttpRequestException ex)
+            {
+                Assert.Fail($"HTTP 请求异常: {ex.Message}。请检查端点 URL 和网络连接。");
+            }
+            catch (JsonException ex)
+            {
+                Assert.Fail($"JSON 解析失败: {ex.Message}。响应格式可能不正确。");
+            }
+            catch (Exception ex)
+            {
+                Assert.Fail($"测试失败: {ex.GetType().Name} - {ex.Message}");
+            }
+        }
 
         [Fact]
         public async Task ChatTest()
         {
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲 /think"),
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲。"),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
             var options = new Qwen3ChatOptions
@@ -91,13 +190,14 @@ namespace VllmChatClient.Test
             string res = string.Empty;
             var options = new Qwen3ChatOptions
             {
-                NoThinking = true,
+                NoThinking = false,
             };
             await foreach (var update in _client.GetStreamingResponseAsync(messages, options))
             {
                 res += update;
             }
             Assert.True(res != null);
+            _output.WriteLine(res);
         }
 
         [Fact]
@@ -117,10 +217,30 @@ namespace VllmChatClient.Test
                 NoThinking = false
             };
             string res = string.Empty;
+            string reasoning = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
-                res += update;
+                if(update is ReasoningChatResponseUpdate reasoningUpdate)
+                {
+                    if (reasoningUpdate.Thinking)
+                    {
+                        reasoning += reasoningUpdate.Text;
+                    }
+                    else
+                    {
+                        res += reasoningUpdate.Text;
+                    }
+                }
+                else
+                {
+                    res += update.Text;
+                }
+                    
             }
+            _output.WriteLine("思考过程：");
+            _output.WriteLine(reasoning);
+            _output.WriteLine("最终回答：");
+            _output.WriteLine(res);
             Assert.True(res != null);
         }
 

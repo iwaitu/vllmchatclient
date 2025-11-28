@@ -1146,11 +1146,14 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 
                 foreach (var tool in tools.OfType<AIFunction>())
                 {
+                    // 清理并规范化 JSON Schema，确保所有 type 字段都有有效值
+                    var cleanedSchema = CleanAndNormalizeSchema(tool.JsonSchema);
+                    
                     functionDeclarations.Add(new GeminiFunctionDeclaration
                     {
                         Name = tool.Name,
                         Description = tool.Description,
-                        Parameters = System.Text.Json.JsonSerializer.Deserialize<object>(tool.JsonSchema)
+                        Parameters = cleanedSchema
                     });
                 }
 
@@ -1164,6 +1167,136 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
             }
 
             return request;
+        }
+
+        /// <summary>
+        /// 清理和规范化 JSON Schema，确保所有 type 字段都有有效值
+        /// Gemini API 要求 Schema 中的所有 properties 必须有明确的 type 字段
+        /// </summary>
+        private static object CleanAndNormalizeSchema(JsonElement jsonSchemaElement)
+        {
+            try
+            {
+                // 递归清理 Schema
+                var cleaned = CleanSchemaElement(jsonSchemaElement);
+                return cleaned ?? new object();
+            }
+            catch
+            {
+                // 如果解析失败，返回一个最小化的有效 Schema
+                return new Dictionary<string, object?>
+                {
+                    ["type"] = "object",
+                    ["properties"] = new Dictionary<string, object?>()
+                };
+            }
+        }
+
+        /// <summary>
+        /// 递归清理 Schema 元素，确保所有节点都有有效的 type
+        /// </summary>
+        private static object? CleanSchemaElement(JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    var obj = new Dictionary<string, object?>();
+                    bool hasType = false;
+                    
+                    foreach (var prop in element.EnumerateObject())
+                    {
+                        if (prop.Name == "type")
+                        {
+                            hasType = true;
+                            // 确保 type 不为空字符串
+                            var typeValue = prop.Value.GetString();
+                            if (!string.IsNullOrEmpty(typeValue))
+                            {
+                                obj["type"] = typeValue;
+                            }
+                            else
+                            {
+                                // 如果 type 为空，默认为 string
+                                obj["type"] = "string";
+                            }
+                        }
+                        else if (prop.Name == "properties")
+                        {
+                            // 递归处理 properties
+                            var cleanedProps = CleanSchemaElement(prop.Value);
+                            if (cleanedProps != null)
+                            {
+                                obj["properties"] = cleanedProps;
+                            }
+                        }
+                        else if (prop.Name == "items")
+                        {
+                            // 递归处理 array items
+                            var cleanedItems = CleanSchemaElement(prop.Value);
+                            if (cleanedItems != null)
+                            {
+                                obj["items"] = cleanedItems;
+                            }
+                        }
+                        else
+                        {
+                            // 其他字段直接复制
+                            obj[prop.Name] = CleanSchemaElement(prop.Value);
+                        }
+                    }
+                    
+                    // 如果是 properties 对象的子对象且没有 type，添加默认 type
+                    if (!hasType && obj.Count > 0 && !obj.ContainsKey("enum"))
+                    {
+                        // 根据其他字段推断类型
+                        if (obj.ContainsKey("properties"))
+                        {
+                            obj["type"] = "object";
+                        }
+                        else if (obj.ContainsKey("items"))
+                        {
+                            obj["type"] = "array";
+                        }
+                        else if (obj.ContainsKey("enum"))
+                        {
+                            obj["type"] = "string";
+                        }
+                    }
+                    
+                    return obj;
+                    
+                case JsonValueKind.Array:
+                    var arr = new List<object?>();
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        arr.Add(CleanSchemaElement(item));
+                    }
+                    return arr;
+                    
+                case JsonValueKind.String:
+                    var strValue = element.GetString();
+                    // 确保字符串不为空
+                    return string.IsNullOrEmpty(strValue) ? null : strValue;
+                    
+                case JsonValueKind.Number:
+                    if (element.TryGetInt32(out var intVal))
+                        return intVal;
+                    if (element.TryGetDouble(out var doubleVal))
+                        return doubleVal;
+                    return element.GetDecimal();
+                    
+                case JsonValueKind.True:
+                    return true;
+                    
+                case JsonValueKind.False:
+                    return false;
+                    
+                case JsonValueKind.Null:
+                    return null;
+                    
+                default:
+                    return null;
+            }
         }
 
         /// <summary>

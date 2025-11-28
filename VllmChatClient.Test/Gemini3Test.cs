@@ -294,10 +294,7 @@ namespace VllmChatClient.Test
             {
                 ReasoningLevel = GeminiReasoningLevel.Low,
                 Temperature = 1.0f,
-                Tools = new List<AITool>
-                {
-                    AIFunctionFactory.Create(GetWeather)
-                }
+                Tools = [AIFunctionFactory.Create(GetWeather)]
             };
 
             try
@@ -688,6 +685,205 @@ namespace VllmChatClient.Test
                 _output.WriteLine($"\n❌ Error: {ex.Message}");
                 throw;
             }
+        }
+
+        /// <summary>
+        /// 测试多轮工具调用 - 使用 Low Reasoning Level
+        /// 验证在低推理级别下，模型能否正确处理需要多次函数调用的复杂场景
+        /// </summary>
+        [Fact]
+        public async Task FunctionCall_MultiTurn_LowReasoning()
+        {
+            if (string.IsNullOrEmpty(_apiKey))
+            {
+                _output.WriteLine("Skipping test: GEMINI_API_KEY environment variable not set");
+                return;
+            }
+
+            var client = new VllmGemini3ChatClient(
+                "https://generativelanguage.googleapis.com/v1beta",
+                _apiKey,
+                "gemini-3-pro-preview"
+            );
+
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.User, "我明天要去北京出差，请帮我查看天气并告诉我需要带什么")
+            };
+
+            var options = new GeminiChatOptions
+            {
+                ReasoningLevel = GeminiReasoningLevel.Low,  // 使用低推理级别
+                Temperature = 0.8f,
+                Tools = new List<AITool>
+                {
+                    AIFunctionFactory.Create(GetCityWeather),
+                    AIFunctionFactory.Create(CheckUmbrellaNeeded),
+                    AIFunctionFactory.Create(GetClothingSuggestion)
+                }
+            };
+
+            try
+            {
+                _output.WriteLine("=== Multi-turn tool calling with Low Reasoning Level ===");
+                int turnCount = 0;
+                int totalFunctionCalls = 0;
+                const int maxTurns = 5;  // 防止无限循环
+
+                while (turnCount < maxTurns)
+                {
+                    turnCount++;
+                    _output.WriteLine($"\n--- Turn {turnCount} ---");
+
+                    var response = await client.GetResponseAsync(messages, options);
+                    Assert.NotNull(response);
+
+                    // 检查是否有函数调用
+                    var functionCalls = response.Messages[0].Contents
+                        .OfType<FunctionCallContent>()
+                        .ToList();
+
+                    _output.WriteLine($"Function calls in this turn: {functionCalls.Count}");
+                    totalFunctionCalls += functionCalls.Count;
+
+                    if (functionCalls.Count > 0)
+                    {
+                        // 添加助手的函数调用消息
+                        messages.Add(response.Messages[0]);
+
+                        // 执行每个函数调用
+                        foreach (var fc in functionCalls)
+                        {
+                            _output.WriteLine($"  Executing: {fc.Name}");
+                            _output.WriteLine($"  Arguments: {System.Text.Json.JsonSerializer.Serialize(fc.Arguments)}");
+
+                            string result = "";
+                            try
+                            {
+                                // 根据函数名执行相应的函数
+                                if (fc.Name == "GetCityWeather" && fc.Arguments.TryGetValue("city", out var cityObj))
+                                {
+                                    result = GetCityWeather(cityObj?.ToString() ?? "");
+                                }
+                                else if (fc.Name == "CheckUmbrellaNeeded" && fc.Arguments.TryGetValue("weatherDescription", out var weatherObj))
+                                {
+                                    result = CheckUmbrellaNeeded(weatherObj?.ToString() ?? "");
+                                }
+                                else if (fc.Name == "GetClothingSuggestion" && fc.Arguments.TryGetValue("temperature", out var tempObj))
+                                {
+                                    var temp = Convert.ToInt32(tempObj);
+                                    result = GetClothingSuggestion(temp);
+                                }
+                                else
+                                {
+                                    result = "函数执行失败：参数不匹配";
+                                }
+
+                                _output.WriteLine($"  Result: {result}");
+
+                                // 添加函数结果
+                                messages.Add(new ChatMessage(
+                                    ChatRole.User,
+                                    new List<AIContent> { new FunctionResultContent(fc.CallId, result) }
+                                ));
+                            }
+                            catch (Exception ex)
+                            {
+                                _output.WriteLine($"  Error executing function: {ex.Message}");
+                                messages.Add(new ChatMessage(
+                                    ChatRole.User,
+                                    new List<AIContent> { new FunctionResultContent(fc.CallId, $"执行错误：{ex.Message}") }
+                                ));
+                            }
+                        }
+
+                        // 如果有函数调用，继续下一轮
+                        continue;
+                    }
+                    else
+                    {
+                        // 没有函数调用，检查最终回答
+                        _output.WriteLine($"\n=== Final Response (Turn {turnCount}) ===");
+                        _output.WriteLine($"Text: {response.Text}");
+
+                        if (response is ReasoningChatResponse reasoningResp)
+                        {
+                            _output.WriteLine($"Reasoning: {reasoningResp.Reason}");
+                        }
+
+                        // 验证最终回答包含相关信息
+                        Assert.False(string.IsNullOrWhiteSpace(response.Text), "Final response should not be empty");
+                        
+                        // 验证至少调用了一些函数
+                        Assert.True(totalFunctionCalls > 0, $"Expected at least one function call, but got {totalFunctionCalls}");
+
+                        _output.WriteLine($"\n=== Test Summary ===");
+                        _output.WriteLine($"Total turns: {turnCount}");
+                        _output.WriteLine($"Total function calls: {totalFunctionCalls}");
+                        _output.WriteLine($"✓ Multi-turn conversation completed successfully with Low Reasoning Level");
+
+                        // 成功完成
+                        break;
+                    }
+                }
+
+                // 检查是否超过最大轮数
+                if (turnCount >= maxTurns)
+                {
+                    _output.WriteLine($"\n⚠️ Reached maximum turns ({maxTurns}) without final answer");
+                    _output.WriteLine($"Total function calls made: {totalFunctionCalls}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _output.WriteLine($"\n❌ Error: {ex.Message}");
+                _output.WriteLine($"Stack trace: {ex.StackTrace}");
+                throw;
+            }
+        }
+
+        // ==================== 辅助函数（用于多轮测试） ====================
+
+        /// <summary>
+        /// 获取指定城市的当前天气
+        /// </summary>
+        [Description("获取指定城市的当前天气")]
+        private static string GetCityWeather([Description("城市名称")] string city)
+        {
+            return city switch
+            {
+                "北京" or "Beijing" => "北京：晴天，15°C，空气质量良好",
+                "上海" or "Shanghai" => "上海：多云，18°C，有轻度雾霾",
+                _ => $"{city}：天气数据不可用"
+            };
+        }
+
+        /// <summary>
+        /// 检查是否需要带雨伞
+        /// </summary>
+        [Description("检查是否需要带雨伞")]
+        private static string CheckUmbrellaNeeded([Description("天气描述")] string weatherDescription)
+        {
+            if (weatherDescription.Contains("雨") || weatherDescription.Contains("rain", StringComparison.OrdinalIgnoreCase))
+            {
+                return "建议携带雨伞";
+            }
+            return "无需携带雨伞";
+        }
+
+        /// <summary>
+        /// 获取穿衣建议
+        /// </summary>
+        [Description("获取穿衣建议")]
+        private static string GetClothingSuggestion([Description("温度（摄氏度）")] int temperature)
+        {
+            return temperature switch
+            {
+                < 10 => "建议穿厚外套、羽绒服",
+                < 20 => "建议穿长袖衬衫、薄外套",
+                < 30 => "建议穿短袖、轻便衣物",
+                _ => "建议穿清凉透气的衣物"
+            };
         }
     }
 }

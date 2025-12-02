@@ -255,28 +255,32 @@ namespace Microsoft.Extensions.AI
                         buffer_params += call?.Function?.Arguments?.ToString() ?? "";
                         try
                         {
-                            var obj = JsonConvert.DeserializeObject(buffer_params);
-                            isJsonComplete = ToolcallParser.GetBraceDepth(buffer_params) == 0;
-                            var item = funcList.Where(p => p.Name == buffer_name).FirstOrDefault();
-                            if (item == null)
+                            if(buffer_params.Length > 0)
                             {
-                                funcList.Add(new VllmFunctionToolCall
+                                var obj = JsonConvert.DeserializeObject(buffer_params);
+                                isJsonComplete = ToolcallParser.GetBraceDepth(buffer_params) == 0;
+                                var item = funcList.Where(p => p.Name == buffer_name).FirstOrDefault();
+                                if (item == null)
                                 {
-                                    Name = buffer_name,
-                                    Arguments = buffer_params
-                                });
-                            }
-                            else
-                            {
-                                funcList.Remove(item);
-                                funcList.Add(new VllmFunctionToolCall
+                                    funcList.Add(new VllmFunctionToolCall
+                                    {
+                                        Name = buffer_name,
+                                        Arguments = buffer_params
+                                    });
+                                }
+                                else
                                 {
-                                    Name = buffer_name,
-                                    Arguments = buffer_params
-                                });
+                                    funcList.Remove(item);
+                                    funcList.Add(new VllmFunctionToolCall
+                                    {
+                                        Name = buffer_name,
+                                        Arguments = buffer_params
+                                    });
+                                }
+                                buffer_params = string.Empty;
+                                buffer_name = string.Empty;
                             }
-                            buffer_params = string.Empty;
-                            buffer_name = string.Empty;
+                            
                         }
                         catch (Exception)
                         {

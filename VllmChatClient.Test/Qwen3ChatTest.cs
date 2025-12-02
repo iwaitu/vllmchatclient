@@ -322,8 +322,8 @@ namespace VllmChatClient.Test
         }
 
 
-        [Description("获取南宁的天气情况")]
-        static string GetWeather() =>  "It's raining";
+        [Description("获取的天气情况")]
+        static string GetWeather([Description("要查询的城市名称")]string city) =>  "It's raining";
 
 
         [Description("Searh")]

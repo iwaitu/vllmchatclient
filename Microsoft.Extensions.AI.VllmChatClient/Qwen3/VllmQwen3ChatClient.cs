@@ -23,7 +23,7 @@ namespace Microsoft.Extensions.AI
 
         /// <summary>用于与工具调用参数和结果相关的序列化活动的 JsonSerializerOptions 对象</summary>
         private JsonSerializerOptions _toolCallJsonSerializerOptions = AIJsonUtilities.DefaultOptions;
-        public VllmQwen3ChatClient(string endpoint, string? token = null, string? modelId = "qwen3",string? toolParser = "hermes", HttpClient? httpClient = null) 
+        public VllmQwen3ChatClient(string endpoint, string? token = null, string? modelId = "qwen3",HttpClient? httpClient = null) 
         {
             _ = Throw.IfNull(endpoint);
             if (modelId is not null)

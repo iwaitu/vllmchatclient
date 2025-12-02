@@ -107,7 +107,24 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 🐳 Docker Deployment Examples
 
-### Qwen3/QwQ vLLM Deployment:
+### Qwen3 vLLM Deployment:
+```bash
+docker run -it --gpus all -p 8000:8000 \
+  -v /models/Qwen3-32B-FP8:/models/Qwen3-32B-FP8 \
+  --restart always \
+  -e VLLM_USE_V1=1 \
+  vllm/llm-openai:v0.8.5 \
+  --model /models/Qwen3-32B-FP8 \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes \
+  --trust-remote-code \
+  --max-model-len 131072 \
+  --tensor-parallel-size 2 \
+  --gpu_memory_utilization 0.8 \
+  --served-model-name "qwen3"
+```
+
+### QwQ vLLM Deployment:
 ```bash
 docker run -it --gpus all -p 8000:8000 \
   -v /models/Qwen3-32B-FP8:/models/Qwen3-32B-FP8 \

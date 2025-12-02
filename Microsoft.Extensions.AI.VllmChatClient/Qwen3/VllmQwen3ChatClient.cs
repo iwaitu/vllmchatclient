@@ -23,7 +23,7 @@ namespace Microsoft.Extensions.AI
 
         /// <summary>用于与工具调用参数和结果相关的序列化活动的 JsonSerializerOptions 对象</summary>
         private JsonSerializerOptions _toolCallJsonSerializerOptions = AIJsonUtilities.DefaultOptions;
-        public VllmQwen3ChatClient(string endpoint, string? token = null, string? modelId = "qwen3", HttpClient? httpClient = null) 
+        public VllmQwen3ChatClient(string endpoint, string? token = null, string? modelId = "qwen3",string? toolParser = "hermes", HttpClient? httpClient = null) 
         {
             _ = Throw.IfNull(endpoint);
             if (modelId is not null)
@@ -181,7 +181,7 @@ namespace Microsoft.Extensions.AI
             string buffer_msg = string.Empty;
             string buffer_name = string.Empty;
             string buffer_params = string.Empty;
-            bool thinking = true;
+            bool thinking = !noThinking ;
             bool insideThink = false;   // 是否正在 <think> 中
             bool insideToolCall = false;   // 是否正在 <tool_call> 中（用于兜底残缺情况）
             string buff_toolcall = string.Empty;
@@ -223,14 +223,14 @@ namespace Microsoft.Extensions.AI
                 }
                 string? modelId = chunk.Model ?? _metadata.DefaultModelId;
 
-                if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
-                {
-                    if (string.IsNullOrEmpty(buffer_name))
-                    {
-                        buffer_name = chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Name ?? "";
-                    }
-                    buffer_params += chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Arguments?.ToString() ?? "";
-                }
+                //if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
+                //{
+                //    if (string.IsNullOrEmpty(buffer_name))
+                //    {
+                //        buffer_name = chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Name ?? "";
+                //    }
+                //    buffer_params += chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Arguments?.ToString() ?? "";
+                //}
 
                 ReasoningChatResponseUpdate update = new()
                 {
@@ -247,6 +247,44 @@ namespace Microsoft.Extensions.AI
                     buffer_msg += message.Content ?? string.Empty;
                     var buffer_copy = buffer_msg;
                     var funcList = new List<VllmFunctionToolCall>();
+
+                    foreach (var call in message.ToolCalls ?? [])
+                    {
+                        bool isJsonComplete = false;
+                        buffer_name = string.IsNullOrWhiteSpace(call?.Function?.Name) ? buffer_name : (call?.Function?.Name ?? "");
+                        buffer_params += call?.Function?.Arguments?.ToString() ?? "";
+                        try
+                        {
+                            var obj = JsonConvert.DeserializeObject(buffer_params);
+                            isJsonComplete = ToolcallParser.GetBraceDepth(buffer_params) == 0;
+                            var item = funcList.Where(p => p.Name == buffer_name).FirstOrDefault();
+                            if (item == null)
+                            {
+                                funcList.Add(new VllmFunctionToolCall
+                                {
+                                    Name = buffer_name,
+                                    Arguments = buffer_params
+                                });
+                            }
+                            else
+                            {
+                                funcList.Remove(item);
+                                funcList.Add(new VllmFunctionToolCall
+                                {
+                                    Name = buffer_name,
+                                    Arguments = buffer_params
+                                });
+                            }
+                            buffer_params = string.Empty;
+                            buffer_name = string.Empty;
+                        }
+                        catch (Exception)
+                        {
+                            continue;
+                        }
+
+                        
+                    }
 
                     // A) 已闭合的 <tool_call>…
                     ToolcallParser.TryFlushClosedToolCallBlocks(ref buffer_copy, out var tcalls);
@@ -289,7 +327,9 @@ namespace Microsoft.Extensions.AI
                             buff_toolcall += message.Content;
                             continue;
                         }
+                        
                         yield return BuildTextUpdate(responseId, message.Content, thinking);
+                        if (message.Content == "</think>") thinking = false;
                     }
                 }
 
@@ -371,6 +411,15 @@ namespace Microsoft.Extensions.AI
         private static ChatMessage FromVllmMessage(VllmChatResponseMessage message)
         {
             var contents = new List<AIContent>();
+
+            foreach (var toolcall in message.ToolCalls ?? [])
+            {
+                contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
+                {
+                    Name = toolcall.Function?.Name ?? "",
+                    Arguments = toolcall.Function?.Arguments?.ToString() ?? "{}"
+                }));
+            }
 
             if (string.IsNullOrEmpty(message.Content))
                 return new ChatMessage(new ChatRole(message.Role), contents);

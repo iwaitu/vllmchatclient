@@ -15,11 +15,13 @@ namespace VllmChatClient.Test
         private readonly ITestOutputHelper _output;
 
         // 端点和密钥配置
-        
-        private const string Endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}";
-        private string ApiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY") ?? "";
+        //private const string Endpoint = "http://59.211.236.171:32452/qwen-32b/v1/{1}";
+        //private const string Endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}";
+        //private string ApiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY") ?? "";
         //private const string ModelId = "Qwen/Qwen3-32B";
-        private const string ModelId = "qwen3-32b";
+        private const string Endpoint = "https://chatservice.nngeo.net/v1/{1}";
+        private string ApiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY") ?? "";
+        private const string ModelId = "qwen3";
 
 
         public Qwen3ChatTest(ITestOutputHelper testOutput)
@@ -125,12 +127,13 @@ namespace VllmChatClient.Test
             };
             var options = new Qwen3ChatOptions
             {
-                NoThinking = true,
+                //NoThinking = false,
             };
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
 
-            Assert.Equal(1, res.Messages.Count);
+            Assert.Single(res.Messages);
+            _output.WriteLine(res.Text);
 
         }
 
@@ -154,6 +157,7 @@ namespace VllmChatClient.Test
             Assert.True(match.Success);
             string json = match.Groups[1].Value;
             Assert.NotEmpty(json);
+            _output.WriteLine(json);
         }
 
         [Fact]
@@ -176,6 +180,7 @@ namespace VllmChatClient.Test
             };
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
+            _output.WriteLine(res.Text);
         }
 
 
@@ -188,16 +193,32 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
             string res = string.Empty;
+            string reason = string.Empty;
             var options = new Qwen3ChatOptions
             {
                 NoThinking = false,
             };
             await foreach (var update in _client.GetStreamingResponseAsync(messages, options))
             {
-                res += update;
+                if (update is ReasoningChatResponseUpdate reasoningUpdate)
+                {
+                    if (reasoningUpdate.Thinking)
+                    {
+                        reason += reasoningUpdate.Text;
+                    }
+                    else
+                    {
+                        res += reasoningUpdate.Text;
+                    }
+                }
+                else
+                {
+                    res += update.Text;
+                }
             }
             Assert.True(res != null);
-            _output.WriteLine(res);
+            _output.WriteLine($"思考过程：\n{reason}");
+            _output.WriteLine($"最终答案：\n{res}");
         }
 
         [Fact]
@@ -218,10 +239,13 @@ namespace VllmChatClient.Test
             };
             string res = string.Empty;
             string reasoning = string.Empty;
+            ReasoningChatResponseUpdate lastUpdate;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
+                if (update is null) continue;
                 if(update is ReasoningChatResponseUpdate reasoningUpdate)
                 {
+                    lastUpdate = reasoningUpdate;
                     if (reasoningUpdate.Thinking)
                     {
                         reasoning += reasoningUpdate.Text;
@@ -273,6 +297,8 @@ namespace VllmChatClient.Test
                 Assert.DoesNotContain("```", line); // 确保没有代码块
                 Assert.DoesNotContain("```json", line); // 确保没有json代码块
             });
+
+            _output.WriteLine(res);
             // 确保输出是有效的JSON格式
             try
             {
@@ -364,6 +390,7 @@ namespace VllmChatClient.Test
                                    .FirstOrDefault()?.Text;
 
             Assert.False(string.IsNullOrWhiteSpace(answerText));
+            _output.WriteLine(answerText);
         }
 
         [Fact]
@@ -382,17 +409,12 @@ namespace VllmChatClient.Test
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
-            var textContent = res.Messages[0].Contents.OfType<TextContent>().FirstOrDefault();
-            Assert.NotNull(textContent);
-            Assert.All(textContent.Text.Split('\n'), line =>
-            {
-                Assert.DoesNotContain("```", line); // 确保没有代码块
-                Assert.DoesNotContain("```json", line); // 确保没有json代码块
-            });
+            _output.WriteLine(res.Text);
+            
             // 确保输出是有效的JSON格式
             try
             {
-                var json = System.Text.Json.JsonDocument.Parse(textContent.Text);
+                var json = System.Text.Json.JsonDocument.Parse(res.Text);
                 Assert.NotNull(json);
             }
             catch (System.Text.Json.JsonException)

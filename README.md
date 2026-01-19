@@ -13,8 +13,8 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Qwen3, QwQ, Gemma3, DeepSeek-R1, GLM-4 / 4.6, GPT-OSS-120B/20B, Qwen3-Next, Kimi K2, Gemini 3
-- ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models
+- ✅ **Multi-model Support**: Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, GLM-4 / glm-4.6 / glm-4.7, GPT-OSS-120B/20B, Kimi K2, Gemini 3
+- ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models (GLM supports Zhipu official thinking parameter via `GlmChatOptions.ThinkingEnabled`)
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
 - ✅ **Multiple Deployment Options**: Local vLLM deployment and cloud API support
 - ✅ **Performance Optimized**: Efficient streaming and memory management
@@ -93,6 +93,9 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmGptOssChatClient` | OpenRouter/Cloud | GPT-OSS-120B/20B | ✅ Full | ✅ Stream |
 | `VllmQwen3ChatClient` | Local vLLM | Qwen3-32B/235B | ✅ Toggle | ✅ Stream |
 | `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | Multiple modelIds (e.g. qwen3-next-80b-a3b-thinking / qwen3-next-80b-a3b-instruct) | ✅ (thinking model) | ✅ Stream |
+| `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3-vl-30b-a3b-thinking / qwen3-vl-30b-a3b-instruct | ✅ (thinking model) | ✅ Stream |
+| `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3-vl-32b-thinking / qwen3-vl-32b-instruct | ✅ (thinking model) | ✅ Stream |
+| `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3-vl-235b-a22b-thinking / qwen3-vl-235b-a22b-instruct (manual verified) | ✅ (thinking model) | ✅ Stream |
 | `VllmQwqChatClient` | Local vLLM | QwQ-32B | ✅ Full | ✅ Stream |
 | `VllmGemmaChatClient` | Local vLLM | Gemma3-27B | ❌ | ✅ Stream |
 | `VllmGemini3ChatClient` | Cloud API (Google Gemini) | gemini-3-pro-preview | Signature (hidden) | ✅ Stream |

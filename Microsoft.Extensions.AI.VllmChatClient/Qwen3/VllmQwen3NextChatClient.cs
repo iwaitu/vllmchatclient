@@ -2,6 +2,7 @@
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Newtonsoft.Json;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 
@@ -441,6 +442,8 @@ namespace Microsoft.Extensions.AI
         /// </summary>
         private VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
+            ValidateMultimodalSupport(messages, options);
+
             VllmOpenAIChatRequest request = new()
             {
                 Format = ToVllmChatResponseFormat(options?.ResponseFormat),
@@ -466,6 +469,25 @@ namespace Microsoft.Extensions.AI
             return request;
         }
 
+        private void ValidateMultimodalSupport(IEnumerable<ChatMessage> messages, ChatOptions? options)
+        {
+            foreach (var message in messages)
+            {
+                foreach (var item in message.Contents)
+                {
+                    if (item is DataContent dataContent && dataContent.HasTopLevelMediaType("image"))
+                    {
+                        var modelId = options?.ModelId ?? _metadata.DefaultModelId;
+                        if (string.IsNullOrWhiteSpace(modelId) ||
+                            !modelId.StartsWith("qwen3-vl", StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidOperationException("当前模型不支持多模态");
+                        }
+                    }
+                }
+            }
+        }
+
         /// <summary>
         /// 将 ChatMessage 对象转换为一个或多个 VllmChatRequestMessage 消息
         /// </summary>
@@ -478,86 +500,91 @@ namespace Microsoft.Extensions.AI
             // 然而，各种图像模型期望同一个请求消息中同时包含文本和图像。
             // 为此，如果存在文本消息，则将图像附加到之前的文本消息上。
 
-            VllmOpenAIChatRequestMessage? currentTextMessage = null;
+            var text = string.Empty;
+            var imageParts = new List<object>();
+
             foreach (var item in content.Contents)
             {
-                if (item is DataContent dataContent && dataContent.HasTopLevelMediaType("image"))
+                switch (item)
                 {
-                    IList<string> images = currentTextMessage?.Images ?? [];
-                    images.Add(Convert.ToBase64String(dataContent.Data
-#if NET
-                        .Span));
-#else
-                .ToArray()));
-#endif
-
-                    if (currentTextMessage is not null)
-                    {
-                        currentTextMessage.Images = images;
-                    }
-                    else
-                    {
-                        yield return new VllmOpenAIChatRequestMessage
+                    case DataContent dataContent when dataContent.HasTopLevelMediaType("image"):
                         {
-                            Role = content.Role.Value,
-                            Images = images,
-                        };
-                    }
-                }
-                else
-                {
-                    if (currentTextMessage is not null)
-                    {
-                        yield return currentTextMessage;
-                        currentTextMessage = null;
-                    }
-
-                    switch (item)
-                    {
-                        case TextContent textContent:
-                            currentTextMessage = new VllmOpenAIChatRequestMessage
+                            var base64 = Convert.ToBase64String(dataContent.Data
+#if NET
+                                .Span);
+#else
+                                .ToArray());
+#endif
+                            var mime = string.IsNullOrWhiteSpace(dataContent.MediaType) ? "image/jpeg" : dataContent.MediaType;
+                            imageParts.Add(new
                             {
-                                Role = content.Role.Value,
-                                Content = textContent.Text,
+                                type = "image_url",
+                                image_url = new
+                                {
+                                    url = $"data:{mime};base64,{base64}",
+                                }
+                            });
+                            break;
+                        }
+
+                    case TextContent textContent:
+                        text = textContent.Text;
+                        break;
+
+                    case FunctionCallContent fcc:
+                        {
+                            var toolCallJson = JsonSerializer.Serialize(new
+                            {
+                                name = fcc.Name,
+                                arguments = fcc.Arguments
+                            }, ToolCallJsonSerializerOptions);
+
+                            yield return new VllmOpenAIChatRequestMessage
+                            {
+                                Role = "assistant",
+                                Content = $"<tool_call>\n{toolCallJson}\n</tool_call>",
                             };
                             break;
+                        }
 
-                        case FunctionCallContent fcc:
+                    case FunctionResultContent frc:
+                        {
+                            var resultContent = frc.Result?.ToString() ?? "";
+                            yield return new VllmOpenAIChatRequestMessage
                             {
-                                // 使用 <tool_call> XML 标签格式，符合模板要求
-                                var toolCallJson = JsonSerializer.Serialize(new
-                                {
-                                    name = fcc.Name,
-                                    arguments = fcc.Arguments
-                                }, ToolCallJsonSerializerOptions);
-
-                                yield return new VllmOpenAIChatRequestMessage
-                                {
-                                    Role = "assistant",
-                                    Content = $"<tool_call>\n{toolCallJson}\n</tool_call>",
-                                };
-                                break;
-                            }
-
-                        case FunctionResultContent frc:
-                            {
-                                // 使用 <tool_response> XML 标签格式，符合模板要求
-                                var resultContent = frc.Result?.ToString() ?? "";
-                                yield return new VllmOpenAIChatRequestMessage
-                                {
-                                    Role = "user",
-                                    Content = $"<tool_response>\n{resultContent}\n</tool_response>",
-                                    ToolCallId = frc.CallId
-                                };
-                                break;
-                            }
-                    }
+                                Role = "user",
+                                Content = $"<tool_response>\n{resultContent}\n</tool_response>",
+                                ToolCallId = frc.CallId
+                            };
+                            break;
+                        }
                 }
             }
 
-            if (currentTextMessage is not null)
+            if (imageParts.Count > 0)
             {
-                yield return currentTextMessage;
+                var parts = new List<object>(capacity: imageParts.Count + 1);
+                parts.AddRange(imageParts);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    parts.Add(new { type = "text", text });
+                }
+
+                yield return new VllmOpenAIChatRequestMessage
+                {
+                    Role = content.Role.Value,
+                    Content = JsonSerializer.Serialize(parts, ToolCallJsonSerializerOptions),
+                };
+                yield break;
+            }
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                yield return new VllmOpenAIChatRequestMessage
+                {
+                    Role = content.Role.Value,
+                    Content = text,
+                };
             }
         }
 

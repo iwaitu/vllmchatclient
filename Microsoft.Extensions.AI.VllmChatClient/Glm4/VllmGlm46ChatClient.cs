@@ -448,6 +448,11 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Glm4
                 Tools = options?.ToolMode is not NoneChatToolMode && options?.Tools is { Count: > 0 } tools ? tools.OfType<AIFunction>().Select(ToVllmTool) : null,
             };
 
+            if (options is GlmChatOptions glmOptions && glmOptions.ThinkingEnabled)
+            {
+                request.Thinking = new VllmThinkingOptions { Type = "enabled" };
+            }
+
             if (options is not null)
             {
                 if (options.Temperature is float temperature)

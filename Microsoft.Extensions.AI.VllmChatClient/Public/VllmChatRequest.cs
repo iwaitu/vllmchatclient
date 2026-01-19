@@ -11,7 +11,13 @@ internal sealed class VllmOpenAIChatRequest
     public JsonElement? Format { get; set; }
     public bool Stream { get; set; }
     public IEnumerable<VllmTool>? Tools { get; set; }
+    public VllmThinkingOptions? Thinking { get; set; }
     public VllmRequestOptions? Options { get; set; }
+}
+
+internal sealed class VllmThinkingOptions
+{
+    public required string Type { get; set; }
 }
 
 internal sealed class VllmChatRequest

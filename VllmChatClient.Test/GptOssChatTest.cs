@@ -46,6 +46,7 @@ namespace VllmChatClient.Test
                 _output.WriteLine(response.Text);
 
             }
+
             Assert.NotNull(res);
 
             Assert.Equal(1, res.Messages.Count);

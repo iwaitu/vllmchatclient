@@ -1,38 +1,33 @@
 ﻿using Microsoft.Extensions.AI;
-using Microsoft.Extensions.AI.VllmChatClient.Glm4;
-using Microsoft.Extensions.AI.VllmChatClient.Kimi;
-using Microsoft.VisualStudio.TestPlatform.CommunicationUtilities;
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
+using System.Net.Http;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using Xunit.Abstractions;
 
 namespace VllmChatClient.Test
 {
-    
-    public class Glm46Tests
+    public class Qwen3VLTests
     {
         private readonly IChatClient _client;
-        private readonly ITestOutputHelper _output;
-        private const string MODEL = "glm-4.7";
-        //private const string MODEL = "glm-4.6";
         static int functionCallTime = 0;
+        private readonly ITestOutputHelper _output;
 
-        [Description("获取南宁的天气情况")]
-        static string GetWeather() => "现在正在下雨。";
-
-
-        [Description("Searh")]
-        static string Search([Description("需要搜索的问题")] string question)
+        public Qwen3VLTests(ITestOutputHelper output)
         {
-            functionCallTime += 1;
-            return "南宁市青秀区方圆广场北面站前路1号。";
+            //var apiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY");
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-vl-30b-a3b-thinking"); //测试通过
+            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-vl-30b-a3b-instruct"); //测试通过
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-vl-32b-thinking"); //测试通过
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-vl-32b-instruct"); //测试通过
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-vl-235b-a22b-thinking"); //该模型由于官方平台的限流（RPM=60），暂时无法进行完整测试，人工逐个验证通过
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-vl-235b-a22b-instruct"); //该模型由于官方平台的限流（RPM=60），暂时无法进行完整测试，人工逐个验证通过
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct"); //测试通过
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking"); //测试通过
+            //_client = new VllmQwen3NextChatClient("http://localhost:8000/v1/{1}", apiKey, "qwen3-next-80b-a3b-instruct");
+            _output = output;
         }
 
         [Description("搜索周边的书店")]
@@ -42,13 +37,6 @@ namespace VllmChatClient.Test
             return "附近100米有一家爱民书店。";
         }
 
-        public Glm46Tests(ITestOutputHelper output)
-        {
-            _output = output; // 修复 CS8618: 正确初始化 _output 字段
-            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ZHIPU_API_KEY");
-            _client = new VllmGlm46ChatClient("https://open.bigmodel.cn/api/paas/v4/{1}", cloud_apiKey, MODEL); // 智普官方平台支持思维链
-            //_client = new VllmGlm46ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL); // 阿里云百炼平台思维链命令格式与智普官方平台不同，暂不支持思维链
-        }
 
         [Fact]
         public async Task ChatTest()
@@ -58,62 +46,76 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲 "),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
-            var options = new GlmChatOptions { ThinkingEnabled = true };
+            var options = new ChatOptions();
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
-
-            if (res is ReasoningChatResponse reasoningResponse)
-            {
-                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
-            }
-            _output.WriteLine($"Response: {res.Text}");
             Assert.Single(res.Messages); // 使用 Assert.Single 替代 Assert.Equal(1, ...)
 
             Assert.True(res.Text.Contains("菲菲"));
-            var reasonResponse = res as ReasoningChatResponse;
-            Assert.NotNull(reasonResponse?.Reason);
-            _output.WriteLine($"Reason: {reasonResponse.Reason}");
+            if (res is ReasoningChatResponse reasonResponse)
+            {
+                Assert.NotNull(reasonResponse.Reason);
+                _output.WriteLine($"Reason: {reasonResponse.Reason}");
+            }
             _output.WriteLine($"Response: {res.Text}");
+
 
         }
 
-        [Fact]
-        public async Task StreamChatTest()
-        {
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"你是谁？")
-            };
-            var options = new GlmChatOptions { ThinkingEnabled = true };
-            string reason = string.Empty;
-            string anwser = string.Empty;
-            await foreach (var message in _client.GetStreamingResponseAsync(messages, options))
-            {
-                if (message is ReasoningChatResponseUpdate reasoningMessage)
-                {
-                    if (reasoningMessage.Thinking)
-                    {
-                        reason += reasoningMessage.Text;
-                    }
-                    else
-                    {
-                        anwser += reasoningMessage.Text;
-                    }
-                    
-                }
-                else
-                {
-                    anwser += message.Text;
-                }
-            }
 
-            
-            Assert.False(string.IsNullOrEmpty(anwser));
-            Assert.Contains("菲菲", anwser);
-            Assert.False(string.IsNullOrWhiteSpace(reason));
-            _output.WriteLine($"Partial Response: {reason}");
-            _output.WriteLine($"Final Response: {anwser}");
+        [Fact]
+        public async Task ChatWithImageTest()
+        {
+            var userMessage = new ChatMessage(ChatRole.User, "详细描述图片的内容");
+
+            var imageUrl = "https://ofasys-multimodal-wlcb-3-toshanghai.oss-accelerate.aliyuncs.com/wpf272043/keepme/image/receipt.png";
+            using var http = new HttpClient();
+            var response = await http.GetAsync(imageUrl);
+            response.EnsureSuccessStatusCode();
+
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            Assert.False(string.IsNullOrWhiteSpace(mediaType));
+            Assert.StartsWith("image/", mediaType!, StringComparison.OrdinalIgnoreCase);
+
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            Assert.NotEmpty(bytes);
+
+            userMessage.Contents.Add(new DataContent(bytes, mediaType!));
+
+            var result = await _client.GetResponseAsync([userMessage], new ChatOptions());
+            Assert.NotNull(result);
+            Assert.NotNull(result.Messages);
+            Assert.NotEmpty(result.Messages);
+            Assert.False(string.IsNullOrWhiteSpace(result.Text));
+
+            _output.WriteLine($"Response: {result.Text}");
+        }
+
+        [Fact]
+        public async Task ChatWithImageButNotSupportedTest()
+        {
+            var userMessage = new ChatMessage(ChatRole.User, "Read all the text in the image.");
+
+            var imageUrl = "https://ofasys-multimodal-wlcb-3-toshanghai.oss-accelerate.aliyuncs.com/wpf272043/keepme/image/receipt.png";
+            using var http = new HttpClient();
+            var response = await http.GetAsync(imageUrl);
+            response.EnsureSuccessStatusCode();
+
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            Assert.False(string.IsNullOrWhiteSpace(mediaType));
+            Assert.StartsWith("image/", mediaType!, StringComparison.OrdinalIgnoreCase);
+
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            Assert.NotEmpty(bytes);
+
+            userMessage.Contents.Add(new DataContent(bytes, mediaType!));
+
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            var wrongClient = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => wrongClient.GetResponseAsync([userMessage], new ChatOptions()));
+            Assert.Equal("当前模型不支持多模态", ex.Message);
         }
 
         [Fact]
@@ -121,7 +123,7 @@ namespace VllmChatClient.Test
         {
             string text = "不动产登记资料查询，即查档业务，包括查询房屋、土地、车库车位等不动产登记结果，以及复制房屋、土地、车库车位等不动产登记原始资料。\n";
 
-            var options = new GlmChatOptions { ThinkingEnabled = true };
+            var options = new ChatOptions();
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.User,$"请为以下文本提取3个最相关的标签。用json格式返回，不要输出代码块。\n\n文本:{text}")
@@ -129,6 +131,12 @@ namespace VllmChatClient.Test
 
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
+
+            if (res is ReasoningChatResponse reasonResponse)
+            {
+                Assert.NotNull(reasonResponse.Reason);
+                _output.WriteLine($"Reason: {reasonResponse.Reason}");
+            }
 
             // 修复可能的 null 引用警告
             var firstMessage = res.Messages.FirstOrDefault();
@@ -140,6 +148,8 @@ namespace VllmChatClient.Test
             Assert.True(match.Success);
             string json = match.Groups[1].Value;
             Assert.NotEmpty(json);
+
+            _output.WriteLine($"Response: {messageText}");
         }
 
         [Fact]
@@ -154,7 +164,7 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")               //串行调用两个函数
             };
-            ChatOptions chatOptions = new GlmChatOptions
+            ChatOptions chatOptions = new()
             {
                 Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
             };
@@ -162,14 +172,16 @@ namespace VllmChatClient.Test
             Assert.NotNull(res);
             Assert.True(res.Messages.Count >= 1);
 
+            if (res is ReasoningChatResponse reasoningResponse)
+            {
+                Assert.NotNull(reasoningResponse.Reason);
+                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
+            }
+
             // 最后一条回复通常是助手文本，包含天气信息
             var lastMessage = res.Messages.LastOrDefault();
             Assert.NotNull(lastMessage);
             var lastText = lastMessage.Contents.OfType<TextContent>().FirstOrDefault()?.Text ?? string.Empty;
-            if (res is ReasoningChatResponse reasoningResponse)
-            {
-                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
-            }
             Assert.True(res.Text.Contains("爱民书店") || res.Text.Contains("100米"), $"Unexpected reply: '{lastText}'");  //串行任务
             _output.WriteLine($"Response: {res.Text}");
         }
@@ -183,30 +195,55 @@ namespace VllmChatClient.Test
                 .Build();
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")               //并行调用两个函数
             };
-            ChatOptions chatOptions = new GlmChatOptions
+            ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)],
-                Temperature = 0.2f,
-                ThinkingEnabled = true,
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
             };
-            
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
             Assert.True(res.Messages.Count >= 1);
+
+            if (res is ReasoningChatResponse reasoningResponse)
+            {
+                Assert.NotNull(reasoningResponse.Reason);
+                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
+            }
 
             // 最后一条回复通常是助手文本，包含天气信息
             var lastMessage = res.Messages.LastOrDefault();
             Assert.NotNull(lastMessage);
             var lastText = lastMessage.Contents.OfType<TextContent>().FirstOrDefault()?.Text ?? string.Empty;
-            if (res is ReasoningChatResponse reasoningResponse)
-            {
-                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
-            }
             Assert.True(res.Text.Contains("下雨") || res.Text.Contains("雨"), $"Unexpected reply: '{lastText}'");  //并行任务
             _output.WriteLine($"Response: {res.Text}");
+        }
+
+
+        [Fact]
+        public async Task StreamChatTest()
+        {
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User,"你是谁？")
+            };
+            string res = string.Empty;
+            var options = new ChatOptions();
+            string reason = string.Empty;
+            await foreach (var update in _client.GetStreamingResponseAsync(messages, options))
+            {
+                // 累积文本内容（仅 TextContent 更稳健）
+                foreach (var text in update.Contents.OfType<TextContent>())
+                {
+                    res += text.Text;
+                }
+            }
+            Assert.False(string.IsNullOrWhiteSpace(res));
+            Assert.Contains("菲菲", res);
+
+            _output.WriteLine($"Response: {res}");
         }
 
         [Fact]
@@ -221,10 +258,9 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
-            ChatOptions chatOptions = new GlmChatOptions
+            ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)],
-                ThinkingEnabled = true,
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
             };
             string res = string.Empty;
             string reason = string.Empty;
@@ -245,9 +281,8 @@ namespace VllmChatClient.Test
 
             Assert.False(string.IsNullOrWhiteSpace(res));
             Assert.True(res.Contains("下雨") || res.Contains("雨"), $"Unexpected reply: '{res}'");  //并行任务
-            Assert.False(string.IsNullOrWhiteSpace(reason));
-            _output.WriteLine($"Partial Response: {reason}");
-            _output.WriteLine($"Final Response: {res}");
+            _output.WriteLine($"Reason: {reason}");
+            _output.WriteLine($"Response: {res}");
         }
 
         [Fact]
@@ -262,10 +297,9 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
-            ChatOptions chatOptions = new GlmChatOptions
+            ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)],
-                ThinkingEnabled = true,
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
             };
             string res = string.Empty;
             string reason = string.Empty;
@@ -284,11 +318,10 @@ namespace VllmChatClient.Test
                 }
             }
 
-            _output.WriteLine($"Partial Response: {reason}");
-            _output.WriteLine($"Final Response: {res}");
+            _output.WriteLine($"Reason: {reason}");
+            _output.WriteLine($"Response: {res}");
             Assert.False(string.IsNullOrWhiteSpace(res));
             Assert.True(res.Contains("爱民书店") || res.Contains("100米"), $"Unexpected reply: '{res}'");  //串行任务
-            Assert.False(string.IsNullOrWhiteSpace(reason));
         }
 
         [Fact]
@@ -303,10 +336,9 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
-            ChatOptions chatOptions = new GlmChatOptions
+            ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)],
-                ThinkingEnabled = true,
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
             };
             string res = string.Empty;
             string reason = string.Empty;
@@ -357,8 +389,8 @@ namespace VllmChatClient.Test
             }
 
             Assert.False(string.IsNullOrWhiteSpace(res));
-            _output.WriteLine($"Partial Response: {reason}");
-            _output.WriteLine($"Final Response: {res}");
+
+            _output.WriteLine($"Response: {res}");
         }
 
         [Fact]
@@ -369,32 +401,33 @@ namespace VllmChatClient.Test
                 .Build();
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲。"),
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用 codeblock。")
             };
-            ChatOptions chatOptions = new GlmChatOptions { ThinkingEnabled = true };
+            ChatOptions chatOptions = new()
+            {
+                //Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
+            };
             string res = string.Empty;
             string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
-                if (update is ReasoningChatResponseUpdate reasoningMessage)
+                if (update is ReasoningChatResponseUpdate reasonUpdate)
                 {
-                    if (reasoningMessage.Thinking)
-                    {
-                        reason += reasoningMessage.Text;
-                    }
+                    if (reasonUpdate.Thinking)
+                        reason += reasonUpdate.Text;
                     else
-                    {
-                        res += reasoningMessage.Text;
-                    }
-
+                        res += reasonUpdate.Text;
+                }
+                else
+                {
+                    res += update.Text;
                 }
             }
             Assert.False(string.IsNullOrWhiteSpace(res));
-            Assert.False(string.IsNullOrWhiteSpace(reason));
 
-            _output.WriteLine($"Partial Response: {reason}");
-            _output.WriteLine($"Final Response: {res}");
+            _output.WriteLine($"Reason: {reason}");
+            _output.WriteLine($"Response: {res}");
 
             // 验证不包含代码块标记
             Assert.All(res.Split('\n'), line =>
@@ -418,6 +451,18 @@ namespace VllmChatClient.Test
             }
         }
 
+
+        [Description("获取南宁的天气情况")]
+        static string GetWeather() => "现在正在下雨。";
+
+
+        [Description("Searh")]
+        static string Search([Description("需要搜索的问题")] string question)
+        {
+            functionCallTime += 1;
+            return "南宁市青秀区方圆广场北面站前路1号。";
+        }
+
         [Fact]
         public async Task ChatManualFunctionCallTest()
         {
@@ -425,23 +470,16 @@ namespace VllmChatClient.Test
 
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？"),
             };
-            ChatOptions chatOptions = new GlmChatOptions
+            ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)],
-                ThinkingEnabled = true,
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
             };
             var res = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
-
-            if (res is ReasoningChatResponse reasoningResponse)
-            {
-                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
-            }
-            _output.WriteLine($"Response: {res.Text}");
 
             // 至少应包含一个函数调用
             var functionCalls = res.Messages[0].Contents.OfType<FunctionCallContent>().ToList();
@@ -478,17 +516,19 @@ namespace VllmChatClient.Test
             Assert.NotNull(result);
             Assert.Single(result.Messages);
 
-            if (result is ReasoningChatResponse reasoningResponse2)
+            if (result is ReasoningChatResponse reasoningResponse)
             {
-                _output.WriteLine($"Reason: {reasoningResponse2.Reason}");
+                Assert.NotNull(reasoningResponse.Reason);
+                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
             }
-            _output.WriteLine($"Response: {result.Text}");
 
             var answerText = result.Messages[0].Contents
                                    .OfType<TextContent>()
                                    .FirstOrDefault()?.Text;
 
             Assert.False(string.IsNullOrWhiteSpace(answerText));
+
+            _output.WriteLine($"Response: {answerText}");
         }
 
         [Fact]
@@ -499,23 +539,23 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用 codeblock。")
             };
-            var options = new GlmChatOptions
+            var options = new ChatOptions
             {
                 MaxOutputTokens = 100,
-                ThinkingEnabled = true,
             };
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
+            var textContent = res.Messages[0].Contents.OfType<TextContent>().FirstOrDefault();
+            Assert.NotNull(textContent);
 
             if (res is ReasoningChatResponse reasoningResponse)
             {
+                Assert.NotNull(reasoningResponse.Reason);
                 _output.WriteLine($"Reason: {reasoningResponse.Reason}");
             }
-            _output.WriteLine($"Response: {res.Text}");
 
-            var textContent = res.Messages[0].Contents.OfType<TextContent>().FirstOrDefault();
-            Assert.NotNull(textContent);
+            _output.WriteLine($"Response: {textContent.Text}");
 
             // 验证不包含代码块标记
             Assert.All(textContent.Text.Split('\n'), line =>

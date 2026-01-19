@@ -28,10 +28,12 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 本次更新
 
-- 新增 GLM 4.6 思考模型支持：`VllmGlm46ChatClient`，支持推理分段流式输出（思考/答案）与函数调用。
+- 新增 GLM 4.6/4.7 思维链支持：`VllmGlm46ChatClient`，支持推理分段流式输出（思考/答案）与函数调用。
+- 新增 `GlmChatOptions`：通过 `ThinkingEnabled` 开关控制是否在请求体中发送智普官方平台所需的 `thinking: { type: "enabled" }`（默认关闭）。
 - 在“支持的客户端”表新增 `VllmGlm46ChatClient` 条目。
-- 新增 GLM 4.6 使用示例（见下文“GLM 4.6 Thinking Stream Example”）。
+- 更新 GLM 4.6/4.7 使用示例（见下文“GLM 4.6/4.7 Thinking Example”），并说明智普官方平台思维链参数支持。
 - 强化 Qwen3-Next 能力：新增“串行/并行函数调用”示例、手动工具编排的流式调用示例、以及严格的 JSON 纯文本输出（无 codeblock）示例。
+- 说明 `VllmQwen3NextChatClient` 支持多个模型：通过构造函数 `modelId` 或 `ChatOptions.ModelId` 切换（thinking / instruct 等）。
 - 新增标签提取示例（基于 JSON 解析与正则匹配）。
 - 新增 Gemini 3 支持（`VllmGemini3ChatClient`）：
   - 文本与流式响应、推理级别 Normal/Low
@@ -46,8 +48,9 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ### 🆕 GLM 4.6 Thinking Model Support
 - **VllmGlm46ChatClient** added with full reasoning (thinking) stream separation.
-- Supports `glm-4.6` thinking style output (Reasoning + final answer phases).
+- Supports `glm-4.6` and `glm-4.7`.
 - Compatible with existing tool/function invocation pipeline.
+- Supports Zhipu official platform thinking parameter via `GlmChatOptions.ThinkingEnabled`.
 
 ### 🆕 New GPT-OSS-20B/120B Support
 - **VllmGptOssChatClient** - Support for OpenAI's GPT-OSS-120B model with full reasoning capabilities
@@ -89,14 +92,14 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 |--------|------------|---------------|-----------|----------------|
 | `VllmGptOssChatClient` | OpenRouter/Cloud | GPT-OSS-120B/20B | ✅ Full | ✅ Stream |
 | `VllmQwen3ChatClient` | Local vLLM | Qwen3-32B/235B | ✅ Toggle | ✅ Stream |
-| `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3-next-80b-a3b-(thinking/instruct) | ✅ (thinking model) | ✅ Stream |
+| `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | Multiple modelIds (e.g. qwen3-next-80b-a3b-thinking / qwen3-next-80b-a3b-instruct) | ✅ (thinking model) | ✅ Stream |
 | `VllmQwqChatClient` | Local vLLM | QwQ-32B | ✅ Full | ✅ Stream |
 | `VllmGemmaChatClient` | Local vLLM | Gemma3-27B | ❌ | ✅ Stream |
 | `VllmGemini3ChatClient` | Cloud API (Google Gemini) | gemini-3-pro-preview | Signature (hidden) | ✅ Stream |
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
 | `VllmGlmZ1ChatClient` | Local vLLM | GLM-4 | ✅ Full | ✅ Stream |
 | `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
-| `VllmGlm46ChatClient` | Local/Cloud OpenAI compatible | glm-4.6 | ✅ Full | ✅ Stream |
+| `VllmGlm46ChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-4.6 / glm-4.7 | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
 | `VllmQwen2507ChatClient` | Cloud API | qwen3-235b-a22b-instruct-2507 | ❌ | ✅ Stream |
 | `VllmQwen2507ReasoningChatClient` | Cloud API | qwen3-235b-a22b-thinking-2507 | ✅ Full | ✅ Stream |
 | `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) | ✅ (thinking model) | ✅ Stream |
@@ -165,7 +168,7 @@ docker run -it --gpus all -p 8000:8000 \
 
 ## 💻 Usage Examples
 
-### 🆕 GLM 4.6 Thinking Stream Example
+### 🆕 GLM 4.6/4.7 Thinking Example
 
 ```csharp
 using Microsoft.Extensions.AI;
@@ -176,6 +179,10 @@ IChatClient glm46 = new VllmGlm46ChatClient(
     null,
     "glm-4.6");
 
+// Enable Zhipu official platform thinking chain parameter:
+// thinking: { "type": "enabled" }
+var opts = new GlmChatOptions { ThinkingEnabled = true };
+
 var messages = new List<ChatMessage>
 {
     new(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
@@ -184,7 +191,7 @@ var messages = new List<ChatMessage>
 
 string reasoning = string.Empty;
 string answer = string.Empty;
-await foreach (var update in glm46.GetStreamingResponseAsync(messages))
+await foreach (var update in glm46.GetStreamingResponseAsync(messages, opts))
 {
     if (update is ReasoningChatResponseUpdate r)
     {

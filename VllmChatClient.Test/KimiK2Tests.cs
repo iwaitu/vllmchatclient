@@ -13,7 +13,7 @@ namespace VllmChatClient.Test
     {
         private readonly IChatClient _client;
         private readonly ITestOutputHelper _output;
-        private const string MODEL = "kimi-k2-thinking";
+        private const string MODEL = "kimi-k2.5";
         static int functionCallTime = 0;
         
 
@@ -38,10 +38,10 @@ namespace VllmChatClient.Test
         public KimiK2Tests(ITestOutputHelper output)
         {
             _output = output; // 修复 CS8618: 正确初始化 _output 字段
-            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
-            _client = new VllmKimiK2ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
-            //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_KIMI_API_KEY");
-            //_client = new VllmKimiK2ChatClient("https://api.moonshot.cn/{0}/{1}", cloud_apiKey, MODEL);
+            //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            //_client = new VllmKimiK2ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_KIMI_API_KEY");
+            _client = new VllmKimiK2ChatClient("https://api.moonshot.cn/{0}/{1}", cloud_apiKey, MODEL);
         }
 
         [Fact]
@@ -102,6 +102,26 @@ namespace VllmChatClient.Test
             Assert.Contains("菲菲", anwser);
             _output.WriteLine($"Partial Response: {reason}");
             _output.WriteLine($"Final Response: {anwser}");
+        }
+
+        [Fact]
+        public async Task ChatThinkingDisabledTest()
+        {
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User,"你是谁？")
+            };
+
+            var options = new KimiChatOptions { ThinkingEnabled = false };
+            var res = await _client.GetResponseAsync(messages, options);
+
+            Assert.NotNull(res);
+            Assert.Contains("菲菲", res.Text);
+            if (res is ReasoningChatResponse r)
+            {
+                Assert.True(string.IsNullOrEmpty(r.Reason), $"Expected empty reason when thinking is disabled, but got: '{r.Reason}'");
+            }
         }
 
         [Fact]

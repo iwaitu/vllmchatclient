@@ -168,7 +168,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
             string buffer_msg = string.Empty;
             string buffer_name = string.Empty;
             string buffer_params = string.Empty;
-            bool thinking = _metadata.DefaultModelId?.Contains("thinking") == true;
+            bool thinking = true;
             string buff_toolcall = string.Empty;
             yield return new ChatResponseUpdate
             {   
@@ -207,6 +207,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                     continue;
                 }
                 string? modelId = chunk.Model ?? _metadata.DefaultModelId;
+                thinking = true;
                 
 
                 if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
@@ -221,35 +222,17 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
 
                 if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
                 {
-                    if (message.Content != null && message.Content.Contains("</think>"))
-                    {
-                        thinking = false;
-                        continue;
-                    }
-
-                    buffer_msg += message.Content;
+                    buffer_msg += message.Content ?? string.Empty;
                     var buffer_copy = buffer_msg;
                     var funcList = new List<VllmFunctionToolCall>();
 
-                    if ( !(string.IsNullOrWhiteSpace(message.Content) && string.IsNullOrWhiteSpace(message.ReasoningContent)))
+                    if (message.ReasoningContent != null)
                     {
-                        if ((message.ReasoningContent != null || thinking == true) && message.ToolCalls == null)
-                        {
-                            if (message.ReasoningContent != null)
-                            {
-                                yield return BuildTextUpdate(responseId, message.ReasoningContent, thinking);
-                            }
-                            else
-                            {
-                                if (!string.IsNullOrWhiteSpace(message.Content))
-                                {
-                                    thinking = false;
-                                }
-                                yield return BuildTextUpdate(responseId, message.Content, thinking);
-                            }
-                            continue;
-                        }
+                        yield return BuildTextUpdate(responseId, message.ReasoningContent, thinking);
+                        continue;
                     }
+
+                    thinking = false;
                     
                     foreach (var call in message.ToolCalls ?? [])
                     {
@@ -312,7 +295,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                             buff_toolcall += message.Content;
                             continue;
                         }
-                        yield return BuildTextUpdate(responseId, message.Content);
+                        yield return BuildTextUpdate(responseId, message.Content, thinking);
                     }
                 }
 
@@ -479,6 +462,8 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
         /// </summary>
         private VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
+            var kimiOptions = options as KimiChatOptions;
+
             VllmOpenAIChatRequest request = new()
             {
                 Format = ToVllmChatResponseFormat(options?.ResponseFormat),
@@ -486,6 +471,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
                 Model = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty,
                 Stream = stream,
                 Tools = options?.ToolMode is not NoneChatToolMode && options?.Tools is { Count: > 0 } tools ? tools.OfType<AIFunction>().Select(ToVllmTool) : null,
+                Thinking = kimiOptions is null ? null : new VllmThinkingOptions { Type = kimiOptions.ThinkingEnabled ? "enabled" : "disabled" },
             };
 
             if (options is not null)

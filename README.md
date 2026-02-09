@@ -9,11 +9,13 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **Kimi K2 / Kimi 2.5**, **GLM 4.6**, **Gemini 3** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **Kimi K2 / Kimi 2.5**, **GLM 4.6 / 4.7 / 4.7 Flash**, **Gemini 3** with advanced reasoning capabilities.
+
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, GLM-4 / glm-4.6 / glm-4.7, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3
+- ✅ **Multi-model Support**: Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3
+
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models (GLM supports Zhipu official thinking parameter via `GlmChatOptions.ThinkingEnabled`)
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
 - ✅ **Multiple Deployment Options**: Local vLLM deployment and cloud API support
@@ -28,7 +30,9 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 本次更新
 
+- 新增 **GLM 4.7 Flash** 支持。
 - 新增 GLM 4.6/4.7 思维链支持：`VllmGlm46ChatClient`，支持推理分段流式输出（思考/答案）与函数调用。
+
 - 新增 `GlmChatOptions`：通过 `ThinkingEnabled` 开关控制是否在请求体中发送智普官方平台所需的 `thinking: { type: "enabled" }`（默认关闭）。
 - 新增 `KimiChatOptions`：通过 `ThinkingEnabled` 开关控制 Moonshot/Kimi 2.5 所需的 `thinking: { type: "enabled" | "disabled" }`。
 - 修复/完善 `VllmKimiK2ChatClient` 思维链解析：Kimi 2.5 不使用 `</think>` 标记，思维链内容来自 `reasoningContent`（流式同样按 `delta.reasoning_content` 输出）。
@@ -49,9 +53,10 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 🔥 Latest Updates
 
-### 🆕 GLM 4.6 Thinking Model Support
+### 🆕 GLM 4.6 / 4.7 Flash Thinking Model Support
 - **VllmGlm46ChatClient** added with full reasoning (thinking) stream separation.
-- Supports `glm-4.6` and `glm-4.7`.
+- Supports `glm-4.6`, `glm-4.7`, and `glm-4.7-flash`.
+
 - Compatible with existing tool/function invocation pipeline.
 - Supports Zhipu official platform thinking parameter via `GlmChatOptions.ThinkingEnabled`.
 
@@ -111,7 +116,8 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
 | `VllmGlmZ1ChatClient` | Local vLLM | GLM-4 | ✅ Full | ✅ Stream |
 | `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
-| `VllmGlm46ChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-4.6 / glm-4.7 | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
+| `VllmGlm46ChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-4.6 / glm-4.7 / glm-4.7-flash | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
+
 | `VllmQwen2507ChatClient` | Cloud API | qwen3-235b-a22b-instruct-2507 | ❌ | ✅ Stream |
 | `VllmQwen2507ReasoningChatClient` | Cloud API | qwen3-235b-a22b-thinking-2507 | ✅ Full | ✅ Stream |
 | `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) / kimi-k2.5 | ✅ (thinking model) | ✅ Stream |
@@ -180,7 +186,8 @@ docker run -it --gpus all -p 8000:8000 \
 
 ## 💻 Usage Examples
 
-### 🆕 GLM 4.6/4.7 Thinking Example
+### 🆕 GLM 4.6/4.7/4.7-Flash Thinking Example
+
 
 ```csharp
 using Microsoft.Extensions.AI;

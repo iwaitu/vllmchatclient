@@ -12,7 +12,8 @@ namespace VllmChatClient.Test
         private readonly IChatClient _client;
         public DeepseekR1Test()
         {
-            _client = new VllmDeepseekR1ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", "", "deepseek-r1");
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            _client = new VllmDeepseekR1ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "deepseek-r1");
         }
 
         [Fact]

@@ -1,5 +1,7 @@
 ﻿using Microsoft.Shared.Diagnostics;
 using Newtonsoft.Json;
+using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -10,6 +12,7 @@ namespace Microsoft.Extensions.AI
     public abstract class VllmBaseChatClient : IChatClient
     {
         private static readonly JsonElement _schemalessJsonResponseFormatValue = JsonDocument.Parse("\"json\"").RootElement;
+        private static readonly ConcurrentDictionary<string, (string? instruction, DateTime timestamp)> _skillInstructionCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ChatClientMetadata _metadata;
         private readonly string _apiChatEndpoint;
         private readonly HttpClient _httpClient;
@@ -24,7 +27,7 @@ namespace Microsoft.Extensions.AI
             }
 
             _apiChatEndpoint = endpoint ?? "http://localhost:8000/{0}/{1}";
-            _httpClient = httpClient ?? VllmUtilities.SharedClient;
+            _httpClient = httpClient ?? new HttpClient();
             if (!string.IsNullOrWhiteSpace(token))
             {
                 _httpClient.DefaultRequestHeaders.Authorization =
@@ -43,6 +46,17 @@ namespace Microsoft.Extensions.AI
         protected string ApiChatEndpoint => _apiChatEndpoint;
 
         protected HttpClient HttpClient => _httpClient;
+
+        protected virtual string ProviderName => "vllm";
+
+        internal virtual ChatResponseUpdate? HandleStreamingReasoningContent(Delta delta, string responseId, string modelId)
+        {
+            if (delta.ReasoningContent != null)
+            {
+                return BuildTextUpdate(responseId, delta.ReasoningContent, true);
+            }
+            return null;
+        }
 
         public JsonSerializerOptions ToolCallJsonSerializerOptions
         {
@@ -154,6 +168,11 @@ namespace Microsoft.Extensions.AI
             while ((await streamReader.ReadLineAsync().ConfigureAwait(false)) is { } line)
 #endif
             {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith(':'))
+                {
+                    continue;
+                }
+
                 string jsonPart = Regex.Replace(line, @"^data:\s*", "");
 
                 if (string.IsNullOrEmpty(jsonPart))
@@ -187,9 +206,10 @@ namespace Microsoft.Extensions.AI
                     var bufferCopy = bufferMsg;
                     var funcList = new List<VllmFunctionToolCall>();
 
-                    if (message.ReasoningContent != null)
+                    var reasoningUpdate = HandleStreamingReasoningContent(message, responseId, chunk.Model ?? Metadata.DefaultModelId);
+                    if (reasoningUpdate != null)
                     {
-                        yield return BuildTextUpdate(responseId, message.ReasoningContent, true);
+                        yield return reasoningUpdate;
                         continue;
                     }
 
@@ -392,6 +412,132 @@ namespace Microsoft.Extensions.AI
             return null;
         }
 
+        private protected virtual IEnumerable<ChatMessage> PrepareMessagesWithSkills(IEnumerable<ChatMessage> messages, ChatOptions? options)
+        {
+            if (options is not VllmChatOptions vllmOptions)
+            {
+                return messages;
+            }
+
+            if (!vllmOptions.EnableSkills && string.IsNullOrWhiteSpace(vllmOptions.SkillDirectoryPath))
+            {
+                return messages;
+            }
+
+            // Inject built-in skill AIFunctions into options.Tools so that
+            // FunctionInvokingChatClient can find and execute them.
+            var skillsDir = GetEffectiveSkillsDirectory(vllmOptions.SkillDirectoryPath);
+            if (Directory.Exists(skillsDir))
+            {
+                var builtInFunctions = CreateBuiltInSkillTools(skillsDir).ToList();
+                if (builtInFunctions.Count > 0)
+                {
+                    vllmOptions.Tools ??= [];
+                    foreach (var fn in builtInFunctions)
+                    {
+                        if (!vllmOptions.Tools.OfType<AIFunction>().Any(t => t.Name == fn.Name))
+                        {
+                            vllmOptions.Tools.Add(fn);
+                        }
+                    }
+                }
+            }
+
+            var skillInstruction = LoadSkillInstruction(vllmOptions.SkillDirectoryPath);
+            if (string.IsNullOrWhiteSpace(skillInstruction))
+            {
+                return messages;
+            }
+
+            return [new ChatMessage(ChatRole.System, skillInstruction), .. messages];
+        }
+
+        private static string? LoadSkillInstruction(string? skillDirectoryPath)
+        {
+            var effectiveDirectory = string.IsNullOrWhiteSpace(skillDirectoryPath)
+                ? Path.Combine(Directory.GetCurrentDirectory(), "skills")
+                : Path.GetFullPath(skillDirectoryPath);
+
+            try
+            {
+                if (!Directory.Exists(effectiveDirectory))
+                {
+                    return null; // 不缓存，下次继续检查
+                }
+
+                var dirInfo = new DirectoryInfo(effectiveDirectory);
+                var lastWrite = dirInfo.LastWriteTimeUtc;
+
+                // 检查缓存是否有效
+                if (_skillInstructionCache.TryGetValue(effectiveDirectory, out var cached)
+                    && cached.timestamp >= lastWrite
+                    && cached.instruction != null)
+                {
+                    return cached.instruction;
+                }
+
+                var skillFiles = Directory
+                    .EnumerateFiles(effectiveDirectory, "*.md", SearchOption.TopDirectoryOnly)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                if (skillFiles.Length == 0)
+                {
+                    return null; // 不缓存空结果
+                }
+
+                var sections = skillFiles
+                    .Select(file =>
+                    {
+                        try
+                        {
+                            var title = Path.GetFileNameWithoutExtension(file);
+                            var content = File.ReadAllText(file).Trim();
+                            return string.IsNullOrWhiteSpace(content)
+                                ? null
+                                : $"## Skill: {title}\n{content}";
+                        }
+                        catch (Exception)
+                        {
+                            return null; // 单个文件失败不影响其他
+                        }
+                    })
+                    .Where(section => section is not null)
+                    .Cast<string>()
+                    .ToArray();
+
+                if (sections.Length == 0)
+                {
+                    return null;
+                }
+
+                var instruction = $"""
+                    # Skills
+                    
+                    You have {sections.Length} skill(s) loaded from the local skills directory.
+                    Based on the user's question, select the most relevant skill(s) and follow the instructions defined in them.
+                    If no skill is relevant, answer the question directly without referencing any skill.
+                    If the user's question relates to multiple skills, combine the instructions from all applicable skills.
+                    
+                    You also have two built-in tools:
+                    - **ListSkillFiles**: Lists all available skill files (.md) in the skills directory.
+                    - **ReadSkillFile**: Reads the full content of a specific skill file by filename.
+                    Use these tools when the user asks to browse, inspect, or discover available skills.
+                    
+                    {string.Join("\n\n", sections)}
+                    """;
+
+                // 仅缓存有效结果
+                _skillInstructionCache[effectiveDirectory] = (instruction, lastWrite);
+                return instruction;
+            }
+            catch (Exception)
+            {
+                // 任何异常都静默处理，视为 skill 加载失败
+                return null;
+            }
+        }
+
         private protected virtual VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
             ValidateMessages(messages, options);
@@ -399,7 +545,7 @@ namespace Microsoft.Extensions.AI
             VllmOpenAIChatRequest request = new()
             {
                 Format = ToVllmChatResponseFormat(options?.ResponseFormat),
-                Messages = messages.SelectMany(ToVllmChatRequestMessages).ToArray(),
+                Messages = PrepareMessagesWithSkills(messages, options).SelectMany(ToVllmChatRequestMessages).ToArray(),
                 Model = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty,
                 Stream = stream,
                 Tools = GetTools(options),
@@ -533,6 +679,50 @@ namespace Microsoft.Extensions.AI
                     Parameters = JsonSerializer.Deserialize(function.JsonSchema, JsonContext.Default.VllmFunctionToolParameters)!,
                 }
             };
+        }
+
+        private static string GetEffectiveSkillsDirectory(string? skillDirectoryPath)
+        {
+            return string.IsNullOrWhiteSpace(skillDirectoryPath)
+                ? Path.Combine(Directory.GetCurrentDirectory(), "skills")
+                : Path.GetFullPath(skillDirectoryPath);
+        }
+
+        private static IEnumerable<AIFunction> CreateBuiltInSkillTools(string skillsDir)
+        {
+            yield return AIFunctionFactory.Create(
+                [Description("List all available skill files (.md) in the skills directory.")]
+                () =>
+                {
+                    if (!Directory.Exists(skillsDir))
+                    {
+                        return "No skills directory found.";
+                    }
+
+                    var files = Directory.EnumerateFiles(skillsDir, "*.md", SearchOption.TopDirectoryOnly)
+                        .Select(Path.GetFileName)
+                        .ToArray();
+                    return files.Length > 0
+                        ? string.Join("\n", files)
+                        : "No skill files found.";
+                },
+                "ListSkillFiles",
+                "List all available skill files (.md) in the skills directory.");
+
+            yield return AIFunctionFactory.Create(
+                [Description("Read the full content of a specific skill file by filename.")]
+                (string fileName) =>
+                {
+                    var filePath = Path.Combine(skillsDir, fileName);
+                    if (!File.Exists(filePath))
+                    {
+                        return $"File '{fileName}' not found.";
+                    }
+
+                    return File.ReadAllText(filePath);
+                },
+                "ReadSkillFile",
+                "Read the full content of a specific skill file by filename.");
         }
     }
 }

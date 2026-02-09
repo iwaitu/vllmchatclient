@@ -476,26 +476,53 @@ namespace Microsoft.Extensions.AI
                     return cached.instruction;
                 }
 
-                var skillFiles = Directory
+                // 扫描顶层 *.md 文件
+                var topLevelSkills = Directory
                     .EnumerateFiles(effectiveDirectory, "*.md", SearchOption.TopDirectoryOnly)
-                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .Select(file => (title: Path.GetFileNameWithoutExtension(file), path: file))
+                    .ToList();
+
+                // 扫描子目录中的 SKILL.md 文件（例如 ./skills/test/SKILL.md）
+                var subDirSkills = Directory
+                    .EnumerateDirectories(effectiveDirectory)
+                    .Select(dir =>
+                    {
+                        var skillMd = Path.Combine(dir, "SKILL.md");
+                        if (File.Exists(skillMd))
+                        {
+                            return (title: Path.GetFileName(dir), path: skillMd);
+                        }
+                        // 也支持小写 skill.md
+                        var skillMdLower = Path.Combine(dir, "skill.md");
+                        if (File.Exists(skillMdLower))
+                        {
+                            return (title: Path.GetFileName(dir), path: skillMdLower);
+                        }
+                        return (title: (string?)null, path: (string?)null);
+                    })
+                    .Where(x => x.title != null)
+                    .Select(x => (title: x.title!, path: x.path!))
+                    .ToList();
+
+                var allSkillFiles = topLevelSkills
+                    .Concat(subDirSkills)
+                    .OrderBy(x => x.title, StringComparer.OrdinalIgnoreCase)
                     .ToArray();
 
-                if (skillFiles.Length == 0)
+                if (allSkillFiles.Length == 0)
                 {
                     return null; // 不缓存空结果
                 }
 
-                var sections = skillFiles
-                    .Select(file =>
+                var sections = allSkillFiles
+                    .Select(skill =>
                     {
                         try
                         {
-                            var title = Path.GetFileNameWithoutExtension(file);
-                            var content = File.ReadAllText(file).Trim();
+                            var content = File.ReadAllText(skill.path).Trim();
                             return string.IsNullOrWhiteSpace(content)
                                 ? null
-                                : $"## Skill: {title}\n{content}";
+                                : $"## Skill: {skill.title}\n{content}";
                         }
                         catch (Exception)
                         {
@@ -691,7 +718,7 @@ namespace Microsoft.Extensions.AI
         private static IEnumerable<AIFunction> CreateBuiltInSkillTools(string skillsDir)
         {
             yield return AIFunctionFactory.Create(
-                [Description("List all available skill files (.md) in the skills directory.")]
+                [Description("List all available skill files (.md) in the skills directory, including subdirectory skills.")]
                 () =>
                 {
                     if (!Directory.Exists(skillsDir))
@@ -699,30 +726,63 @@ namespace Microsoft.Extensions.AI
                         return "No skills directory found.";
                     }
 
-                    var files = Directory.EnumerateFiles(skillsDir, "*.md", SearchOption.TopDirectoryOnly)
+                    var results = new List<string>();
+
+                    // 顶层 *.md 文件
+                    var topLevelFiles = Directory.EnumerateFiles(skillsDir, "*.md", SearchOption.TopDirectoryOnly)
                         .Select(Path.GetFileName)
-                        .ToArray();
-                    return files.Length > 0
-                        ? string.Join("\n", files)
+                        .Where(f => f != null)
+                        .Cast<string>();
+                    results.AddRange(topLevelFiles);
+
+                    // 子目录中的 SKILL.md
+                    foreach (var dir in Directory.EnumerateDirectories(skillsDir))
+                    {
+                        var dirName = Path.GetFileName(dir);
+                        var skillMd = Path.Combine(dir, "SKILL.md");
+                        var skillMdLower = Path.Combine(dir, "skill.md");
+                        if (File.Exists(skillMd))
+                        {
+                            results.Add($"{dirName}/ (SKILL.md)");
+                        }
+                        else if (File.Exists(skillMdLower))
+                        {
+                            results.Add($"{dirName}/ (skill.md)");
+                        }
+                    }
+
+                    return results.Count > 0
+                        ? string.Join("\n", results.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
                         : "No skill files found.";
                 },
                 "ListSkillFiles",
-                "List all available skill files (.md) in the skills directory.");
+                "List all available skill files (.md) in the skills directory, including subdirectory skills.");
 
             yield return AIFunctionFactory.Create(
-                [Description("Read the full content of a specific skill file by filename.")]
+                [Description("Read the full content of a specific skill file. For top-level files, use filename directly. For subdirectory skills, use 'dirname/SKILL.md' format.")]
                 (string fileName) =>
                 {
                     var filePath = Path.Combine(skillsDir, fileName);
                     if (!File.Exists(filePath))
                     {
+                        // 尝试子目录中的 SKILL.md
+                        var subDirSkill = Path.Combine(skillsDir, fileName, "SKILL.md");
+                        if (File.Exists(subDirSkill))
+                        {
+                            return File.ReadAllText(subDirSkill);
+                        }
+                        var subDirSkillLower = Path.Combine(skillsDir, fileName, "skill.md");
+                        if (File.Exists(subDirSkillLower))
+                        {
+                            return File.ReadAllText(subDirSkillLower);
+                        }
                         return $"File '{fileName}' not found.";
                     }
 
                     return File.ReadAllText(filePath);
                 },
                 "ReadSkillFile",
-                "Read the full content of a specific skill file by filename.");
+                "Read the full content of a specific skill file. For top-level files, use filename directly. For subdirectory skills, use directory name.");
         }
     }
 }

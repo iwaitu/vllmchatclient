@@ -1,11 +1,7 @@
 namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
 {
-    public class KimiChatOptions : ChatOptions
+    public class KimiChatOptions : VllmChatOptions
     {
-        /// <summary>
-        /// Enable/disable Kimi thinking chain output.
-        /// Default is enabled.
-        /// </summary>
-        public bool ThinkingEnabled { get; set; } = true;
+        
     }
 }

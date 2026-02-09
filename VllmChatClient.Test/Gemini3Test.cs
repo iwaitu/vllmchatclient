@@ -17,21 +17,34 @@ namespace VllmChatClient.Test
     {
         private readonly ITestOutputHelper _output;
         private readonly string _apiKey;
+        private readonly bool _skipTests;
 
         public Gemini3Test(ITestOutputHelper output)
         {
             _output = output;
             // 从环境变量获取 Gemini API Key
             _apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY") ?? "";
+            var runExternal = Environment.GetEnvironmentVariable("VLLM_RUN_EXTERNAL_TESTS");
+            _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(_apiKey);
+        }
+
+        private bool ShouldSkip()
+        {
+            if (!_skipTests)
+            {
+                return false;
+            }
+
+            _output.WriteLine("Skipping test: external tests disabled or GEMINI_API_KEY not set");
+            return true;
         }
 
         [Fact]
         public async Task ChatTest_WithNormalReasoning()
         {
             // 跳过测试如果没有 API Key
-            if (string.IsNullOrEmpty(_apiKey))
+            if (ShouldSkip())
             {
-                _output.WriteLine("Skipping test: GEMINI_API_KEY environment variable not set");
                 return;
             }
 
@@ -78,9 +91,8 @@ namespace VllmChatClient.Test
         public async Task ChatTest_WithLowReasoning()
         {
             // 跳过测试如果没有 API Key
-            if (string.IsNullOrEmpty(_apiKey))
+            if (ShouldSkip())
             {
-                _output.WriteLine("Skipping test: GEMINI_API_KEY environment variable not set");
                 return;
             }
 
@@ -127,9 +139,8 @@ namespace VllmChatClient.Test
         public async Task StreamChatTest()
         {
             // 跳过测试如果没有 API Key
-            if (string.IsNullOrEmpty(_apiKey))
+            if (ShouldSkip())
             {
-                _output.WriteLine("Skipping test: GEMINI_API_KEY environment variable not set");
                 return;
             }
 
@@ -192,9 +203,8 @@ namespace VllmChatClient.Test
         public async Task DebugApiConnection()
         {
             // 跳过测试如果没有 API Key
-            if (string.IsNullOrEmpty(_apiKey))
+            if (ShouldSkip())
             {
-                _output.WriteLine("Skipping test: GEMINI_API_KEY environment variable not set");
                 return;
             }
 
@@ -273,9 +283,8 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task FunctionCall_SingleCall_ManualExecution()
         {
-            if (string.IsNullOrEmpty(_apiKey))
+            if (ShouldSkip())
             {
-                _output.WriteLine("Skipping test: GEMINI_API_KEY environment variable not set");
                 return;
             }
 
@@ -374,9 +383,8 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task FunctionCall_WithAutomaticInvocation()
         {
-            if (string.IsNullOrEmpty(_apiKey))
+            if (ShouldSkip())
             {
-                _output.WriteLine("Skipping test: GEMINI_API_KEY environment variable not set");
                 return;
             }
 

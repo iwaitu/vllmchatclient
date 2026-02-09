@@ -1,6 +1,6 @@
 ﻿namespace Microsoft.Extensions.AI
 {
-    public class Qwen3ChatOptions : ChatOptions
+    public class Qwen3ChatOptions : VllmChatOptions
     {
         public bool NoThinking { get; set; } = false;
         //设置Top P为0.9，TopK为20

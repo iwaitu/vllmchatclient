@@ -9,9 +9,12 @@ namespace VllmChatClient.Test
     {
         private readonly IChatClient _client;
         static int functionCallTime = 0;
+        private readonly bool _skipTests;
         public Qwen2507ReasoningChatTests()
         {
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            var runExternal = Environment.GetEnvironmentVariable("VLLM_RUN_EXTERNAL_TESTS");
+            _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
             _client = new VllmQwen2507ReasoningChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-235b-a22b-thinking-2507");
         }
 
@@ -20,6 +23,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task ChatTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
@@ -38,6 +45,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task ExtractTags()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             string text = "不动产登记资料查询，即查档业务，包括查询房屋、土地、车库车位等不动产登记结果，以及复制房屋、土地、车库车位等不动产登记原始资料。\n";
 
             var options = new ChatOptions
@@ -60,6 +71,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task ChatFunctionCallTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
 
             IChatClient client = new ChatClientBuilder(_client)
                 .UseFunctionInvocation()
@@ -83,6 +98,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task StreamChatTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"我是一个智能助手，名字叫菲菲"),
@@ -111,6 +130,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task StreamChatFunctionCallTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             IChatClient client = new ChatClientBuilder(_client)
                 .UseFunctionInvocation()
                 .Build();
@@ -143,6 +166,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task StreamChatJsonoutput()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             IChatClient client = new ChatClientBuilder(_client)
                 .UseFunctionInvocation()
                 .Build();
@@ -198,6 +225,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task ChatManualFunctionCallTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
 
 
             var messages = new List<ChatMessage>
@@ -286,6 +317,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task TestJsonOutput()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),

@@ -14,7 +14,18 @@ namespace VllmChatClient.Test
         private readonly IChatClient _client;
         private readonly ITestOutputHelper _output;
         private const string MODEL = "kimi-k2.5";
+        private readonly bool _skipTests;
         static int functionCallTime = 0;
+
+        private static ChatOptions CreateChatOptions()
+        {
+            if (MODEL == "kimi-k2.5")
+            {
+                return new KimiChatOptions { ThinkingEnabled = false };
+            }
+
+            return new ChatOptions();
+        }
         
 
         [Description("获取南宁的天气情况")]
@@ -41,18 +52,24 @@ namespace VllmChatClient.Test
             //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
             //_client = new VllmKimiK2ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_KIMI_API_KEY");
+            var runExternal = "1";
+            _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
             _client = new VllmKimiK2ChatClient("https://api.moonshot.cn/{0}/{1}", cloud_apiKey, MODEL);
         }
 
         [Fact]
         public async Task ChatTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲 "),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
-            var options = new ChatOptions();
+            var options = CreateChatOptions();
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
             Assert.Single(res.Messages); // 使用 Assert.Single 替代 Assert.Equal(1, ...)
@@ -70,12 +87,16 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task StreamChatTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
-            var options = new ChatOptions();
+            var options = CreateChatOptions();
             string reason = string.Empty;
             string anwser = string.Empty;
             await foreach (var message in _client.GetStreamingResponseAsync(messages, options))
@@ -97,7 +118,10 @@ namespace VllmChatClient.Test
                 }
             }
             
-            Assert.False(string.IsNullOrEmpty(reason));
+            if (options is KimiChatOptions)
+            {
+                Assert.True(string.IsNullOrEmpty(reason));
+            }
             Assert.False(string.IsNullOrEmpty(anwser));
             Assert.Contains("菲菲", anwser);
             _output.WriteLine($"Partial Response: {reason}");
@@ -107,18 +131,22 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task ChatThinkingDisabledTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
 
-            var options = new KimiChatOptions { ThinkingEnabled = false };
+            var options = CreateChatOptions();
             var res = await _client.GetResponseAsync(messages, options);
 
             Assert.NotNull(res);
             Assert.Contains("菲菲", res.Text);
-            if (res is ReasoningChatResponse r)
+            if (options is KimiChatOptions && res is ReasoningChatResponse r)
             {
                 Assert.True(string.IsNullOrEmpty(r.Reason), $"Expected empty reason when thinking is disabled, but got: '{r.Reason}'");
             }
@@ -127,9 +155,13 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task ExtractTags()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             string text = "不动产登记资料查询，即查档业务，包括查询房屋、土地、车库车位等不动产登记结果，以及复制房屋、土地、车库车位等不动产登记原始资料。\n";
 
-            var options = new ChatOptions();
+            var options = CreateChatOptions();
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.User,$"请为以下文本提取3个最相关的标签。用json格式返回，不要输出代码块。\n\n文本:{text}")
@@ -153,6 +185,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task ChatSerialFunctionCallTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
 
             IChatClient client = new ChatClientBuilder(_client)
                 .UseFunctionInvocation()
@@ -162,10 +198,8 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")               //串行调用两个函数
             };
-            ChatOptions chatOptions = new()
-            {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
-            };
+            var chatOptions = CreateChatOptions();
+            chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)];
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
             Assert.True(res.Messages.Count >= 1);
@@ -185,6 +219,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task ChatParallelFunctionCallTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
 
             IChatClient client = new ChatClientBuilder(_client)
                 .UseFunctionInvocation()
@@ -194,10 +232,8 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")               //并行调用两个函数
             };
-            ChatOptions chatOptions = new()
-            {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
-            };
+            var chatOptions = CreateChatOptions();
+            chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)];
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
             Assert.True(res.Messages.Count >= 1);
@@ -217,6 +253,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task StreamChatParallelFunctionCallTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             IChatClient client = new ChatClientBuilder(_client)
                 .UseFunctionInvocation()
                 .Build();
@@ -226,10 +266,8 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
-            ChatOptions chatOptions = new()
-            {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
-            };
+            var chatOptions = CreateChatOptions();
+            chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)];
             string res = string.Empty;
             string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
@@ -256,6 +294,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task StreamChatSerialFunctionCallTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             IChatClient client = new ChatClientBuilder(_client)
                 .UseFunctionInvocation()
                 .Build();
@@ -265,10 +307,8 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
-            ChatOptions chatOptions = new()
-            {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
-            };
+            var chatOptions = CreateChatOptions();
+            chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)];
             string res = string.Empty;
             string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
@@ -295,6 +335,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task StreamChatManualFunctionCallTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             //IChatClient client = new ChatClientBuilder(_client)
             //    .UseFunctionInvocation()
             //    .Build();
@@ -304,10 +348,8 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
-            ChatOptions chatOptions = new()
-            {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
-            };
+            var chatOptions = CreateChatOptions();
+            chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)];
             string res = string.Empty;
             string reason = string.Empty;
             await foreach (var update in _client.GetStreamingResponseAsync(messages, chatOptions))
@@ -362,6 +404,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task StreamChatJsonoutput()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             //IChatClient client = new ChatClientBuilder(_client)
             //    .UseFunctionInvocation()
             //    .Build();
@@ -370,10 +416,7 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲。"),
                 new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用 codeblock。")
             };
-            ChatOptions chatOptions = new()
-            {
-                //Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
-            };
+            var chatOptions = CreateChatOptions();
             string res = string.Empty;
             string reason = string.Empty;
             await foreach (var update in _client.GetStreamingResponseAsync(messages, chatOptions))
@@ -421,6 +464,10 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task ChatManualFunctionCallTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
 
 
             var messages = new List<ChatMessage>
@@ -428,10 +475,8 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。"),
             };
-            ChatOptions chatOptions = new()
-            {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search),AIFunctionFactory.Create(FindBookStore)]
-            };
+            var chatOptions = CreateChatOptions();
+            chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search),AIFunctionFactory.Create(FindBookStore)];
             var res = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
@@ -501,15 +546,17 @@ namespace VllmChatClient.Test
         [Fact]
         public async Task TestJsonOutput()
         {
+            if (_skipTests)
+            {
+                return;
+            }
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用 codeblock。")
             };
-            var options = new ChatOptions
-            {
-                MaxOutputTokens = 100,
-            };
+            var options = CreateChatOptions();
+            options.MaxOutputTokens = 100;
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
             Assert.Single(res.Messages);

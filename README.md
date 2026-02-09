@@ -35,6 +35,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 - 新增 `GlmChatOptions`：通过 `ThinkingEnabled` 开关控制是否在请求体中发送智普官方平台所需的 `thinking: { type: "enabled" }`（默认关闭）。
 - 新增 `KimiChatOptions`：通过 `ThinkingEnabled` 开关控制 Moonshot/Kimi 2.5 所需的 `thinking: { type: "enabled" | "disabled" }`。
+- 新增 `VllmChatOptions` skill 自动加载：默认可从运行目录 `./skills/*.md` 读取本地 skills，并自动注入系统提示词；可通过 `EnableSkills` / `SkillDirectoryPath` 控制。
 - 修复/完善 `VllmKimiK2ChatClient` 思维链解析：Kimi 2.5 不使用 `</think>` 标记，思维链内容来自 `reasoningContent`（流式同样按 `delta.reasoning_content` 输出）。
 - 说明：现已支持 Moonshot **Kimi 2.5** 模型（例如 `kimi-k2.5`）。
 - 在“支持的客户端”表新增 `VllmGlm46ChatClient` 条目。

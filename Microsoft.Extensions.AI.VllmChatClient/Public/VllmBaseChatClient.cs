@@ -1,5 +1,6 @@
 ﻿using Microsoft.Shared.Diagnostics;
 using Newtonsoft.Json;
+using System.Collections.Concurrent;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -10,6 +11,7 @@ namespace Microsoft.Extensions.AI
     public abstract class VllmBaseChatClient : IChatClient
     {
         private static readonly JsonElement _schemalessJsonResponseFormatValue = JsonDocument.Parse("\"json\"").RootElement;
+        private static readonly ConcurrentDictionary<string, string?> _skillInstructionCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ChatClientMetadata _metadata;
         private readonly string _apiChatEndpoint;
         private readonly HttpClient _httpClient;
@@ -392,6 +394,67 @@ namespace Microsoft.Extensions.AI
             return null;
         }
 
+        private protected virtual IEnumerable<ChatMessage> PrepareMessagesWithSkills(IEnumerable<ChatMessage> messages, ChatOptions? options)
+        {
+            if (options is not VllmChatOptions vllmOptions || !vllmOptions.EnableSkills)
+            {
+                return messages;
+            }
+
+            var skillInstruction = LoadSkillInstruction(vllmOptions.SkillDirectoryPath);
+            if (string.IsNullOrWhiteSpace(skillInstruction))
+            {
+                return messages;
+            }
+
+            return [new ChatMessage(ChatRole.System, skillInstruction), .. messages];
+        }
+
+        private static string? LoadSkillInstruction(string? skillDirectoryPath)
+        {
+            var effectiveDirectory = string.IsNullOrWhiteSpace(skillDirectoryPath)
+                ? Path.Combine(Directory.GetCurrentDirectory(), "skills")
+                : Path.GetFullPath(skillDirectoryPath);
+
+            return _skillInstructionCache.GetOrAdd(effectiveDirectory, static directory =>
+            {
+                if (!Directory.Exists(directory))
+                {
+                    return null;
+                }
+
+                var skillFiles = Directory
+                    .EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                if (skillFiles.Length == 0)
+                {
+                    return null;
+                }
+
+                var sections = skillFiles
+                    .Select(file =>
+                    {
+                        var title = Path.GetFileNameWithoutExtension(file);
+                        var content = File.ReadAllText(file).Trim();
+                        return string.IsNullOrWhiteSpace(content)
+                            ? null
+                            : $"## Skill: {title}\n{content}";
+                    })
+                    .Where(section => section is not null)
+                    .Cast<string>()
+                    .ToArray();
+
+                if (sections.Length == 0)
+                {
+                    return null;
+                }
+
+                return $"你可以使用以下本地 skills 指令（来自运行目录 skills 文件夹）：\n\n{string.Join("\n\n", sections)}";
+            });
+        }
+
         private protected virtual VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
             ValidateMessages(messages, options);
@@ -399,7 +462,7 @@ namespace Microsoft.Extensions.AI
             VllmOpenAIChatRequest request = new()
             {
                 Format = ToVllmChatResponseFormat(options?.ResponseFormat),
-                Messages = messages.SelectMany(ToVllmChatRequestMessages).ToArray(),
+                Messages = PrepareMessagesWithSkills(messages, options).SelectMany(ToVllmChatRequestMessages).ToArray(),
                 Model = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty,
                 Stream = stream,
                 Tools = GetTools(options),

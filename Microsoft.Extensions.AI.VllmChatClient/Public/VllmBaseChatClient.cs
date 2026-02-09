@@ -1,6 +1,7 @@
 ﻿using Microsoft.Shared.Diagnostics;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -396,9 +397,33 @@ namespace Microsoft.Extensions.AI
 
         private protected virtual IEnumerable<ChatMessage> PrepareMessagesWithSkills(IEnumerable<ChatMessage> messages, ChatOptions? options)
         {
-            if (options is not VllmChatOptions vllmOptions || !vllmOptions.EnableSkills)
+            if (options is not VllmChatOptions vllmOptions)
             {
                 return messages;
+            }
+
+            if (!vllmOptions.EnableSkills && string.IsNullOrWhiteSpace(vllmOptions.SkillDirectoryPath))
+            {
+                return messages;
+            }
+
+            // Inject built-in skill AIFunctions into options.Tools so that
+            // FunctionInvokingChatClient can find and execute them.
+            var skillsDir = GetEffectiveSkillsDirectory(vllmOptions.SkillDirectoryPath);
+            if (Directory.Exists(skillsDir))
+            {
+                var builtInFunctions = CreateBuiltInSkillTools(skillsDir).ToList();
+                if (builtInFunctions.Count > 0)
+                {
+                    vllmOptions.Tools ??= [];
+                    foreach (var fn in builtInFunctions)
+                    {
+                        if (!vllmOptions.Tools.OfType<AIFunction>().Any(t => t.Name == fn.Name))
+                        {
+                            vllmOptions.Tools.Add(fn);
+                        }
+                    }
+                }
             }
 
             var skillInstruction = LoadSkillInstruction(vllmOptions.SkillDirectoryPath);
@@ -451,7 +476,21 @@ namespace Microsoft.Extensions.AI
                     return null;
                 }
 
-                return $"你可以使用以下本地 skills 指令（来自运行目录 skills 文件夹）：\n\n{string.Join("\n\n", sections)}";
+                return $"""
+                    # Skills
+                    
+                    You have {sections.Length} skill(s) loaded from the local skills directory.
+                    Based on the user's question, select the most relevant skill(s) and follow the instructions defined in them.
+                    If no skill is relevant, answer the question directly without referencing any skill.
+                    If the user's question relates to multiple skills, combine the instructions from all applicable skills.
+                    
+                    You also have two built-in tools:
+                    - **ListSkillFiles**: Lists all available skill files (.md) in the skills directory.
+                    - **ReadSkillFile**: Reads the full content of a specific skill file by filename.
+                    Use these tools when the user asks to browse, inspect, or discover available skills.
+                    
+                    {string.Join("\n\n", sections)}
+                    """;
             });
         }
 
@@ -596,6 +635,50 @@ namespace Microsoft.Extensions.AI
                     Parameters = JsonSerializer.Deserialize(function.JsonSchema, JsonContext.Default.VllmFunctionToolParameters)!,
                 }
             };
+        }
+
+        private static string GetEffectiveSkillsDirectory(string? skillDirectoryPath)
+        {
+            return string.IsNullOrWhiteSpace(skillDirectoryPath)
+                ? Path.Combine(Directory.GetCurrentDirectory(), "skills")
+                : Path.GetFullPath(skillDirectoryPath);
+        }
+
+        private static IEnumerable<AIFunction> CreateBuiltInSkillTools(string skillsDir)
+        {
+            yield return AIFunctionFactory.Create(
+                [Description("List all available skill files (.md) in the skills directory.")]
+                () =>
+                {
+                    if (!Directory.Exists(skillsDir))
+                    {
+                        return "No skills directory found.";
+                    }
+
+                    var files = Directory.EnumerateFiles(skillsDir, "*.md", SearchOption.TopDirectoryOnly)
+                        .Select(Path.GetFileName)
+                        .ToArray();
+                    return files.Length > 0
+                        ? string.Join("\n", files)
+                        : "No skill files found.";
+                },
+                "ListSkillFiles",
+                "List all available skill files (.md) in the skills directory.");
+
+            yield return AIFunctionFactory.Create(
+                [Description("Read the full content of a specific skill file by filename.")]
+                (string fileName) =>
+                {
+                    var filePath = Path.Combine(skillsDir, fileName);
+                    if (!File.Exists(filePath))
+                    {
+                        return $"File '{fileName}' not found.";
+                    }
+
+                    return File.ReadAllText(filePath);
+                },
+                "ReadSkillFile",
+                "Read the full content of a specific skill file by filename.");
         }
     }
 }

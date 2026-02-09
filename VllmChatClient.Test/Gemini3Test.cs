@@ -24,7 +24,7 @@ namespace VllmChatClient.Test
             _output = output;
             // 从环境变量获取 Gemini API Key
             _apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY") ?? "";
-            var runExternal = Environment.GetEnvironmentVariable("VLLM_RUN_EXTERNAL_TESTS");
+            var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(_apiKey);
         }
 

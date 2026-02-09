@@ -27,7 +27,7 @@ namespace Microsoft.Extensions.AI
             }
 
             _apiChatEndpoint = endpoint ?? "http://localhost:8000/{0}/{1}";
-            _httpClient = httpClient ?? VllmUtilities.SharedClient;
+            _httpClient = httpClient ?? new HttpClient();
             if (!string.IsNullOrWhiteSpace(token))
             {
                 _httpClient.DefaultRequestHeaders.Authorization =
@@ -46,6 +46,17 @@ namespace Microsoft.Extensions.AI
         protected string ApiChatEndpoint => _apiChatEndpoint;
 
         protected HttpClient HttpClient => _httpClient;
+
+        protected virtual string ProviderName => "vllm";
+
+        internal virtual ChatResponseUpdate? HandleStreamingReasoningContent(Delta delta, string responseId, string modelId)
+        {
+            if (delta.ReasoningContent != null)
+            {
+                return BuildTextUpdate(responseId, delta.ReasoningContent, true);
+            }
+            return null;
+        }
 
         public JsonSerializerOptions ToolCallJsonSerializerOptions
         {
@@ -157,6 +168,11 @@ namespace Microsoft.Extensions.AI
             while ((await streamReader.ReadLineAsync().ConfigureAwait(false)) is { } line)
 #endif
             {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith(':'))
+                {
+                    continue;
+                }
+
                 string jsonPart = Regex.Replace(line, @"^data:\s*", "");
 
                 if (string.IsNullOrEmpty(jsonPart))
@@ -190,9 +206,10 @@ namespace Microsoft.Extensions.AI
                     var bufferCopy = bufferMsg;
                     var funcList = new List<VllmFunctionToolCall>();
 
-                    if (message.ReasoningContent != null)
+                    var reasoningUpdate = HandleStreamingReasoningContent(message, responseId, chunk.Model ?? Metadata.DefaultModelId);
+                    if (reasoningUpdate != null)
                     {
-                        yield return BuildTextUpdate(responseId, message.ReasoningContent, true);
+                        yield return reasoningUpdate;
                         continue;
                     }
 

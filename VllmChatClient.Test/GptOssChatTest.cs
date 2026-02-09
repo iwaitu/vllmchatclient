@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.AI;
 using Microsoft.Extensions.AI.VllmChatClient.GptOss;
 using System.ComponentModel;
+using System.ComponentModel.Design;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -287,13 +288,13 @@ namespace VllmChatClient.Test
                                 [new FunctionResultContent(fc.CallId, result)]));
                             continue;
                         }
-                    }
+                    }                    
                 }
                 else
                 {
-                    if(update is ReasoningChatResponseUpdate reasoningUpdate)
+                    if (update is ReasoningChatResponseUpdate reasoningUpdate)
                     {
-                        if(reasoningUpdate.Thinking)
+                        if (reasoningUpdate.Thinking)
                         {
                             // 如果模型在思考，可以选择处理思考内容
                             reason += reasoningUpdate.Reasoning;
@@ -303,10 +304,30 @@ namespace VllmChatClient.Test
                             res += reasoningUpdate.Text;
                         }
                     }
-                    
                 }
-
             }
+
+            // Second turn: Get model response after tool execution
+            if (messages.Last().Role == ChatRole.Tool)
+            {
+                await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
+                {
+                    if (update is ReasoningChatResponseUpdate reasoningUpdate)
+                    {
+                        if (reasoningUpdate.Thinking)
+                        {
+                            reason += reasoningUpdate.Reasoning;
+                        }
+                        else
+                        {
+                            res += reasoningUpdate.Text;
+                        }
+                    }
+                }
+            }
+            
+            _output.WriteLine($"Reasoning: {reason}");
+            _output.WriteLine($"Response: {res}");
 
             Assert.False(string.IsNullOrWhiteSpace(res));
         }

@@ -30,25 +30,41 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 本次更新
 
+### 🔄 `VllmQwen3NextChatClient` 重构 — 统一多模型适配
+
+- **`VllmQwen3NextChatClient` 已适配多个模型系列**，通过构造函数 `modelId` 或 `ChatOptions.ModelId` 切换，无需再使用独立的 Client 类：
+  - `qwen3-next-80b-a3b-thinking` / `qwen3-next-80b-a3b-instruct`
+  - `qwen3-vl-30b-a3b-thinking` / `qwen3-vl-30b-a3b-instruct`（多模态，支持图片输入）
+  - `qwen3-vl-32b-thinking` / `qwen3-vl-32b-instruct`（多模态）
+  - `qwen3-vl-235b-a22b-thinking` / `qwen3-vl-235b-a22b-instruct`（多模态，人工验证通过）
+- **删除已整合的模型类**（功能已由 `VllmQwen3NextChatClient` 或基类统一覆盖）：
+  - `VllmQwen2507ChatClient`（qwen3-235b-a22b-instruct-2507）— 已删除
+  - `VllmQwen2507ReasoningChatClient`（qwen3-235b-a22b-thinking-2507）— 已删除
+  - 对应测试 `Qwen2507ChatTests.cs`、`Qwen2507ReasoningChatTests.cs`、`Qwen3coderNextTests.cs` 同步删除
+- 删除 `VllmChatClientNuget.Test` 测试项目（已不再需要）。
+
+### 🧩 基类重构与适配器增强
+
+- **`VllmBaseChatClient` 基类增强**：提取公共逻辑（请求构建、流式解析、推理内容处理）到基类，子类只需重写特定差异部分。
+- **`VllmDeepseekR1ChatClient` 重构**：继承 `VllmBaseChatClient`，精简代码，仅保留 DeepSeek R1 特有的 `ReasoningContent` 流式处理逻辑。
+- **`VllmGptOssChatClient` 重构**：继承 `VllmBaseChatClient`，精简大量重复代码，增强推理流式处理。
+
+### 🛠️ 本地 Skill 自动加载
+
+- 新增 `VllmChatOptions` 的 skill 自动加载功能：默认从运行目录 `./skills/*.md` 读取本地 skills，并自动注入系统提示词。
+- 可通过 `EnableSkills`（默认 `true`）/ `SkillDirectoryPath` 控制开关与路径。
+- 内置工具 `ListSkillFiles` 和 `ReadSkillFile`，模型可在对话中按需查询和读取 skill 文件。
+- 新增 `SimpleSkillSmokeTests` 测试类验证 skill 功能。
+
+### 📝 其他更新
+
 - 新增 **GLM 4.7 Flash** 支持。
 - 新增 GLM 4.6/4.7 思维链支持：`VllmGlm46ChatClient`，支持推理分段流式输出（思考/答案）与函数调用。
-
 - 新增 `GlmChatOptions`：通过 `ThinkingEnabled` 开关控制是否在请求体中发送智普官方平台所需的 `thinking: { type: "enabled" }`（默认关闭）。
 - 新增 `KimiChatOptions`：通过 `ThinkingEnabled` 开关控制 Moonshot/Kimi 2.5 所需的 `thinking: { type: "enabled" | "disabled" }`。
-- 新增 `VllmChatOptions` skill 自动加载：默认可从运行目录 `./skills/*.md` 读取本地 skills，并自动注入系统提示词；可通过 `EnableSkills` / `SkillDirectoryPath` 控制。
-- 修复/完善 `VllmKimiK2ChatClient` 思维链解析：Kimi 2.5 不使用 `</think>` 标记，思维链内容来自 `reasoningContent`（流式同样按 `delta.reasoning_content` 输出）。
-- 说明：现已支持 Moonshot **Kimi 2.5** 模型（例如 `kimi-k2.5`）。
-- 在“支持的客户端”表新增 `VllmGlm46ChatClient` 条目。
-- 更新 GLM 4.6/4.7 使用示例（见下文“GLM 4.6/4.7 Thinking Example”），并说明智普官方平台思维链参数支持。
-- 强化 Qwen3-Next 能力：新增“串行/并行函数调用”示例、手动工具编排的流式调用示例、以及严格的 JSON 纯文本输出（无 codeblock）示例。
-- 说明 `VllmQwen3NextChatClient` 支持多个模型：通过构造函数 `modelId` 或 `ChatOptions.ModelId` 切换（thinking / instruct 等）。
+- 修复/完善 `VllmKimiK2ChatClient` 思维链解析。
 - 新增标签提取示例（基于 JSON 解析与正则匹配）。
-- 新增 Gemini 3 支持（`VllmGemini3ChatClient`）：
-  - 文本与流式响应、推理级别 Normal/Low
-  - 工具调用（单个/并行/自动执行/流式）完整测试通过
-  - 新增调试测试：`Gemini3Test`、`GeminiDebugTest`（含多轮 thoughtSignature 调试）
-  - 新增文档：`docs/Gemini3ReasoningExplanation.md`、`docs/Gemini3FunctionCallSupport.md`、`docs/Gemini3DebugTestGuide.md`、`docs/Gemini3FunctionCallDebugGuide.md`、`docs/Gemini3FunctionCallTestResults.md`
-  - 说明：基于当前测试，函数调用无需显式回传 thoughtSignature，仍可正常完成多轮调用（详见文档）
+- 新增 Gemini 3 支持（`VllmGemini3ChatClient`），详见 `docs/Gemini3*` 系列文档。
 
 ---
 
@@ -71,14 +87,26 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - **VllmGlmZ1ChatClient** - Support for GLM-4 models with reasoning capabilities
 - **VllmGlm4ChatClient** - Standard GLM-4 chat functionality
 
-### 🆕 Enhanced Qwen 2507 Models
-- **VllmQwen2507ChatClient** - For qwen3-235b-a22b-instruct-2507 (standard)
-- **VllmQwen2507ReasoningChatClient** - For qwen3-235b-a22b-thinking-2507 (with reasoning)
+### 🔄 Base Class Refactoring & Model Consolidation
+- **`VllmBaseChatClient`** enhanced: common logic (request building, streaming parsing, reasoning content handling) extracted to base class; subclasses only override specific differences.
+- **`VllmDeepseekR1ChatClient`** refactored: inherits `VllmBaseChatClient`, retains only DeepSeek R1-specific `ReasoningContent` streaming logic.
+- **`VllmGptOssChatClient`** refactored: inherits `VllmBaseChatClient`, significantly reduced duplicate code, enhanced reasoning streaming.
+- **Removed** `VllmQwen2507ChatClient` and `VllmQwen2507ReasoningChatClient` (consolidated into `VllmQwen3NextChatClient`).
+- **Removed** `VllmChatClientNuget.Test` project.
 
-### 🆕 Qwen3-Next 80B (Thinking vs Instruct)
-- **VllmQwen3NextChatClient** added.
-- Supports both `qwen3-next-80b-a3b-thinking` (reasoning output, exposes `ReasoningChatResponse` / streaming `ReasoningChatResponseUpdate`) and `qwen3-next-80b-a3b-instruct` (standard instruct style output without reasoning chain).
+### 🛠️ Local Skill Auto-Loading
+- `VllmChatOptions` now supports automatic skill loading from `./skills/*.md` files, injected into system prompts.
+- Controlled via `EnableSkills` (default `true`) / `SkillDirectoryPath`.
+- Built-in tools `ListSkillFiles` and `ReadSkillFile` allow models to query and read skill files during conversation.
+
+### 🆕 Qwen3-Next Multi-Model Adaptation
+- **VllmQwen3NextChatClient** now supports multiple model families via `modelId`:
+  - `qwen3-next-80b-a3b-thinking` / `qwen3-next-80b-a3b-instruct`
+  - `qwen3-vl-30b-a3b-thinking` / `qwen3-vl-30b-a3b-instruct` (multimodal, image input)
+  - `qwen3-vl-32b-thinking` / `qwen3-vl-32b-instruct` (multimodal)
+  - `qwen3-vl-235b-a22b-thinking` / `qwen3-vl-235b-a22b-instruct` (multimodal, manually verified)
 - Unified API: switch model by passing the desired modelId in constructor or per-request via `ChatOptions.ModelId`.
+- Thinking models expose `ReasoningChatResponse` / streaming `ReasoningChatResponseUpdate`; instruct models output standard responses.
 - New examples: Serial/Parallel tool calls, manual tool orchestration in streaming, JSON-only output formatting.
 
 ### 🆕 Kimi K2 Support
@@ -118,9 +146,6 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmGlmZ1ChatClient` | Local vLLM | GLM-4 | ✅ Full | ✅ Stream |
 | `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
 | `VllmGlm46ChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-4.6 / glm-4.7 / glm-4.7-flash | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
-
-| `VllmQwen2507ChatClient` | Cloud API | qwen3-235b-a22b-instruct-2507 | ❌ | ✅ Stream |
-| `VllmQwen2507ReasoningChatClient` | Cloud API | qwen3-235b-a22b-thinking-2507 | ✅ Full | ✅ Stream |
 | `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) / kimi-k2.5 | ✅ (thinking model) | ✅ Stream |
 
 > 注：Gemini 3 的推理采用加密的 thought signature，不输出可读推理文本；函数调用在当前测试中无需显式回传签名亦可完成多轮调用。

@@ -12,7 +12,7 @@ namespace Microsoft.Extensions.AI
     public abstract class VllmBaseChatClient : IChatClient
     {
         private static readonly JsonElement _schemalessJsonResponseFormatValue = JsonDocument.Parse("\"json\"").RootElement;
-        private static readonly ConcurrentDictionary<string, string?> _skillInstructionCache = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, (string? instruction, DateTime timestamp)> _skillInstructionCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ChatClientMetadata _metadata;
         private readonly string _apiChatEndpoint;
         private readonly HttpClient _httpClient;
@@ -458,31 +458,49 @@ namespace Microsoft.Extensions.AI
                 ? Path.Combine(Directory.GetCurrentDirectory(), "skills")
                 : Path.GetFullPath(skillDirectoryPath);
 
-            return _skillInstructionCache.GetOrAdd(effectiveDirectory, static directory =>
+            try
             {
-                if (!Directory.Exists(directory))
+                if (!Directory.Exists(effectiveDirectory))
                 {
-                    return null;
+                    return null; // 不缓存，下次继续检查
+                }
+
+                var dirInfo = new DirectoryInfo(effectiveDirectory);
+                var lastWrite = dirInfo.LastWriteTimeUtc;
+
+                // 检查缓存是否有效
+                if (_skillInstructionCache.TryGetValue(effectiveDirectory, out var cached)
+                    && cached.timestamp >= lastWrite
+                    && cached.instruction != null)
+                {
+                    return cached.instruction;
                 }
 
                 var skillFiles = Directory
-                    .EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly)
+                    .EnumerateFiles(effectiveDirectory, "*.md", SearchOption.TopDirectoryOnly)
                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                     .ToArray();
 
                 if (skillFiles.Length == 0)
                 {
-                    return null;
+                    return null; // 不缓存空结果
                 }
 
                 var sections = skillFiles
                     .Select(file =>
                     {
-                        var title = Path.GetFileNameWithoutExtension(file);
-                        var content = File.ReadAllText(file).Trim();
-                        return string.IsNullOrWhiteSpace(content)
-                            ? null
-                            : $"## Skill: {title}\n{content}";
+                        try
+                        {
+                            var title = Path.GetFileNameWithoutExtension(file);
+                            var content = File.ReadAllText(file).Trim();
+                            return string.IsNullOrWhiteSpace(content)
+                                ? null
+                                : $"## Skill: {title}\n{content}";
+                        }
+                        catch (Exception)
+                        {
+                            return null; // 单个文件失败不影响其他
+                        }
                     })
                     .Where(section => section is not null)
                     .Cast<string>()
@@ -493,7 +511,7 @@ namespace Microsoft.Extensions.AI
                     return null;
                 }
 
-                return $"""
+                var instruction = $"""
                     # Skills
                     
                     You have {sections.Length} skill(s) loaded from the local skills directory.
@@ -508,7 +526,16 @@ namespace Microsoft.Extensions.AI
                     
                     {string.Join("\n\n", sections)}
                     """;
-            });
+
+                // 仅缓存有效结果
+                _skillInstructionCache[effectiveDirectory] = (instruction, lastWrite);
+                return instruction;
+            }
+            catch (Exception)
+            {
+                // 任何异常都静默处理，视为 skill 加载失败
+                return null;
+            }
         }
 
         private protected virtual VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)

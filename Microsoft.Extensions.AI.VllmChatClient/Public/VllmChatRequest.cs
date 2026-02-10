@@ -13,12 +13,23 @@ internal sealed class VllmOpenAIChatRequest
     public IEnumerable<VllmTool>? Tools { get; set; }
     public VllmThinkingOptions? Thinking { get; set; }
     public bool? EnableThinking { get; set; }
+    public VllmReasoningOptions? Reasoning { get; set; }
+    public int? MaxTokens { get; set; }
     public VllmRequestOptions? Options { get; set; }
 }
 
 internal sealed class VllmThinkingOptions
 {
     public required string Type { get; set; }
+}
+
+/// <summary>
+/// Claude/OpenRouter 推理选项，序列化为 reasoning: {effort: "high"} 或 reasoning: {enabled: true}
+/// </summary>
+internal sealed class VllmReasoningOptions
+{
+    public bool? Enabled { get; set; }
+    public string? Effort { get; set; }
 }
 
 internal sealed class VllmChatRequest

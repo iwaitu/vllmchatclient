@@ -27,7 +27,7 @@ namespace Microsoft.Extensions.AI
             }
 
             _apiChatEndpoint = endpoint ?? "http://localhost:8000/{0}/{1}";
-            _httpClient = httpClient ?? new HttpClient();
+            _httpClient = httpClient ?? VllmUtilities.SharedClient;
             if (!string.IsNullOrWhiteSpace(token))
             {
                 _httpClient.DefaultRequestHeaders.Authorization =
@@ -55,6 +55,18 @@ namespace Microsoft.Extensions.AI
             {
                 return BuildTextUpdate(responseId, delta.ReasoningContent, true);
             }
+
+            if (!string.IsNullOrEmpty(delta.Reasoning))
+            {
+                return BuildTextUpdate(responseId, delta.Reasoning, true);
+            }
+
+            if (delta.ReasoningDetails?.FirstOrDefault(x => x.Type == "reasoning.text") is { } detail && !string.IsNullOrEmpty(detail.Text))
+            {
+                // Streaming delta for reasoning details might come piece by piece in Text property
+                return BuildTextUpdate(responseId, detail.Text, true);
+            }
+
             return null;
         }
 
@@ -99,6 +111,17 @@ namespace Microsoft.Extensions.AI
 
             var responseMessage = response.Choices.FirstOrDefault()?.Message;
             string reason = responseMessage?.ReasoningContent?.ToString() ?? string.Empty;
+
+            if (string.IsNullOrEmpty(reason))
+            {
+                reason = responseMessage?.Reasoning ?? string.Empty;
+            }
+
+            if (string.IsNullOrEmpty(reason) && responseMessage?.ReasoningDetails?.FirstOrDefault(x => x.Type == "reasoning.text") is { } detail)
+            {
+                reason = detail.Text;
+            }
+
             var retMessage = FromVllmMessage(responseMessage!, options);
             bool hasToolCall = retMessage.Contents.Any(c => c is FunctionCallContent);
 
@@ -687,6 +710,11 @@ namespace Microsoft.Extensions.AI
             if (options.TopP is float topP)
             {
                 (request.Options ??= new()).top_p = topP;
+            }
+
+            if (options.MaxOutputTokens is int maxTokens)
+            {
+                request.MaxTokens = maxTokens;
             }
         }
 

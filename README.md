@@ -9,12 +9,12 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM 4.6 / 4.7 / 4.7 Flash**, **Gemini 3**, **MiniMax-M2.1** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM 4.6 / 4.7 / 4.7 Flash**, **Gemini 3**, **MiniMax-M2.1** with advanced reasoning capabilities.
 
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Claude 4.6 / 4.5, Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.1
+- ✅ **Multi-model Support**: OpenAI GPT 系列, Claude 4.6 / 4.5, Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.1
 
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models (GLM supports Zhipu official thinking parameter via `GlmChatOptions.ThinkingEnabled`)
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
@@ -36,6 +36,12 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - **思维链参数适配**：支持 Claude 4.6 推出的 `reasoning: { effort: "high"|"medium"|"low" }` 参数（通过 `VllmChatOptions.ThinkingEnabled = true` 开启，默认使用 `high`）。
 - **响应格式解析**：支持从模型返回的 `reasoning` 字符串或 `reasoning_details` 数组中提取思维链内容，并统一封装进 `ReasoningChatResponse`。
 - **Token 优化**：针对 Claude 默认较大的 token 限制进行了保护性设置，避免 OpenRouter 额度报错。
+
+### 🆕 OpenAI GPT 系列支持
+  
+- **新增 `VllmOpenAiGptClient`**：专门适配 OpenAI 官方或 OpenRouter 提供的 GPT 系列模型（如 gpt-4o, gpt-5.2-codex 等）。
+- **推理分段支持**：支持包含思维链的 GPT 系列模型，通过 `OpenAiGptChatOptions` 控制推理级别 (`ReasoningLevel`)。
+- **灵活配置**：内置 `ExcludeReasoning` 选项，允许控制是否在输出中包含推理过程。
 
 ### 🆕 DeepSeek V3.2 思维链支持
 
@@ -101,6 +107,12 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - **Thinking Parameter Adaptation**: Supports the new `reasoning: { effort: "high" }` format introduced in Claude 4.6.
 - **Reasoning Extraction**: Efficiently extracts reasoning content from both `reasoning` (string) and `reasoning_details` (array) response fields.
 - **Token Optimization**: Includes default `MaxTokens` limits to prevent credit-related errors on cloud providers.
+
+### 🆕 OpenAI GPT Series Support
+
+- **`VllmOpenAiGptClient` added**: Specifically designed for OpenAI official or OpenRouter GPT models.
+- **Reasoning Level Control**: Fine-tune model reasoning depth via `OpenAiGptChatOptions.ReasoningLevel`.
+- **Reasoning Toggle**: Use `ExcludeReasoning` to easily include or omit the thinking process from the output.
 
 ### 🆕 DeepSeek V3.2 Thinking Chain Support
 
@@ -189,6 +201,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 | Client | Deployment | Model Support | Reasoning | Function Calls |
 |--------|------------|---------------|-----------|----------------|
+| `VllmOpenAiGptClient` | OpenRouter/Cloud | OpenAI GPT Series | ✅ Full | ✅ Stream |
 | `VllmClaudeChatClient` | OpenRouter/Cloud | Claude 4.6 / 4.5 | ✅ Full | ✅ Stream |
 | `VllmGptOssChatClient` | OpenRouter/Cloud | GPT-OSS-120B/20B | ✅ Full | ✅ Stream |
 | `VllmQwen3ChatClient` | Local vLLM | Qwen3-32B/235B | ✅ Toggle | ✅ Stream |
@@ -349,6 +362,43 @@ await foreach (var update in claude.GetStreamingResponseAsync(messages, options)
             Console.Write(ru.Text); // Reasoning phase
         else
             Console.Write(ru.Text); // Answer phase
+    }
+}
+```
+
+### 🆕 OpenAI GPT Series with Reasoning (OpenRouter)
+
+```csharp
+using Microsoft.Extensions.AI;
+
+// Initialize OpenAI GPT client (OpenRouter)
+IChatClient gptClient = new VllmOpenAiGptClient(
+    "https://openrouter.ai/api/v1",
+    "your-api-key",
+    "openai/gpt-5.2-codex");
+
+var messages = new List<ChatMessage>
+{
+    new(ChatRole.System, "You are a coding expert."),
+    new(ChatRole.User, "Write a complex regex for email validation and explain it.")
+};
+
+// Set reasoning level and other options
+var options = new OpenAiGptChatOptions 
+{ 
+    ReasoningLevel = OpenAiGptReasoningLevel.High,
+    Temperature = 0.5f 
+};
+
+// Streaming with reasoning
+await foreach (var update in gptClient.GetStreamingResponseAsync(messages, options))
+{
+    if (update is ReasoningChatResponseUpdate r)
+    {
+        if (r.Thinking)
+            Console.Write(r.Text); // Reasoning phase
+        else
+            Console.Write(r.Text); // Answer phase
     }
 }
 ```

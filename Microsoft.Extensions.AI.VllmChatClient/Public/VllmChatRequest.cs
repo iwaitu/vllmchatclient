@@ -30,6 +30,7 @@ internal sealed class VllmReasoningOptions
 {
     public bool? Enabled { get; set; }
     public string? Effort { get; set; }
+    public bool? Exclude { get; set; }
 }
 
 internal sealed class VllmChatRequest

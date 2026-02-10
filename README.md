@@ -9,12 +9,12 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **Kimi K2 / Kimi 2.5**, **GLM 4.6 / 4.7 / 4.7 Flash**, **Gemini 3** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **Kimi K2 / Kimi 2.5**, **GLM 4.6 / 4.7 / 4.7 Flash**, **Gemini 3**, **MiniMax-M2.1** with advanced reasoning capabilities.
 
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3
+- ✅ **Multi-model Support**: Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.1
 
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models (GLM supports Zhipu official thinking parameter via `GlmChatOptions.ThinkingEnabled`)
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
@@ -127,6 +127,12 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - Tests: `Gemini3Test` 全部通过（含多轮与并行工具调用）、`GeminiDebugTest` 覆盖原生 API 思维签名与多轮函数调用调试。
 - Docs: 详见 `docs/Gemini3*` 文档合集。
 
+### 🆕 MiniMax-M2.1 Support
+- **VllmMiniMaxChatClient** added for MiniMax-M2.1 model support.
+- Full streaming chat and function calling (parallel tool calls supported).
+- Compatible with DashScope API endpoint.
+- Tests: `MiniMaxTests` covering chat, streaming, function calls (serial/parallel/manual), and JSON output.
+
 ---
 
 ## 🏗️ Supported Clients
@@ -147,6 +153,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
 | `VllmGlm46ChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-4.6 / glm-4.7 / glm-4.7-flash | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
 | `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) / kimi-k2.5 | ✅ (thinking model) | ✅ Stream |
+| `VllmMiniMaxChatClient` | Cloud API (DashScope) | MiniMax-M2.1 | ✅ | ✅ Stream |
 
 > 注：Gemini 3 的推理采用加密的 thought signature，不输出可读推理文本；函数调用在当前测试中无需显式回传签名亦可完成多轮调用。
 

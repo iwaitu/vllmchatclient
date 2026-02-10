@@ -30,6 +30,14 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 本次更新
 
+### 🐛 Bug Fixes
+
+- **`VllmGptOssChatClient` 流式函数调用 Bug 修复**：
+  - 修复了流式手动函数调用（Manual Function Call）时，模型返回 `tool_calls` 后第一个流结束、导致无法获取最终文本回复的问题。
+  - 新增 `GetStreamingResponseAsync` 重写：自动检测调用方已将工具结果追加到 `messages`，并自动发起第二轮流式请求，实现无缝的工具调用 → 最终回复流程。
+  - 现在 `StreamChatManualFunctionCallTest` 可以在单个 `await foreach` 循环中完成完整的工具调用流程，无需手动编写 "Second turn" 逻辑。
+  - 简化了默认系统提示词，去除了"tool_calls 时 content 必须为空"的硬性约束。
+
 ### 🔄 `VllmQwen3NextChatClient` 重构 — 统一多模型适配
 
 - **`VllmQwen3NextChatClient` 已适配多个模型系列**，通过构造函数 `modelId` 或 `ChatOptions.ModelId` 切换，无需再使用独立的 Client 类：
@@ -69,6 +77,14 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 🔥 Latest Updates
+
+### 🐛 Bug Fixes
+
+- **`VllmGptOssChatClient` Streaming Function Call Bug Fixed**:
+  - Fixed an issue where the stream ended after model returned `tool_calls`, leaving the final text response empty.
+  - Added `GetStreamingResponseAsync` override: automatically detects when the caller has appended tool results to `messages` and initiates a follow-up streaming request seamlessly.
+  - `StreamChatManualFunctionCallTest` now works in a single `await foreach` loop without needing manual "Second turn" logic.
+  - Simplified the default system prompt by removing the strict "content must be empty when tool_calls present" constraint.
 
 ### 🆕 GLM 4.6 / 4.7 Flash Thinking Model Support
 - **VllmGlm46ChatClient** added with full reasoning (thinking) stream separation.

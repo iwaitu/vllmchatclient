@@ -1,10 +1,7 @@
 ﻿using Microsoft.Shared.Diagnostics;
-using Newtonsoft.Json;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Text;
-using System.Reflection;
 
 namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
 {
@@ -222,14 +219,6 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
 
             var responseMessage = response.Choices.FirstOrDefault()?.Message;
             string reasoning = response.Choices.FirstOrDefault()?.Message?.Reasoning ?? ""; 
-
-            // Use base implementation of FromVllmMessage to parse tool calls/content
-            // Note: Base implementation handles XML tool calls, but here we expect OpenAI tool calls.
-            // Wait, Base FromVllmMessage handles VllmChatResponseMessage which has standard ToolCalls array.
-            // So FromVllmMessage in base should work for standard tool calls too.
-            // Let's verify Base.FromVllmMessage:
-            // "foreach (var toolcall in message.ToolCalls ?? []) { ... contents.Add(ToFunctionCallContent(...)) }"
-            // Yes, it handles standard tool calls.
             
             var retMessage = FromVllmMessage(responseMessage!, options);
 

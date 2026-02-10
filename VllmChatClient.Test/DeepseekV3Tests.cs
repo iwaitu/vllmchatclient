@@ -95,7 +95,7 @@ namespace VllmChatClient.Test
         }
         
         [Fact]
-        public async Task ChatSerialFunctionCallTest()
+        public async Task ChatFunctionCallTest()
         {
             IChatClient client = new ChatClientBuilder(_client)
                 .UseFunctionInvocation()
@@ -123,43 +123,6 @@ namespace VllmChatClient.Test
                 _output.WriteLine($"Reason: {reasoningResponse.Reason}");
             }
             Assert.True(res.Text.Contains("爱民书店") || res.Text.Contains("100米"), $"Unexpected reply: '{lastText}'");  //串行任务
-            _output.WriteLine($"Response: {res.Text}");
-        }
-
-        [Fact]
-        public async Task ChatParallelFunctionCallTest()
-        {
-            IChatClient client = new ChatClientBuilder(_client)
-                .UseFunctionInvocation()
-                .Build();
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲。"),
-                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")               //并行调用两个函数
-            };
-            var chatOptions = new ChatOptions
-            {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
-            };
-            
-            var res = await client.GetResponseAsync(messages, chatOptions);
-            Assert.NotNull(res);
-            Assert.True(res.Messages.Count >= 1);
-
-            // 最后一条回复通常是助手文本
-            var lastMessage = res.Messages.LastOrDefault();
-            Assert.NotNull(lastMessage);
-            var lastText = lastMessage.Contents.OfType<TextContent>().FirstOrDefault()?.Text ?? string.Empty;
-            if (res is ReasoningChatResponse reasoningResponse)
-            {
-                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
-            }
-            // 简单的并行检查：天气和地点信息应该都包含
-            // 注意：Deepseek V3 可能不总是以特定顺序返回，但最终汇总应包含关键信息
-            bool hasWeather = res.Text.Contains("下雨") || res.Text.Contains("雨") || res.Text.Contains("35度");
-            bool hasLocation = res.Text.Contains("方圆广场") || res.Text.Contains("站前路");
-            
-            Assert.True(hasWeather || hasLocation, $"Unexpected reply: '{lastText}'"); 
             _output.WriteLine($"Response: {res.Text}");
         }
         

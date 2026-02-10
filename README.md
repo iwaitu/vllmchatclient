@@ -9,12 +9,12 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM 4.6 / 4.7 / 4.7 Flash**, **Gemini 3**, **MiniMax-M2.1** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM 4.6 / 4.7 / 4.7 Flash**, **Gemini 3**, **MiniMax-M2.1** with advanced reasoning capabilities.
 
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.1
+- ✅ **Multi-model Support**: Claude 4.6 / 4.5, Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.1
 
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models (GLM supports Zhipu official thinking parameter via `GlmChatOptions.ThinkingEnabled`)
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
@@ -29,6 +29,13 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 本次更新
+
+### 🆕 Claude 4.6 / 4.5 思维链支持
+  
+- **新增 `VllmClaudeChatClient`**：专门适配 OpenRouter 等平台提供的 Claude 模型。
+- **思维链参数适配**：支持 Claude 4.6 推出的 `reasoning: { effort: "high"|"medium"|"low" }` 参数（通过 `VllmChatOptions.ThinkingEnabled = true` 开启，默认使用 `high`）。
+- **响应格式解析**：支持从模型返回的 `reasoning` 字符串或 `reasoning_details` 数组中提取思维链内容，并统一封装进 `ReasoningChatResponse`。
+- **Token 优化**：针对 Claude 默认较大的 token 限制进行了保护性设置，避免 OpenRouter 额度报错。
 
 ### 🆕 DeepSeek V3.2 思维链支持
 
@@ -87,6 +94,13 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 🔥 Latest Updates
+
+### 🆕 Claude 4.6 / 4.5 Thinking Chain Support
+
+- **`VllmClaudeChatClient` added**: Specifically designed for Claude models via platforms like OpenRouter.
+- **Thinking Parameter Adaptation**: Supports the new `reasoning: { effort: "high" }` format introduced in Claude 4.6.
+- **Reasoning Extraction**: Efficiently extracts reasoning content from both `reasoning` (string) and `reasoning_details` (array) response fields.
+- **Token Optimization**: Includes default `MaxTokens` limits to prevent credit-related errors on cloud providers.
 
 ### 🆕 DeepSeek V3.2 Thinking Chain Support
 
@@ -175,6 +189,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 | Client | Deployment | Model Support | Reasoning | Function Calls |
 |--------|------------|---------------|-----------|----------------|
+| `VllmClaudeChatClient` | OpenRouter/Cloud | Claude 4.6 / 4.5 | ✅ Full | ✅ Stream |
 | `VllmGptOssChatClient` | OpenRouter/Cloud | GPT-OSS-120B/20B | ✅ Full | ✅ Stream |
 | `VllmQwen3ChatClient` | Local vLLM | Qwen3-32B/235B | ✅ Toggle | ✅ Stream |
 | `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | Multiple modelIds (e.g. qwen3-next-80b-a3b-thinking / qwen3-next-80b-a3b-instruct) | ✅ (thinking model) | ✅ Stream |
@@ -295,6 +310,47 @@ await foreach (var update in glm46.GetStreamingResponseAsync(messages, opts))
     }
 }
 Console.WriteLine($"Reasoning: {reasoning}\nAnswer: {answer}");
+```
+
+### 🆕 Claude 4.6 / 4.5 with Reasoning (OpenRouter)
+
+```csharp
+using Microsoft.Extensions.AI;
+
+// Initialize Claude client (OpenRouter)
+IChatClient claude = new VllmClaudeChatClient(
+    "https://openrouter.ai/api/v1",
+    "your-api-key",
+    "anthropic/claude-4.6-sonnet");
+
+var messages = new List<ChatMessage>
+{
+    new(ChatRole.System, "你是一个拥有强大逻辑推理能力的智能助手。"),
+    new(ChatRole.User, "解释一下为什么天空是蓝色的？请详细思考。")
+};
+
+// Enable high-effort reasoning
+var options = new VllmChatOptions { ThinkingEnabled = true };
+
+// Non-streaming example:
+var response = await claude.GetResponseAsync(messages, options);
+if (response is ReasoningChatResponse r)
+{
+    Console.WriteLine($"🧠 Thinking:\n{r.Reason}");
+    Console.WriteLine($"💬 Answer:\n{r.Text}");
+}
+
+// Streaming example:
+await foreach (var update in claude.GetStreamingResponseAsync(messages, options))
+{
+    if (update is ReasoningChatResponseUpdate ru)
+    {
+        if (ru.Thinking)
+            Console.Write(ru.Text); // Reasoning phase
+        else
+            Console.Write(ru.Text); // Answer phase
+    }
+}
 ```
 
 ### 🆕 GPT-OSS-120B with Reasoning (OpenRouter)

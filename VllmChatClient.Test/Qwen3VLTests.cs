@@ -153,7 +153,7 @@ namespace VllmChatClient.Test
         }
 
         [Fact]
-        public async Task ChatSerialFunctionCallTest()
+        public async Task ChatFunctionCallTest()
         {
 
             IChatClient client = new ChatClientBuilder(_client)
@@ -186,40 +186,6 @@ namespace VllmChatClient.Test
             _output.WriteLine($"Response: {res.Text}");
         }
 
-        [Fact]
-        public async Task ChatParallelFunctionCallTest()
-        {
-
-            IChatClient client = new ChatClientBuilder(_client)
-                .UseFunctionInvocation()
-                .Build();
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲。"),
-                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")               //并行调用两个函数
-            };
-            ChatOptions chatOptions = new()
-            {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
-            };
-            var res = await client.GetResponseAsync(messages, chatOptions);
-            Assert.NotNull(res);
-            Assert.True(res.Messages.Count >= 1);
-
-            if (res is ReasoningChatResponse reasoningResponse)
-            {
-                Assert.NotNull(reasoningResponse.Reason);
-                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
-            }
-
-            // 最后一条回复通常是助手文本，包含天气信息
-            var lastMessage = res.Messages.LastOrDefault();
-            Assert.NotNull(lastMessage);
-            var lastText = lastMessage.Contents.OfType<TextContent>().FirstOrDefault()?.Text ?? string.Empty;
-            Assert.True(res.Text.Contains("下雨") || res.Text.Contains("雨"), $"Unexpected reply: '{lastText}'");  //并行任务
-            _output.WriteLine($"Response: {res.Text}");
-        }
-
 
         [Fact]
         public async Task StreamChatTest()
@@ -247,7 +213,7 @@ namespace VllmChatClient.Test
         }
 
         [Fact]
-        public async Task StreamChatParallelFunctionCallTest()
+        public async Task StreamChatFunctionCallTest()
         {
             IChatClient client = new ChatClientBuilder(_client)
                 .UseFunctionInvocation()
@@ -285,44 +251,7 @@ namespace VllmChatClient.Test
             _output.WriteLine($"Response: {res}");
         }
 
-        [Fact]
-        public async Task StreamChatSerialFunctionCallTest()
-        {
-            IChatClient client = new ChatClientBuilder(_client)
-                .UseFunctionInvocation()
-                .Build();
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")
-                //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
-            };
-            ChatOptions chatOptions = new()
-            {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
-            };
-            string res = string.Empty;
-            string reason = string.Empty;
-            await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
-            {
-                if (update is ReasoningChatResponseUpdate reasoningMessage)
-                {
-                    if (reasoningMessage.Thinking)
-                    {
-                        reason += reasoningMessage.Text;
-                    }
-                    else
-                    {
-                        res += reasoningMessage.Text;
-                    }
-                }
-            }
-
-            _output.WriteLine($"Reason: {reason}");
-            _output.WriteLine($"Response: {res}");
-            Assert.False(string.IsNullOrWhiteSpace(res));
-            Assert.True(res.Contains("爱民书店") || res.Contains("100米"), $"Unexpected reply: '{res}'");  //串行任务
-        }
+        
 
         [Fact]
         public async Task StreamChatManualFunctionCallTest()

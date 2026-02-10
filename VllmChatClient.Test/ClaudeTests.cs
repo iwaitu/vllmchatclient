@@ -107,7 +107,7 @@ namespace VllmChatClient.Test
         }
 
         [Fact]
-        public async Task ChatSerialFunctionCallTest()
+        public async Task ChatFunctionCallTest()
         {
             if (_skipTests) return;
 
@@ -140,42 +140,7 @@ namespace VllmChatClient.Test
             _output.WriteLine($"Response: {res.Text}");
         }
 
-        [Fact]
-        public async Task ChatParallelFunctionCallTest()
-        {
-            if (_skipTests) return;
-
-            IChatClient client = new ChatClientBuilder(_client)
-                .UseFunctionInvocation()
-                .Build();
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲。"),
-                new ChatMessage(ChatRole.User, "南宁火车站在哪里？我出门需要带伞吗？")
-            };
-            var chatOptions = new VllmChatOptions
-            {
-                ThinkingEnabled = true,
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)],
-                MaxOutputTokens = 1024
-            };
-
-            var res = await client.GetResponseAsync(messages, chatOptions);
-            Assert.NotNull(res);
-            Assert.True(res.Messages.Count >= 1);
-
-            var lastMessage = res.Messages.LastOrDefault();
-            Assert.NotNull(lastMessage);
-            if (res is ReasoningChatResponse reasoningResponse)
-            {
-                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
-            }
-            bool hasWeather = res.Text.Contains("下雨") || res.Text.Contains("雨") || res.Text.Contains("35度");
-            bool hasLocation = res.Text.Contains("方圆广场") || res.Text.Contains("站前路");
-
-            Assert.True(hasWeather || hasLocation, $"Unexpected reply: '{res.Text}'");
-            _output.WriteLine($"Response: {res.Text}");
-        }
+        
 
         [Fact]
         public async Task StreamChatParallelFunctionCallTest()

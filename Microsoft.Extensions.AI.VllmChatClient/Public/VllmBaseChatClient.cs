@@ -422,7 +422,7 @@ namespace Microsoft.Extensions.AI
             var id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
             var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments);
-            return new FunctionCallContent(id, function.Name, arguments);
+            return new FunctionCallContent(id, function.Name ?? string.Empty, arguments);
         }
 
         protected static JsonElement? ToVllmChatResponseFormat(ChatResponseFormat? format)

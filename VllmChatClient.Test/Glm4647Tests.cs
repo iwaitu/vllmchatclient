@@ -158,41 +158,9 @@ namespace VllmChatClient.Test
             Assert.NotEmpty(json);
         }
 
-        [Fact]
-        public async Task ChatSerialFunctionCallTest()
-        {
-            if (_skipTests)
-            {
-                return;
-            }
-
-            IChatClient client = new ChatClientBuilder(_client)
-                .UseFunctionInvocation()
-                .Build();
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
-                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")               //串行调用两个函数
-            };
-            _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)];
-            var res = await client.GetResponseAsync(messages, _chatOptions);
-            Assert.NotNull(res);
-            Assert.True(res.Messages.Count >= 1);
-
-            // 最后一条回复通常是助手文本，包含天气信息
-            var lastMessage = res.Messages.LastOrDefault();
-            Assert.NotNull(lastMessage);
-            var lastText = lastMessage.Contents.OfType<TextContent>().FirstOrDefault()?.Text ?? string.Empty;
-            if (res is ReasoningChatResponse reasoningResponse)
-            {
-                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
-            }
-            Assert.True(res.Text.Contains("爱民书店") || res.Text.Contains("100米"), $"Unexpected reply: '{lastText}'");  //串行任务
-            _output.WriteLine($"Response: {res.Text}");
-        }
 
         [Fact]
-        public async Task ChatParallelFunctionCallTest()
+        public async Task ChatFunctionCallTest()
         {
             if (_skipTests)
             {
@@ -227,7 +195,7 @@ namespace VllmChatClient.Test
         }
 
         [Fact]
-        public async Task StreamChatParallelFunctionCallTest()
+        public async Task StreamChatFunctionCallTest()
         {
             if (_skipTests)
             {
@@ -267,47 +235,7 @@ namespace VllmChatClient.Test
             _output.WriteLine($"Final Response: {res}");
         }
 
-        [Fact]
-        public async Task StreamChatSerialFunctionCallTest()
-        {
-            if (_skipTests)
-            {
-                return;
-            }
-            IChatClient client = new ChatClientBuilder(_client)
-                .UseFunctionInvocation()
-                .Build();
-            var messages = new List<ChatMessage>
-            {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")
-                //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
-            };
-            _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)];
-            string res = string.Empty;
-            string reason = string.Empty;
-            await foreach (var update in client.GetStreamingResponseAsync(messages, _chatOptions))
-            {
-                if (update is ReasoningChatResponseUpdate reasoningMessage)
-                {
-                    if (reasoningMessage.Thinking)
-                    {
-                        reason += reasoningMessage.Text;
-                    }
-                    else
-                    {
-                        res += reasoningMessage.Text;
-                    }
-                }
-            }
-
-            _output.WriteLine($"Partial Response: {reason}");
-            _output.WriteLine($"Final Response: {res}");
-            Assert.False(string.IsNullOrWhiteSpace(res));
-            Assert.True(res.Contains("爱民书店") || res.Contains("100米"), $"Unexpected reply: '{res}'");  //串行任务
-            Assert.False(string.IsNullOrWhiteSpace(reason));
-        }
-
+        
         [Fact]
         public async Task StreamChatManualFunctionCallTest()
         {

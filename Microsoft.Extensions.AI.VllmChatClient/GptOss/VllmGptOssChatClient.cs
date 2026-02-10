@@ -10,14 +10,12 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
 {
     public class VllmGptOssChatClient : VllmBaseChatClient
     {
-        private static readonly string DefaultSystemPrompt = @"你必须遵循以下硬性规则：
-1) 当且仅当需要调用工具解决用户问题时，当前轮消息必须只返回工具调用（tool_calls），并将 content 置空或不返回任何自然语言。
-2) 如果不需要调用工具，当前轮消息不得返回任何工具调用，仅以自然语言回答。
-3) 不得在包含 tool_calls 的同一条消息中加入解释、道歉、前后缀、思考过程或任何自然语言。
-4) 若需要多个工具，请按需要返回多个 tool_calls；除 tool_calls 外不得返回其它字段内容（content 为空）。
-5) 若无法确定是否需要工具，先不调用工具，直接向用户询问澄清（此时只能自然语言，无 tool_calls）。";
+        private static readonly string DefaultSystemPrompt = @"你必须遵循以下工具调用规则：
+1) 当需要调用工具时，使用 tool_calls 格式返回工具调用。
+2) 若需要多个工具，请在同一轮返回多个 tool_calls。
+3) 若无法确定是否需要工具，先不调用工具，直接向用户询问澄清。";
 
-        private static readonly string DefaultPromptMarker = "你必须遵循以下硬性规则：";
+        private static readonly string DefaultPromptMarker = "你必须遵循以下工具调用规则：";
         
         public VllmGptOssChatClient(string endpoint, string? token = null, string? modelId = "gpt-oss-120b", HttpClient? httpClient = null)
             : base(ProcessEndpoint(endpoint), token, modelId, httpClient)
@@ -50,6 +48,39 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
         {
             var newMessages = SetUpChatOptions(messages, options);
             return base.PrepareMessagesWithSkills(newMessages, options);
+        }
+
+        public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var messagesList = messages as IList<ChatMessage>;
+
+            bool continueLoop;
+            do
+            {
+                continueLoop = false;
+                bool hasToolCalls = false;
+                int messageCountBefore = messagesList?.Count ?? -1;
+
+                await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken))
+                {
+                    if (update.FinishReason == ChatFinishReason.ToolCalls)
+                    {
+                        hasToolCalls = true;
+                    }
+                    yield return update;
+                }
+
+                if (hasToolCalls &&
+                    messagesList is not null &&
+                    messagesList.Count > messageCountBefore &&
+                    messagesList[messagesList.Count - 1].Role == ChatRole.Tool)
+                {
+                    continueLoop = true;
+                }
+            } while (continueLoop);
         }
 
         private protected override void ApplyRequestOptions(VllmOpenAIChatRequest request, ChatOptions? options)

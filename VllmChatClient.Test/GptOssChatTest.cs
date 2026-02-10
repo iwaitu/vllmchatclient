@@ -2,6 +2,7 @@
 using Microsoft.Extensions.AI.VllmChatClient.GptOss;
 using System.ComponentModel;
 using System.ComponentModel.Design;
+using System.Reflection.Emit;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -42,7 +43,6 @@ namespace VllmChatClient.Test
             {
                 _output.WriteLine("=== Reasoning Content ===");
                 _output.WriteLine(response.Reason);
-                _output.WriteLine("=== End of Reasoning ===");
                 _output.WriteLine("=== Final Response ===");
                 _output.WriteLine(response.Text);
 
@@ -98,7 +98,7 @@ namespace VllmChatClient.Test
         //    Assert.True(res.Text.Contains("下雨"));
         //}
 
-        [Description("获取南宁的天气情况")]
+        [Description("获取天气情况")]
         static string GetWeather([Description("城市名称")]string city) => $"{city} 气温35度，暴雨。.";
 
         [Description("地名地址搜索")]
@@ -144,7 +144,6 @@ namespace VllmChatClient.Test
             Assert.Contains("菲菲", result);
             _output.WriteLine("=== Reasoning Content ===");
             _output.WriteLine(reason);
-            _output.WriteLine("=== End of Reasoning ===");
             _output.WriteLine("=== Final Response ===");
             _output.WriteLine(result);
         }
@@ -245,13 +244,16 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"用工具查询一下南宁火车站在哪里？")
-                //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
+                new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
             };
-            ChatOptions chatOptions = new()
+            var chatOptions = new GptOssChatOptions
             {
+                ReasoningLevel = GptOssReasoningLevel.Medium,
+                Temperature = 0.8f, // 稍高的温度以获得更多推理内容
+                //MaxOutputTokens = 3000, // 足够的token限制以观察差异
                 Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
             };
+            
             string res = string.Empty;
             string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
@@ -288,44 +290,27 @@ namespace VllmChatClient.Test
                                 [new FunctionResultContent(fc.CallId, result)]));
                             continue;
                         }
-                    }                    
+                    }
                 }
                 else
                 {
-                    if (update is ReasoningChatResponseUpdate reasoningUpdate)
+                    foreach (var text in update.Contents.OfType<TextContent>())
                     {
-                        if (reasoningUpdate.Thinking)
+                        ReasoningChatResponseUpdate reasoningUpdate = update as ReasoningChatResponseUpdate;
+                        if (reasoningUpdate != null && reasoningUpdate.Thinking)
                         {
-                            // 如果模型在思考，可以选择处理思考内容
                             reason += reasoningUpdate.Reasoning;
                         }
                         else
                         {
-                            res += reasoningUpdate.Text;
+                            res += text.Text;
                         }
+
                     }
                 }
+
             }
 
-            // Second turn: Get model response after tool execution
-            if (messages.Last().Role == ChatRole.Tool)
-            {
-                await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
-                {
-                    if (update is ReasoningChatResponseUpdate reasoningUpdate)
-                    {
-                        if (reasoningUpdate.Thinking)
-                        {
-                            reason += reasoningUpdate.Reasoning;
-                        }
-                        else
-                        {
-                            res += reasoningUpdate.Text;
-                        }
-                    }
-                }
-            }
-            
             _output.WriteLine($"Reasoning: {reason}");
             _output.WriteLine($"Response: {res}");
 

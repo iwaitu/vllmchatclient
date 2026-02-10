@@ -9,12 +9,12 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **Kimi K2 / Kimi 2.5**, **GLM 4.6 / 4.7 / 4.7 Flash**, **Gemini 3**, **MiniMax-M2.1** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM 4.6 / 4.7 / 4.7 Flash**, **Gemini 3**, **MiniMax-M2.1** with advanced reasoning capabilities.
 
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.1
+- ✅ **Multi-model Support**: Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.1
 
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models (GLM supports Zhipu official thinking parameter via `GlmChatOptions.ThinkingEnabled`)
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
@@ -29,6 +29,16 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 本次更新
+
+### 🆕 DeepSeek V3.2 思维链支持
+
+- **`VllmDeepseekV3ChatClient` 思维链修复**：
+  - 修正请求格式：DashScope API 使用 `enable_thinking: true`（顶层布尔值），而非 Kimi 格式的 `thinking: {type: "enabled"}`。
+  - 模型返回的 `reasoning_content` 字段现在可以正确解析并输出。
+  - 非流式响应通过 `ReasoningChatResponse.Reason` 获取思维链内容。
+  - 流式响应通过 `ReasoningChatResponseUpdate.Thinking` 区分思考阶段与最终回答。
+  - 支持通过 `VllmChatOptions.ThinkingEnabled = true` 开启思维链。
+  - 兼容 DashScope 平台 `deepseek-v3.2` 模型。
 
 ### 🐛 Bug Fixes
 
@@ -77,6 +87,16 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 🔥 Latest Updates
+
+### 🆕 DeepSeek V3.2 Thinking Chain Support
+
+- **`VllmDeepseekV3ChatClient` thinking chain fixed**:
+  - Corrected request format: DashScope API uses `enable_thinking: true` (top-level boolean) instead of `thinking: {type: "enabled"}`.
+  - `reasoning_content` field in model responses is now correctly parsed and output.
+  - Non-streaming: access thinking via `ReasoningChatResponse.Reason`.
+  - Streaming: use `ReasoningChatResponseUpdate.Thinking` to distinguish thinking vs final answer.
+  - Enable via `VllmChatOptions.ThinkingEnabled = true`.
+  - Compatible with DashScope platform `deepseek-v3.2` model.
 
 ### 🐛 Bug Fixes
 
@@ -165,6 +185,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmGemmaChatClient` | Local vLLM | Gemma3-27B | ❌ | ✅ Stream |
 | `VllmGemini3ChatClient` | Cloud API (Google Gemini) | gemini-3-pro-preview | Signature (hidden) | ✅ Stream |
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
+| `VllmDeepseekV3ChatClient` | Cloud API (DashScope) | DeepSeek-V3.2 | ✅ (via `VllmChatOptions`) | ✅ Stream |
 | `VllmGlmZ1ChatClient` | Local vLLM | GLM-4 | ✅ Full | ✅ Stream |
 | `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
 | `VllmGlm46ChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-4.6 / glm-4.7 / glm-4.7-flash | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
@@ -582,6 +603,55 @@ await foreach (ReasoningChatResponseUpdate update in client3.GetStreamingRespons
         res4 += update.Text;
     }
 }
+```
+
+### 🆕 DeepSeek-V3.2 with Thinking Chain
+
+```csharp
+using Microsoft.Extensions.AI;
+
+// Initialize DeepSeek V3.2 client (DashScope API)
+IChatClient dsV3 = new VllmDeepseekV3ChatClient(
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}",
+    "your-api-key",
+    "deepseek-v3.2");
+
+var messages = new List<ChatMessage>
+{
+    new(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+    new(ChatRole.User, "请解释一下相对论。")
+};
+
+// Enable thinking chain via VllmChatOptions
+var options = new VllmChatOptions { ThinkingEnabled = true };
+
+// Non-streaming: access reasoning via ReasoningChatResponse.Reason
+var response = await dsV3.GetResponseAsync(messages, options);
+if (response is ReasoningChatResponse reasoningResponse)
+{
+    Console.WriteLine($"🧠 Thinking: {reasoningResponse.Reason}");
+    Console.WriteLine($"💬 Answer: {reasoningResponse.Text}");
+}
+
+// Streaming: distinguish thinking vs answer phases
+string thinking = string.Empty;
+string answer = string.Empty;
+await foreach (var update in dsV3.GetStreamingResponseAsync(messages, options))
+{
+    if (update is ReasoningChatResponseUpdate r)
+    {
+        if (r.Thinking)
+            thinking += r.Text;  // reasoning phase
+        else
+            answer += r.Text;    // final answer phase
+    }
+    else
+    {
+        answer += update.Text;
+    }
+}
+Console.WriteLine($"🧠 Thinking: {thinking}");
+Console.WriteLine($"💬 Answer: {answer}");
 ```
 
 ---

@@ -1,14 +1,16 @@
 ﻿using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Shared.Diagnostics;
+using Newtonsoft.Json;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace Microsoft.Extensions.AI
 {
     /// <summary>
     /// VllmDeepseekR1ChatClient - 针对 DeepSeek R1 模型的 ChatClient 实现
-    /// 继承自 VllmBaseChatClient，重写流式响应处理以支持 ReasoningContent
+    /// 继承自 VllmBaseChatClient，重写流式响应处理以支持 ReasoningContent 和工具调用
     /// </summary>
     public sealed class VllmDeepseekR1ChatClient : VllmBaseChatClient
     {
@@ -23,7 +25,102 @@ namespace Microsoft.Extensions.AI
         }
 
         /// <summary>
-        /// 重写流式响应处理，以支持 DeepSeek R1 的 ReasoningContent 格式
+        /// 重写请求构建，支持 VllmChatOptions 的思维链开关
+        /// </summary>
+        private protected override VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
+        {
+            var request = base.ToVllmChatRequest(messages, options, stream);
+            
+            // 支持 VllmChatOptions 及其派生类的思维链开关
+            if (options is VllmChatOptions vllmOptions)
+            {
+                request.Thinking = new VllmThinkingOptions
+                {
+                    Type = vllmOptions.ThinkingEnabled ? "enabled" : "disabled"
+                };
+            }
+
+            return request;
+        }
+
+        /// <summary>
+        /// 重写消息序列化，使用 OpenAI 标准格式处理工具调用，聚合同一条消息中的内容
+        /// </summary>
+        private protected override IEnumerable<VllmOpenAIChatRequestMessage> ToVllmChatRequestMessages(ChatMessage content)
+        {
+            // 特殊处理 Tool 角色：每个 FunctionResultContent 必须对应一个独立的 Tool 消息
+            if (content.Role == ChatRole.Tool)
+            {
+                foreach (var item in content.Contents)
+                {
+                    if (item is FunctionResultContent frc)
+                    {
+                        string resultStr = frc.Result is string s
+                            ? s
+                            : JsonSerializer.Serialize(frc.Result,
+                                  ToolCallJsonSerializerOptions.GetTypeInfo(typeof(object)));
+
+                        yield return new VllmOpenAIChatRequestMessage
+                        {
+                            Role = "tool",
+                            Name = "",
+                            ToolCallId = frc.CallId,
+                            Content = resultStr
+                        };
+                    }
+                }
+                yield break;
+            }
+
+            // 对于非 Tool 角色 (System, User, Assistant)，聚合内容
+            var toolCalls = new List<VllmToolCall>();
+            var images = new List<string>();
+            var sb = new StringBuilder();
+
+            foreach (var item in content.Contents)
+            {
+                if (item is DataContent dataContent && dataContent.HasTopLevelMediaType("image"))
+                {
+                    images.Add(Convert.ToBase64String(dataContent.Data
+#if NET
+                        .Span));
+#else
+                        .ToArray()));
+#endif
+                }
+                else if (item is TextContent textContent)
+                {
+                    sb.Append(textContent.Text);
+                }
+                else if (item is FunctionCallContent fcc)
+                {
+                    toolCalls.Add(new VllmToolCall
+                    {
+                        Id = fcc.CallId,
+                        Type = "function",
+                        Function = new VllmFunctionToolCall
+                        {
+                            Name = fcc.Name,
+                            Arguments = JsonSerializer.Serialize(
+                                fcc.Arguments,
+                                ToolCallJsonSerializerOptions.GetTypeInfo(typeof(IDictionary<string, object?>)))
+                        }
+                    });
+                }
+            }
+
+            yield return new VllmOpenAIChatRequestMessage
+            {
+                Role = content.Role.Value,
+                Content = sb.Length > 0 ? sb.ToString() : null,
+                Images = images.Count > 0 ? images : null,
+                ToolCalls = toolCalls.Count > 0 ? toolCalls.ToArray() : null
+            };
+        }
+
+        /// <summary>
+        /// 重写流式响应处理，支持 DeepSeek R1 的 ReasoningContent 格式和工具调用
+        /// 包含自动检测工具结果并发起后续请求的逻辑
         /// </summary>
         public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages, 
@@ -31,6 +128,44 @@ namespace Microsoft.Extensions.AI
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             _ = Throw.IfNull(messages);
+            
+            var messagesList = messages as IList<ChatMessage>;
+
+            bool continueLoop;
+            do
+            {
+                continueLoop = false;
+                bool hasToolCalls = false;
+                int messageCountBefore = messagesList?.Count ?? -1;
+
+                await foreach (var update in StreamSingleResponseAsync(messages, options, cancellationToken))
+                {
+                    if (update.FinishReason == ChatFinishReason.ToolCalls)
+                    {
+                        hasToolCalls = true;
+                    }
+                    yield return update;
+                }
+
+                // 自动检测工具结果并发起后续请求
+                if (hasToolCalls &&
+                    messagesList is not null &&
+                    messagesList.Count > messageCountBefore &&
+                    messagesList[messagesList.Count - 1].Role == ChatRole.Tool)
+                {
+                    continueLoop = true;
+                }
+            } while (continueLoop);
+        }
+
+        /// <summary>
+        /// 单次流式响应处理（内部实现）
+        /// </summary>
+        private async IAsyncEnumerable<ChatResponseUpdate> StreamSingleResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
             string apiEndpoint = GetChatEndpoint();
             
             using HttpRequestMessage request = new(HttpMethod.Post, apiEndpoint)
@@ -59,6 +194,11 @@ namespace Microsoft.Extensions.AI
             string answerMsg = string.Empty;
             bool thinking = true;
             bool printThink = false;
+            
+            // 工具调用缓冲
+            string bufferName = string.Empty;
+            string bufferParams = string.Empty;
+            string? bufferCallId = null;
             
             // 发送初始思考标记
             yield return new ReasoningChatResponseUpdate
@@ -98,20 +238,75 @@ namespace Microsoft.Extensions.AI
                 }
                 
                 string? modelId = chunk.Model ?? Metadata.DefaultModelId;
+                var choice = chunk.Choices.FirstOrDefault();
+                var delta = choice?.Delta;
+
+                // 处理工具调用
+                if (delta?.ToolCalls?.Length > 0)
+                {
+                    var toolCall = delta.ToolCalls.FirstOrDefault();
+                    if (toolCall != null)
+                    {
+                        if (!string.IsNullOrEmpty(toolCall.Id))
+                        {
+                            bufferCallId = toolCall.Id;
+                        }
+                        if (!string.IsNullOrEmpty(toolCall.Function?.Name))
+                        {
+                            bufferName = toolCall.Function.Name;
+                        }
+                        bufferParams += toolCall.Function?.Arguments ?? "";
+
+                        // 检查 JSON 是否完整
+                        bool isJsonComplete = false;
+                        try
+                        {
+                            if (!string.IsNullOrEmpty(bufferName) && !string.IsNullOrEmpty(bufferParams))
+                            {
+                                _ = JsonConvert.DeserializeObject(bufferParams);
+                                isJsonComplete = ToolcallParser.GetBraceDepth(bufferParams) == 0;
+                            }
+                        }
+                        catch { }
+
+                        if (isJsonComplete)
+                        {
+                            yield return BuildToolCallUpdateWithId(responseId, bufferCallId, bufferName, bufferParams);
+                            bufferName = string.Empty;
+                            bufferParams = string.Empty;
+                            bufferCallId = null;
+                        }
+                    }
+                    continue;
+                }
+
+                // 检查是否为工具调用结束
+                if (choice?.FinishReason == "tool_calls")
+                {
+                    // 如果还有未发送的工具调用，尝试发送
+                    if (!string.IsNullOrEmpty(bufferName) && !string.IsNullOrEmpty(bufferParams))
+                    {
+                        yield return BuildToolCallUpdateWithId(responseId, bufferCallId, bufferName, bufferParams);
+                        bufferName = string.Empty;
+                        bufferParams = string.Empty;
+                        bufferCallId = null;
+                    }
+                    continue;
+                }
 
                 ReasoningChatResponseUpdate update = new()
                 {
                     CreatedAt = DateTimeOffset.FromUnixTimeSeconds(chunk.Created).UtcDateTime,
-                    FinishReason = ToFinishReason(chunk.Choices.FirstOrDefault()?.FinishReason),
+                    FinishReason = ToFinishReason(choice?.FinishReason),
                     ModelId = modelId,
                     ResponseId = responseId,
                     Thinking = true,
-                    Role = chunk.Choices.FirstOrDefault()?.Delta?.Role is not null 
-                        ? new ChatRole(chunk.Choices.FirstOrDefault()?.Delta?.Role) 
+                    Role = delta?.Role is not null 
+                        ? new ChatRole(delta.Role) 
                         : null,
                 };
 
-                if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
+                if (delta is { } message)
                 {
                     if (message.Content?.Length > 0)
                     {
@@ -139,15 +334,62 @@ namespace Microsoft.Extensions.AI
                             }
                         }
                     }
-                    else
+                    else if (!string.IsNullOrEmpty(message.ReasoningContent))
                     {
                         update.Contents.Insert(0, new TextContent(message.ReasoningContent));
                     }
+                    else
+                    {
+                        continue; // 跳过空内容
+                    }
+                }
+                else
+                {
+                    continue;
                 }
                 
                 update.Thinking = thinking;
                 yield return update;
             }
+        }
+
+        /// <summary>
+        /// 构建带 CallId 的工具调用更新
+        /// </summary>
+        private ChatResponseUpdate BuildToolCallUpdateWithId(string responseId, string? callId, string name, string arguments)
+        {
+            var functionCall = new VllmFunctionToolCall
+            {
+                Name = name,
+                Arguments = arguments
+            };
+
+            var fcc = ToFunctionCallContentWithId(callId, functionCall);
+
+            return new ChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                FinishReason = ChatFinishReason.ToolCalls,
+                ModelId = Metadata.DefaultModelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                Contents = new List<AIContent> { fcc }
+            };
+        }
+
+        /// <summary>
+        /// 使用指定的 CallId 创建 FunctionCallContent
+        /// </summary>
+        private static FunctionCallContent ToFunctionCallContentWithId(string? callId, VllmFunctionToolCall function)
+        {
+            var id = callId ?? 
+#if NET
+                System.Security.Cryptography.RandomNumberGenerator.GetHexString(8);
+#else
+                Guid.NewGuid().ToString().Substring(0, 8);
+#endif
+            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments);
+            return new FunctionCallContent(id, function.Name, arguments);
         }
     }
 }

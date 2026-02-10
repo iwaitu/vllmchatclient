@@ -12,6 +12,7 @@ internal sealed class VllmOpenAIChatRequest
     public bool Stream { get; set; }
     public IEnumerable<VllmTool>? Tools { get; set; }
     public VllmThinkingOptions? Thinking { get; set; }
+    public bool? EnableThinking { get; set; }
     public VllmRequestOptions? Options { get; set; }
 }
 

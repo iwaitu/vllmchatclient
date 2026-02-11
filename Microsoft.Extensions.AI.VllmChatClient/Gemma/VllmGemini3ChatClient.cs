@@ -282,7 +282,8 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     .ConfigureAwait(false);
 
                 using var geminiStreamReader = new StreamReader(geminiHttpResponseStream);
-                string? lastThoughtSignature = null; // 追踪最近的思维签名供后续函数调用附加
+                string? lastThoughtSignature = null; // 追踪最近的思维签名供首个函数调用附加
+                bool firstFunctionCallSeen = false;
 
 #if NET
                 while ((await geminiStreamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is { } line)
@@ -339,18 +340,20 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 #endif
                                     var argsDict = part.FunctionCall.Args ?? new Dictionary<string, object?>();
 
-                                    // 如果当前函数调用未携带签名但之前捕获到签名，则补充
-                                    if (string.IsNullOrEmpty(signature) && !string.IsNullOrEmpty(lastThoughtSignature))
-                                    {
-                                        signature = lastThoughtSignature;
-                                    }
-
-                                    if (!string.IsNullOrEmpty(signature))
-                                    {
-                                        argsDict["thoughtSignature"] = signature;
-                                    }
-
                                     var fcc = new FunctionCallContent(callId, part.FunctionCall.Name ?? "", argsDict);
+                                    if (!firstFunctionCallSeen)
+                                    {
+                                        var resolvedSig = !string.IsNullOrEmpty(signature)
+                                            ? signature
+                                            : lastThoughtSignature;
+
+                                        if (!string.IsNullOrEmpty(resolvedSig))
+                                        {
+                                            (fcc.AdditionalProperties ??= [])["thoughtSignature"] = resolvedSig;
+                                        }
+
+                                        firstFunctionCallSeen = true;
+                                    }
                                     (_functionCallNameMap ??= new()).TryAdd(callId, part.FunctionCall.Name ?? string.Empty);
 
                                     yield return new ReasoningChatResponseUpdate
@@ -1019,13 +1022,11 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                         });
                         break;
                     case FunctionCallContent fcc:
-                        // 如果参数中包含 thoughtSignature，将其挂载到 GeminiPart 的 ThoughtSignature 字段
+                        // 从 AdditionalProperties 中读取 thoughtSignature，挂载到 GeminiPart 的 ThoughtSignature 字段
                         string? sig = null;
-                        if (fcc.Arguments?.ContainsKey("thoughtSignature") == true)
+                        if (fcc.AdditionalProperties?.TryGetValue("thoughtSignature", out var sigObj) == true)
                         {
-                            var sigObj = fcc.Arguments["thoughtSignature"];
                             sig = sigObj?.ToString();
-                            fcc.Arguments.Remove("thoughtSignature"); // 从参数中移除，避免发送时污染函数调用参数
                         }
                         parts.Add(new GeminiPart
                         {
@@ -1307,7 +1308,8 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 
             var aiContents = new List<AIContent>();
             var thoughtSignatures = new List<string>();
-            string? lastSig = null; // 追踪最近签名供未包含签名的函数调用使用
+            string? lastSig = null; // 追踪最近签名供首个函数调用使用
+            bool firstFunctionCallSeen = false;
             foreach (var part in content.Parts)
             {
                 if (!string.IsNullOrEmpty(part.ThoughtSignature))
@@ -1329,20 +1331,24 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     var callId = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
                     var args = part.FunctionCall.Args ?? new Dictionary<string, object?>();
-                    // 如果当前函数调用没有签名但之前存在签名则补充
-                    if (string.IsNullOrEmpty(part.ThoughtSignature) && !string.IsNullOrEmpty(lastSig))
-                    {
-                        args["thoughtSignature"] = lastSig;
-                    }
-                    else if (!string.IsNullOrEmpty(part.ThoughtSignature))
-                    {
-                        args["thoughtSignature"] = part.ThoughtSignature;
-                    }
-                    aiContents.Add(new FunctionCallContent(
+                    var fcc = new FunctionCallContent(
                         callId,
                         part.FunctionCall.Name ?? "",
                         args
-                    ));
+                    );
+                    if (!firstFunctionCallSeen)
+                    {
+                        var resolvedSig = !string.IsNullOrEmpty(part.ThoughtSignature)
+                            ? part.ThoughtSignature
+                            : lastSig;
+                        if (!string.IsNullOrEmpty(resolvedSig))
+                        {
+                            (fcc.AdditionalProperties ??= [])["thoughtSignature"] = resolvedSig;
+                        }
+
+                        firstFunctionCallSeen = true;
+                    }
+                    aiContents.Add(fcc);
                     (_functionCallNameMap ??= new()).TryAdd(callId, part.FunctionCall.Name ?? string.Empty);
                 }
             }

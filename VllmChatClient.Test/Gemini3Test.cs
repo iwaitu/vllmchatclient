@@ -525,6 +525,21 @@ namespace VllmChatClient.Test
                         _output.WriteLine($"  Arguments: {System.Text.Json.JsonSerializer.Serialize(fc.Arguments)}");
                     }
 
+                    // thoughtSignature should be in AdditionalProperties, not in Arguments
+                    var firstHasSignature = functionCalls[0].AdditionalProperties?.ContainsKey("thoughtSignature") == true;
+                    var firstArgsClean = !functionCalls[0].Arguments.ContainsKey("thoughtSignature");
+                    var otherHasSignature = functionCalls.Skip(1).Any(fc =>
+                        (fc.AdditionalProperties?.ContainsKey("thoughtSignature") == true) ||
+                        fc.Arguments.ContainsKey("thoughtSignature"));
+
+                    if (!firstHasSignature)
+                    {
+                        _output.WriteLine("\n⚠️ First function call is missing thoughtSignature in AdditionalProperties");
+                    }
+
+                    Assert.True(firstArgsClean, "thoughtSignature should not appear in Arguments.");
+                    Assert.False(otherHasSignature, "Only the first function call should include thoughtSignature.");
+
                     _output.WriteLine("\nNote: According to Gemini docs, only the first function call should have thoughtSignature");
                 }
                 else if (functionCalls.Count == 1)

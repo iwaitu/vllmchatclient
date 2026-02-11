@@ -51,7 +51,7 @@ namespace VllmChatClient.Test
         {
             _output = output; // 修复 CS8618: 正确初始化 _output 字段
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
-            _client = new VllmKimiK2ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
+            _client = new VllmMiniMaxChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
             //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_KIMI_API_KEY");
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
@@ -319,15 +319,27 @@ namespace VllmChatClient.Test
                 }
                 else
                 {
-                    foreach (var text in update.Contents.OfType<TextContent>())
+                    if (update is ReasoningChatResponseUpdate reasoningMessage)
                     {
-                        res += text.Text;
+                        if (reasoningMessage.Thinking)
+                        {
+                            reason += reasoningMessage.Text;
+                        }
+                        else
+                        {
+                            res += reasoningMessage.Text;
+                        }
+                    }
+                    else
+                    {
+                        res += update.Text;
                     }
                 }
-
             }
 
             Assert.False(string.IsNullOrWhiteSpace(res));
+            _output.WriteLine("REASON:{0}",reason);
+            _output.WriteLine("RESULT:{0}",res);
         }
 
         [Fact]

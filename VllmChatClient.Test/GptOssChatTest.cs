@@ -294,18 +294,20 @@ namespace VllmChatClient.Test
                 }
                 else
                 {
-                    foreach (var text in update.Contents.OfType<TextContent>())
+                    if (update is ReasoningChatResponseUpdate reasoningMessage)
                     {
-                        ReasoningChatResponseUpdate reasoningUpdate = update as ReasoningChatResponseUpdate;
-                        if (reasoningUpdate != null && reasoningUpdate.Thinking)
+                        if (reasoningMessage.Thinking)
                         {
-                            reason += reasoningUpdate.Reasoning;
+                            reason += reasoningMessage.Text;
                         }
                         else
                         {
-                            res += text.Text;
+                            res += reasoningMessage.Text;
                         }
-
+                    }
+                    else
+                    {
+                        res += update.Text;
                     }
                 }
 

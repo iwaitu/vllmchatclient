@@ -264,15 +264,28 @@ namespace VllmChatClient.Test
                 }
                 else
                 {
-                    foreach (var text in update.Contents.OfType<TextContent>())
+                    if (update is ReasoningChatResponseUpdate reasoningMessage)
                     {
-                        res += text.Text;
+                        if (reasoningMessage.Thinking)
+                        {
+                            reason += reasoningMessage.Text;
+                        }
+                        else
+                        {
+                            res += reasoningMessage.Text;
+                        }
+                    }
+                    else
+                    {
+                        res += update.Text;
                     }
                 }
                     
             }
 
             Assert.False(string.IsNullOrWhiteSpace(res));
+            _output.WriteLine("REASON:{0}", reason);
+            _output.WriteLine("RESULT:{0}", res);
         }
 
         [Fact]

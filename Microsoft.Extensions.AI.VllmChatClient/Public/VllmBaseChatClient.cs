@@ -172,8 +172,8 @@ namespace Microsoft.Extensions.AI
 
             using var streamReader = new StreamReader(httpResponseStream);
             string bufferMsg = string.Empty;
-            string bufferName = string.Empty;
-            string bufferParams = string.Empty;
+            // 按 tool_calls[].index 缓冲多个并行工具调用
+            var toolCallBuffers = new Dictionary<int, (string Name, string Arguments)>();
             bool thinking = true;
             string bufferToolCall = string.Empty;
             yield return new ChatResponseUpdate
@@ -215,16 +215,49 @@ namespace Microsoft.Extensions.AI
                     continue;
                 }
 
-                if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
+                var choice = chunk.Choices[0];
+
+                // 按 index 缓冲每个工具调用的 name 和 arguments 片段
+                if (choice.Delta?.ToolCalls is { Length: > 0 } deltaToolCalls)
                 {
-                    if (string.IsNullOrEmpty(bufferName))
+                    foreach (var tc in deltaToolCalls)
                     {
-                        bufferName = chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Name ?? "";
+                        int idx = tc.Index ?? 0;
+                        if (!toolCallBuffers.TryGetValue(idx, out var buf))
+                        {
+                            buf = (string.Empty, string.Empty);
+                        }
+
+                        if (!string.IsNullOrEmpty(tc.Function?.Name))
+                        {
+                            buf.Name = tc.Function.Name;
+                        }
+
+                        buf.Arguments += tc.Function?.Arguments?.ToString() ?? string.Empty;
+                        toolCallBuffers[idx] = buf;
                     }
-                    bufferParams += chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Arguments?.ToString() ?? "";
                 }
 
-                if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
+                // 当 finish_reason 为 tool_calls 时，flush 所有缓冲的工具调用
+                if (choice.FinishReason == "tool_calls" && toolCallBuffers.Count > 0)
+                {
+                    foreach (var kvp in toolCallBuffers.OrderBy(k => k.Key))
+                    {
+                        if (!string.IsNullOrEmpty(kvp.Value.Name))
+                        {
+                            yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
+                            {
+                                Name = kvp.Value.Name,
+                                Arguments = kvp.Value.Arguments
+                            });
+                        }
+                    }
+
+                    toolCallBuffers.Clear();
+                    continue;
+                }
+
+                if (choice.Delta is { } message)
                 {
                     bufferMsg += message.Content ?? string.Empty;
                     var bufferCopy = bufferMsg;
@@ -239,30 +272,34 @@ namespace Microsoft.Extensions.AI
 
                     thinking = false;
 
+                    // 逐 chunk 检测已完成的工具调用（单工具场景兼容）
                     foreach (var call in message.ToolCalls ?? [])
                     {
-                        bool isJsonComplete = false;
-                        try
+                        int idx = call.Index ?? 0;
+                        if (toolCallBuffers.TryGetValue(idx, out var buf))
                         {
-                            if (!string.IsNullOrEmpty(bufferName) && !string.IsNullOrEmpty(bufferParams))
+                            bool isJsonComplete = false;
+                            try
                             {
-                                _ = JsonConvert.DeserializeObject(bufferParams);
-                                isJsonComplete = ToolcallParser.GetBraceDepth(bufferParams) == 0;
+                                if (!string.IsNullOrEmpty(buf.Name) && !string.IsNullOrEmpty(buf.Arguments))
+                                {
+                                    _ = JsonConvert.DeserializeObject(buf.Arguments);
+                                    isJsonComplete = ToolcallParser.GetBraceDepth(buf.Arguments) == 0;
+                                }
                             }
-                        }
-                        catch (Exception)
-                        {
-                        }
-
-                        if (isJsonComplete)
-                        {
-                            funcList.Add(new VllmFunctionToolCall
+                            catch (Exception)
                             {
-                                Name = bufferName,
-                                Arguments = bufferParams
-                            });
-                            bufferParams = string.Empty;
-                            bufferName = string.Empty;
+                            }
+
+                            if (isJsonComplete)
+                            {
+                                funcList.Add(new VllmFunctionToolCall
+                                {
+                                    Name = buf.Name,
+                                    Arguments = buf.Arguments
+                                });
+                                toolCallBuffers.Remove(idx);
+                            }
                         }
                     }
 
@@ -298,6 +335,34 @@ namespace Microsoft.Extensions.AI
                         }
                         yield return BuildTextUpdate(responseId, message.Content, thinking);
                     }
+                }
+            }
+
+            // 流结束后，flush 所有仍在缓冲中的工具调用（防止 finish_reason 缺失或非标准值）
+            if (toolCallBuffers.Count > 0)
+            {
+                foreach (var kvp in toolCallBuffers.OrderBy(k => k.Key))
+                {
+                    if (!string.IsNullOrEmpty(kvp.Value.Name))
+                    {
+                        yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
+                        {
+                            Name = kvp.Value.Name,
+                            Arguments = kvp.Value.Arguments
+                        });
+                    }
+                }
+
+                toolCallBuffers.Clear();
+            }
+
+            // 流结束后，flush bufferMsg 中可能残留的 <tool_call> 块
+            if (!string.IsNullOrEmpty(bufferMsg))
+            {
+                ToolcallParser.TryFlushClosedToolCallBlocks(ref bufferMsg, out var remainingCalls);
+                foreach (var call in remainingCalls)
+                {
+                    yield return BuildToolCallUpdate(responseId, call);
                 }
             }
         }

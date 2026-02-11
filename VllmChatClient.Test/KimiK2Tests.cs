@@ -21,7 +21,7 @@ namespace VllmChatClient.Test
         {
             if (MODEL == "kimi-k2.5")
             {
-                return new KimiChatOptions { ThinkingEnabled = false };
+                return new KimiChatOptions { ThinkingEnabled = true };
             }
 
             return new ChatOptions();
@@ -319,13 +319,28 @@ namespace VllmChatClient.Test
                 {
                     foreach (var text in update.Contents.OfType<TextContent>())
                     {
-                        res += text.Text;
+                        if (update is ReasoningChatResponseUpdate reasoningMessage)
+                        {
+                            if (reasoningMessage.Thinking)
+                            {
+                                reason += reasoningMessage.Text;
+                            }
+                            else
+                            {
+                                res += reasoningMessage.Text;
+                            }
+                        }
+                        else
+                        {
+                            res += update.Text;
+                        }
                     }
                 }
-
             }
 
             Assert.False(string.IsNullOrWhiteSpace(res));
+            _output.WriteLine("REASON:{0}", reason);
+            _output.WriteLine("RESULT:{0}", res);
         }
 
         [Fact]

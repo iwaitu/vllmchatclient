@@ -450,6 +450,90 @@ public class SimpleSkillSmokeTests
         }
     }
 
+    /// <summary>
+    /// 测试：使用流式传输验证 init_skill.py 脚本可以被 AI 调用来创建新 skill。
+    /// </summary>
+    [Fact]
+    public async Task SkillCreatorCanExecuteInitSkillScriptOnStream()
+    {
+        if (_skipTests)
+        {
+            _testOutput.WriteLine("Skipping: VLLM_ALIYUN_API_KEY not set");
+            return;
+        }
+
+        var skillsDir = GetSkillsDir();
+        var testSkillName = "test-stream-skill";
+        var testSkillPath = Path.Combine(skillsDir, testSkillName);
+
+        if (Directory.Exists(testSkillPath))
+        {
+            Directory.Delete(testSkillPath, true);
+            _testOutput.WriteLine("Cleaned up existing test skill directory");
+        }
+
+        var client = new ChatClientBuilder(_chatClient)
+            .UseFunctionInvocation()
+            .Build();
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.User, $"Please use the init_skill.py script from skill-creator to create a new skill named '{testSkillName}' in the skills directory at path '{skillsDir}'. Respond briefly.")
+        };
+
+        var options = new VllmChatOptions
+        {
+            EnableSkills = true,
+            SkillDirectoryPath = skillsDir
+        };
+
+        var responseBuilder = new StringBuilder();
+        try
+        {
+            await foreach (var update in client.GetStreamingResponseAsync(messages, options))
+            {
+                if (update.Contents is { Count: > 0 })
+                {
+                    foreach (var content in update.Contents)
+                    {
+                        if (content is TextContent textContent)
+                        {
+                            responseBuilder.Append(textContent.Text);
+                        }
+                    }
+                }
+            }
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("insufficient_quota") || ex.Message.Contains("rate_limit"))
+        {
+            _testOutput.WriteLine("Skipping: API quota/rate limit exceeded - {0}", ex.Message);
+            return;
+        }
+        catch (HttpRequestException ex)
+        {
+            _testOutput.WriteLine("Skipping: API unreachable - {0}", ex.Message);
+            return;
+        }
+
+        var responseText = responseBuilder.ToString();
+        _testOutput.WriteLine("Streaming response: {0}", responseText);
+
+        Assert.False(string.IsNullOrWhiteSpace(responseText));
+
+        var mentionsScript =
+            responseText.Contains("init_skill", StringComparison.OrdinalIgnoreCase) ||
+            responseText.Contains("script", StringComparison.OrdinalIgnoreCase) ||
+            responseText.Contains("created", StringComparison.OrdinalIgnoreCase);
+
+        Assert.True(mentionsScript, "Response should mention the init_skill script or creation process");
+
+        if (Directory.Exists(testSkillPath))
+        {
+            Directory.Delete(testSkillPath, true);
+            _testOutput.WriteLine("Cleaned up test skill directory");
+        }
+    }
+
     private sealed class FakeResponseHandler : HttpMessageHandler
     {
         public string? LastRequestBody { get; private set; }

@@ -9,7 +9,8 @@ namespace VllmChatClient.Test
         private readonly IChatClient _client;
         public QwQChatTest()
         {
-            _client = new VllmQwqChatClient("https://localhost:8000/v1/{1}", "", "qwq");
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            _client = new VllmQwqChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwq-32b");
         }
 
         [Fact]

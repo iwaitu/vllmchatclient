@@ -15,13 +15,9 @@ namespace VllmChatClient.Test
         private readonly ITestOutputHelper _output;
 
         // 端点和密钥配置
-        //private const string Endpoint = "http://59.211.236.171:32452/qwen-32b/v1/{1}";
-        //private const string Endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}";
-        //private string ApiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY") ?? "";
-        //private const string ModelId = "Qwen/Qwen3-32B";
-        private const string Endpoint = "https://chatservice.nngeo.net/v1/{1}";
-        private string ApiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY") ?? "";
-        private const string ModelId = "qwen3";
+        private const string Endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}";
+        private string ApiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY") ?? "";
+        private const string ModelId = "qwen3-32b";
 
 
         public Qwen3ChatTest(ITestOutputHelper testOutput)

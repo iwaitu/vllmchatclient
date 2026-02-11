@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.AI;
+using Microsoft.Extensions.AI.VllmChatClient.GptOss;
 using System.ComponentModel;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -9,9 +10,11 @@ namespace VllmChatClient.Test
     {
         private readonly IChatClient _client;
         static int functionCallTime = 0;
+        private string ApiToken = Environment.GetEnvironmentVariable("OPEN_ROUTE_API_KEY");
         public Gemma3ChatTest()
         {
-            _client = new VllmGemmaChatClient("http://localhost:8000/{0}/{1}", "", "gemma3");
+            
+            _client = new VllmGptOssChatClient("https://openrouter.ai/api/v1", ApiToken, "google/gemma-3-27b-it");
         }
         private const string apiKey = "";
         [Description("获取指定地点的天气信息")]

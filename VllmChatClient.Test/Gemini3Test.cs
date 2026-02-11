@@ -523,6 +523,17 @@ namespace VllmChatClient.Test
                         _output.WriteLine($"\nFunction: {fc.Name}");
                         _output.WriteLine($"  Call ID: {fc.CallId}");
                         _output.WriteLine($"  Arguments: {System.Text.Json.JsonSerializer.Serialize(fc.Arguments)}");
+                        
+                        if (fc.AdditionalProperties?.ContainsKey("thoughtSignature") == true)
+                        {
+                             var sig = fc.AdditionalProperties["thoughtSignature"]?.ToString();
+                             var displaySig = sig?.Length > 20 ? sig.Substring(0, 20) + "..." : sig;
+                             _output.WriteLine($"  thoughtSignature: [Present] {displaySig}");
+                        }
+                        else 
+                        {
+                             _output.WriteLine($"  thoughtSignature: [Absent]");
+                        }
                     }
 
                     // thoughtSignature should be in AdditionalProperties, not in Arguments
@@ -532,15 +543,39 @@ namespace VllmChatClient.Test
                         (fc.AdditionalProperties?.ContainsKey("thoughtSignature") == true) ||
                         fc.Arguments.ContainsKey("thoughtSignature"));
 
-                    if (!firstHasSignature)
-                    {
-                        _output.WriteLine("\n⚠️ First function call is missing thoughtSignature in AdditionalProperties");
-                    }
-
+                    Assert.True(firstHasSignature, "First function call MUST have thoughtSignature in AdditionalProperties.");
                     Assert.True(firstArgsClean, "thoughtSignature should not appear in Arguments.");
                     Assert.False(otherHasSignature, "Only the first function call should include thoughtSignature.");
 
-                    _output.WriteLine("\nNote: According to Gemini docs, only the first function call should have thoughtSignature");
+                    _output.WriteLine("\n✓ Verified: Only the first function call has thoughtSignature, complying with Gemini docs.");
+
+                    // ==================================================================================
+                    // Execute tools and get final response
+                    // ==================================================================================
+                    _output.WriteLine("\n=== Turn 2: Executing tools and getting final response ===");
+                    
+                    // Add the assistant's message (the one with tool calls) to history
+                    messages.Add(response.Messages[0]);
+
+                    foreach (var fc in functionCalls)
+                    {
+                        var city = fc.Arguments.TryGetValue("city", out var c) ? c?.ToString() ?? "" : "";
+                        var result = GetWeather(city);
+                        _output.WriteLine($"  Executed {fc.Name}({city}) => {result}");
+
+                        messages.Add(new ChatMessage(ChatRole.User, new List<AIContent> 
+                        { 
+                            new FunctionResultContent(fc.CallId, result) 
+                        }));
+                    }
+
+                    var finalResponse = await client.GetResponseAsync(messages, options);
+                    _output.WriteLine($"\nFinal Response: {finalResponse.Text}");
+                    
+                    if (finalResponse is ReasoningChatResponse reasoningResp)
+                    {
+                         _output.WriteLine($"Final Reasoning: {reasoningResp.Reason}");
+                    }
                 }
                 else if (functionCalls.Count == 1)
                 {

@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI.VllmChatClient.GptOss;
 using Microsoft.Shared.Diagnostics;
 using Newtonsoft.Json;
@@ -608,6 +608,12 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                             {
                                 state.Id = toolCall.Id;
                             }
+
+                            var thoughtSignature = toolCall.ExtraContent?.Google?.ThoughtSignature;
+                            if (!string.IsNullOrEmpty(thoughtSignature) && string.IsNullOrEmpty(state.ThoughtSignature))
+                            {
+                                state.ThoughtSignature = thoughtSignature;
+                            }
                         }
                     }
 
@@ -674,6 +680,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
             public string Id { get; set; } = "";
             public string Name { get; set; } = "";
             public StringBuilder Arguments { get; set; } = new();
+            public string? ThoughtSignature { get; set; }
         }
 
         /// <summary>
@@ -696,7 +703,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                 Role = ChatRole.Assistant,
                 Thinking = false,
                 Reasoning = "",
-                Contents = new List<AIContent> { ToFunctionCallContent(functionCall) }
+                Contents = new List<AIContent> { ToFunctionCallContent(functionCall, state.ThoughtSignature) }
             };
         }
 
@@ -732,7 +739,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
         /// <summary>
         /// 将工具调用转换为 FunctionCallContent 对象
         /// </summary>
-        private static FunctionCallContent ToFunctionCallContent(VllmFunctionToolCall function)
+        private static FunctionCallContent ToFunctionCallContent(VllmFunctionToolCall function, string? thoughtSignature = null)
         {
 #if NET
             var id = System.Security.Cryptography.RandomNumberGenerator.GetHexString(8);
@@ -741,7 +748,12 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 #endif
 
             var argumentsIndex = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(function.Arguments ?? "{}", AIJsonUtilities.DefaultOptions);
-            return new FunctionCallContent(id, function.Name ?? "", argumentsIndex);
+            var fcc = new FunctionCallContent(id, function.Name ?? "", argumentsIndex);
+            if (!string.IsNullOrEmpty(thoughtSignature))
+            {
+                (fcc.AdditionalProperties ??= [])["thoughtSignature"] = thoughtSignature;
+            }
+            return fcc;
         }
 
         private static ChatMessage FromVllmMessage(VllmChatResponseMessage message)
@@ -755,7 +767,13 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     Name = function.Function?.Name,
                     Arguments = function.Function?.Arguments
                 };
-                contents.Add(ToFunctionCallContent(functionCall));
+                var fcc = ToFunctionCallContent(functionCall);
+                var thoughtSignature = function.ExtraContent?.Google?.ThoughtSignature;
+                if (!string.IsNullOrEmpty(thoughtSignature))
+                {
+                    (fcc.AdditionalProperties ??= [])["thoughtSignature"] = thoughtSignature;
+                }
+                contents.Add(fcc);
             }
 
 
@@ -928,6 +946,12 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                             {
                                 // GPT-OSS-120b 期望工具调用使用标准的 OpenAI 格式
                                 // vLLM 模板会处理转换为 commentary channel 格式
+                                string? thoughtSignature = null;
+                                if (fcc.AdditionalProperties?.TryGetValue("thoughtSignature", out var sigObj) == true)
+                                {
+                                    thoughtSignature = sigObj?.ToString();
+                                }
+
                                 yield return new VllmOpenAIChatRequestMessage
                                 {
                                     Role = "assistant",
@@ -936,6 +960,15 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                                         new VllmToolCall {
                                             Id = fcc.CallId,
                                             Type = "function",
+                                            ExtraContent = string.IsNullOrEmpty(thoughtSignature)
+                                                ? null
+                                                : new VllmToolCallExtraContent
+                                                {
+                                                    Google = new VllmToolCallGoogleExtraContent
+                                                    {
+                                                        ThoughtSignature = thoughtSignature
+                                                    }
+                                                },
                                             Function = new VllmFunctionToolCall {
                                                 Name = fcc.Name,
                                                 Arguments = System.Text.Json.JsonSerializer.Serialize(fcc.Arguments, this.ToolCallJsonSerializerOptions)

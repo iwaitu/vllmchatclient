@@ -232,7 +232,7 @@ namespace Microsoft.Extensions.AI
 
                 var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmChatStreamResponse);
 
-                if (chunk == null || chunk.Choices.Count == 0)
+                if (chunk == null || chunk.Choices is null || chunk.Choices.Count == 0)
                 {
                     continue;
                 }
@@ -388,8 +388,8 @@ namespace Microsoft.Extensions.AI
 #else
                 Guid.NewGuid().ToString().Substring(0, 8);
 #endif
-            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments);
-            return new FunctionCallContent(id, function.Name, arguments);
+            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments ?? "{}");
+            return new FunctionCallContent(id, function.Name ?? "", arguments);
         }
     }
 }

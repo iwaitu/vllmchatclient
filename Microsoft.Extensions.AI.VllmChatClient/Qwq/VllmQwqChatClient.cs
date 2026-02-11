@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Shared.Diagnostics;
 using Newtonsoft.Json;
 using JsonSerializer = System.Text.Json.JsonSerializer;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Extensions.AI
 {
@@ -87,15 +88,15 @@ namespace Microsoft.Extensions.AI
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
 
-            if (response.Choices.Length == 0)
+            if (response.Choices?.Length is null or 0)
             {
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
 
-            return new(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!))
+            return new(FromVllmMessage(response.Choices?.FirstOrDefault()?.Message!))
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
-                FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
+                FinishReason = ToFinishReason(response.Choices?.FirstOrDefault()?.FinishReason),
                 ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
                 ResponseId = response.Id,
                 Usage = ParseVllmChatResponseUsage(response),
@@ -111,7 +112,7 @@ namespace Microsoft.Extensions.AI
                 null;
         }
 
-        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             // 检查 messages 参数是否为 null
             _ = Throw.IfNull(messages);
@@ -177,30 +178,30 @@ namespace Microsoft.Extensions.AI
 
                 var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmChatStreamResponse);
                 
-                if(chunk == null || chunk.Choices.Count == 0)
+                if(chunk == null || chunk.Choices is null || chunk.Choices.Count == 0)
                 {
                     continue;
                 }
                 string? modelId = chunk.Model ?? _metadata.DefaultModelId;
-                if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
+                if (chunk.Choices?.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
                 {
                     if (string.IsNullOrEmpty(buffer_name))
                     {
-                        buffer_name = chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Name ?? "";
+                        buffer_name = chunk.Choices?.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Name ?? "";
                     }
-                    buffer_params += chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Arguments?.ToString() ?? "";
+                    buffer_params += chunk.Choices?.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Arguments?.ToString() ?? "";
                 }
                 ReasoningChatResponseUpdate update = new()
                 {
                     CreatedAt = DateTimeOffset.FromUnixTimeSeconds(chunk.Created).UtcDateTime,
-                    FinishReason = ToFinishReason(chunk.Choices.FirstOrDefault()?.FinishReason),
+                    FinishReason = ToFinishReason(chunk.Choices?.FirstOrDefault()?.FinishReason),
                     ModelId = modelId,
                     ResponseId = responseId,
                     Thinking = true,
-                    Role = chunk.Choices.FirstOrDefault()?.Delta.Role is not null ? new ChatRole(chunk.Choices.FirstOrDefault()?.Delta?.Role) : null,
+                    Role = chunk.Choices?.FirstOrDefault()?.Delta?.Role is { } role ? new ChatRole(role) : null,
                 };
 
-                if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
+                if (chunk.Choices?.FirstOrDefault()?.Delta is { } message)
                 {
                     buffer_msg += message.Content ?? string.Empty;
                     var buffer_copy = buffer_msg;
@@ -292,7 +293,7 @@ namespace Microsoft.Extensions.AI
         /// <summary>
         /// 将响应中的结束原因转换为内部枚举
         /// </summary>
-        private static ChatFinishReason? ToFinishReason(string reason) =>
+        private static ChatFinishReason? ToFinishReason(string? reason) =>
             reason switch
             {
                 null => null,
@@ -310,7 +311,7 @@ namespace Microsoft.Extensions.AI
 
             if (message.Content?.Length > 0 || contents.Count == 0)
             {
-                var functionCall = ToolcallParser.ParseToolCall(message.Content);
+                var functionCall = ToolcallParser.ParseToolCall(message.Content ?? "");
                 if (functionCall != null)
                 {
                     contents.Add(ToFunctionCallContent(functionCall));
@@ -321,7 +322,7 @@ namespace Microsoft.Extensions.AI
                 }
             }
 
-            return new ChatMessage(new(message.Role), contents);
+            return new ChatMessage(new(message.Role ?? "assistant"), contents);
         }
 
 
@@ -337,7 +338,7 @@ namespace Microsoft.Extensions.AI
 #else
             var id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
-            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments);
+            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments ?? "{}");
             return new FunctionCallContent(id, function.Name ?? string.Empty, arguments);
         }
 

@@ -8,7 +8,7 @@ namespace Microsoft.Extensions.AI
 {
     internal static class ToolcallParser
     {
-        public static VllmFunctionToolCall ParseToolCall(string inputStr)
+        public static VllmFunctionToolCall? ParseToolCall(string inputStr)
         {
             var pattern = @"<tool_call>(.*?)</tool_call>";
             var match = Regex.Match(inputStr, pattern, RegexOptions.Singleline);
@@ -23,8 +23,8 @@ namespace Microsoft.Extensions.AI
                     var jsonContent = JObject.Parse(content);
 
                     // 提取 "name" 和 "arguments"
-                    JToken nameToken = jsonContent["name"];
-                    JToken argumentsToken = jsonContent["arguments"];
+                    JToken? nameToken = jsonContent["name"];
+                    JToken? argumentsToken = jsonContent["arguments"];
 
                     if (nameToken != null && argumentsToken != null)
                     {
@@ -78,18 +78,18 @@ namespace Microsoft.Extensions.AI
         /// </summary>
         /// <param name="json">JSON 格式字符串</param>
         /// <returns>成功时返回 (toolName, content)，失败时返回 (null, null)</returns>
-        public static VllmFunctionToolCall TryParseToolCall(string json)
+        public static VllmFunctionToolCall? TryParseToolCall(string json)
         {
             try
             {
                 var doc = JsonDocument.Parse(json);
 
                 // 获取 name
-                string name = doc.RootElement.GetProperty("name").GetString();
+                string? name = doc.RootElement.GetProperty("name").GetString();
 
                 // 获取 arguments.content
                 var arguments = doc.RootElement.GetProperty("arguments");
-                string content = arguments.GetProperty("content").GetString();
+                string? content = arguments.GetProperty("content").GetString();
 
                 return new VllmFunctionToolCall { Name = name, Arguments = content };
             }

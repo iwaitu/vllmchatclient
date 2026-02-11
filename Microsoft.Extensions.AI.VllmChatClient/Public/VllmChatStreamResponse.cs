@@ -26,29 +26,29 @@ internal sealed class VllmReasoningDetail
 internal class VllmChatStreamResponse
 {
     [JsonProperty("id")]
-    public string Id { get; set; }
+    public string? Id { get; set; }
 
     [JsonProperty("object")]
-    public string Object { get; set; }
+    public string? Object { get; set; }
 
     [JsonProperty("created")]
     public long Created { get; set; }
 
     [JsonProperty("model")]
-    public string Model { get; set; }
+    public string? Model { get; set; }
 
     [JsonProperty("choices")]
-    public List<ChoiceChunk> Choices { get; set; }
+    public List<ChoiceChunk>? Choices { get; set; }
     
     // GPT-OSS Responses API 支持
     [JsonProperty("type")]
-    public string Type { get; set; }
+    public string? Type { get; set; }
     
     [JsonProperty("sequence_number")]
     public int? SequenceNumber { get; set; }
     
     [JsonProperty("item_id")]
-    public string ItemId { get; set; }
+    public string? ItemId { get; set; }
     
     [JsonProperty("output_index")]
     public int? OutputIndex { get; set; }
@@ -57,10 +57,10 @@ internal class VllmChatStreamResponse
     public int? ContentIndex { get; set; }
     
     [JsonProperty("delta")]
-    public string Delta { get; set; }
+    public string? Delta { get; set; }
     
     [JsonProperty("text")]
-    public string Text { get; set; }
+    public string? Text { get; set; }
 }
 
 internal class ChoiceChunk
@@ -69,13 +69,13 @@ internal class ChoiceChunk
     public int Index { get; set; }
 
     [JsonProperty("delta")]
-    public Delta Delta { get; set; }
+    public Delta? Delta { get; set; }
 
     [JsonProperty("logprobs")]
-    public object Logprobs { get; set; }
+    public object? Logprobs { get; set; }
 
     [JsonProperty("finish_reason")]
-    public string FinishReason { get; set; }
+    public string? FinishReason { get; set; }
 }
 
 internal class Delta

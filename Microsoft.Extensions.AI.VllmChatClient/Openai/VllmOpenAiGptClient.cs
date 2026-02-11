@@ -219,12 +219,13 @@ namespace Microsoft.Extensions.AI
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
 
-            if (response.Choices.Length == 0)
+            if (response.Choices is null || response.Choices.Length == 0)
             {
-                throw new InvalidOperationException("Î´·µ»ØÈÎºÎÏìÓ¦Ñ¡Ïî¡£");
+                throw new InvalidOperationException("æœªè¿”å›žä»»ä½•å“åº”é€‰é¡¹ã€‚");
             }
 
-            var responseMessage = response.Choices.FirstOrDefault()?.Message;
+            var choice = response.Choices[0];
+            var responseMessage = choice.Message;
 
             string reason = responseMessage?.Reasoning ?? string.Empty;
             if (string.IsNullOrEmpty(reason) && responseMessage?.ReasoningDetails?.FirstOrDefault(x => x.Type == "reasoning.text") is { } detail)

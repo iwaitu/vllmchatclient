@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using System.Text.Json;
 using Newtonsoft.Json;
 using JsonSerializer = System.Text.Json.JsonSerializer;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Extensions.AI
 {
@@ -102,15 +103,15 @@ namespace Microsoft.Extensions.AI
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
 
-            if (response.Choices.Length == 0)
+            if (response.Choices is null || response.Choices.Length == 0)
             {
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
 
-            return new(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!))
+            return new(FromVllmMessage(response.Choices[0].Message ?? new VllmChatResponseMessage { Role = "assistant" }))
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
-                FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
+                FinishReason = ToFinishReason(response.Choices[0].FinishReason),
                 ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
                 ResponseId = response.Id,
                 Usage = ParseVllmChatResponseUsage(response),
@@ -126,7 +127,7 @@ namespace Microsoft.Extensions.AI
                 null;
         }
 
-        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             // 检查 messages 参数是否为 null
             _ = Throw.IfNull(messages);
@@ -182,8 +183,8 @@ namespace Microsoft.Extensions.AI
             string buffer_name = string.Empty;
             string buffer_params = string.Empty;
             bool thinking = !noThinking ;
-            bool insideThink = false;   // 是否正在 <think> 中
-            bool insideToolCall = false;   // 是否正在 <tool_call> 中（用于兜底残缺情况）
+   // 是否正在 <think> 中
+   // 是否正在 <tool_call> 中（用于兜底残缺情况）
             string buff_toolcall = string.Empty;
             yield return new ReasoningChatResponseUpdate
             {
@@ -217,7 +218,7 @@ namespace Microsoft.Extensions.AI
 
                 var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmChatStreamResponse);
 
-                if (chunk == null || chunk.Choices.Count == 0)
+                if (chunk == null || chunk.Choices is null || chunk.Choices.Count == 0)
                 {
                     continue;
                 }
@@ -239,10 +240,10 @@ namespace Microsoft.Extensions.AI
                     ModelId = modelId,
                     ResponseId = responseId,
                     Thinking = true,
-                    Role = chunk.Choices.FirstOrDefault()?.Delta.Role is not null ? new ChatRole(chunk.Choices.FirstOrDefault()?.Delta?.Role) : null,
+                    Role = chunk.Choices.FirstOrDefault()?.Delta?.Role is { } role ? new ChatRole(role) : null,
                 };
 
-                if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
+                if (chunk.Choices?.FirstOrDefault()?.Delta is { } message)
                 {
                     buffer_msg += message.Content ?? string.Empty;
                     var buffer_copy = buffer_msg;
@@ -400,7 +401,7 @@ namespace Microsoft.Extensions.AI
         /// <summary>
         /// 将响应中的结束原因转换为内部枚举
         /// </summary>
-        private static ChatFinishReason? ToFinishReason(string reason) =>
+        private static ChatFinishReason? ToFinishReason(string? reason) =>
             reason switch
             {
                 null => null,
@@ -426,7 +427,7 @@ namespace Microsoft.Extensions.AI
             }
 
             if (string.IsNullOrEmpty(message.Content))
-                return new ChatMessage(new ChatRole(message.Role), contents);
+                return new ChatMessage(new ChatRole(message.Role ?? "assistant"), contents);
 
             // ① 去掉 <think> 标记
             var raw = RemoveThinkTag(message.Content);
@@ -454,7 +455,7 @@ namespace Microsoft.Extensions.AI
             if (!string.IsNullOrEmpty(rest))
                 contents.Add(new TextContent(rest));
 
-            return new ChatMessage(new ChatRole(message.Role), contents);
+            return new ChatMessage(new ChatRole(message.Role ?? "assistant"), contents);
         }
 
 
@@ -472,8 +473,8 @@ namespace Microsoft.Extensions.AI
 #else
             var id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
-            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments);
-            return new FunctionCallContent(id, function.Name, arguments);
+            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments ?? "{}");
+            return new FunctionCallContent(id, function.Name ?? "", arguments);
         }
 
         /// <summary>

@@ -104,12 +104,13 @@ namespace Microsoft.Extensions.AI
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
 
-            if (response.Choices.Length == 0)
+            if (response.Choices is null || response.Choices.Length == 0)
             {
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
 
-            var responseMessage = response.Choices.FirstOrDefault()?.Message;
+            var choice = response.Choices[0];
+            var responseMessage = choice.Message;
             string reason = responseMessage?.ReasoningContent?.ToString() ?? string.Empty;
 
             if (string.IsNullOrEmpty(reason))
@@ -128,7 +129,7 @@ namespace Microsoft.Extensions.AI
             return new ReasoningChatResponse(retMessage, reason)
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
-                FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
+                FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToFinishReason(response.Choices?.FirstOrDefault()?.FinishReason),
                 ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
                 ResponseId = response.Id,
                 Usage = ParseVllmChatResponseUsage(response),
@@ -209,7 +210,7 @@ namespace Microsoft.Extensions.AI
 
                 var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmChatStreamResponse);
 
-                if (chunk == null || chunk.Choices.Count == 0)
+                if (chunk == null || chunk.Choices == null || chunk.Choices.Count == 0)
                 {
                     continue;
                 }
@@ -229,7 +230,7 @@ namespace Microsoft.Extensions.AI
                     var bufferCopy = bufferMsg;
                     var funcList = new List<VllmFunctionToolCall>();
 
-                    var reasoningUpdate = HandleStreamingReasoningContent(message, responseId, chunk.Model ?? Metadata.DefaultModelId);
+                    var reasoningUpdate = HandleStreamingReasoningContent(message, responseId, chunk.Model ?? Metadata.DefaultModelId ?? string.Empty);
                     if (reasoningUpdate != null)
                     {
                         yield return reasoningUpdate;
@@ -344,7 +345,7 @@ namespace Microsoft.Extensions.AI
             };
         }
 
-        protected static ChatFinishReason? ToFinishReason(string reason) =>
+        protected static ChatFinishReason? ToFinishReason(string? reason) =>
             reason switch
             {
                 null => null,
@@ -411,7 +412,7 @@ namespace Microsoft.Extensions.AI
                     contents.Add(new TextContent(cleanedText));
                 }
             }
-            return new ChatMessage(new ChatRole(message.Role), contents);
+            return new ChatMessage(new ChatRole(message.Role ?? "assistant"), contents);
         }
 
         private protected static FunctionCallContent ToFunctionCallContent(VllmFunctionToolCall function)
@@ -424,7 +425,7 @@ namespace Microsoft.Extensions.AI
             IDictionary<string, object?>? arguments = null;
             try
             {
-                arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments);
+                arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments ?? "{}");
             }
             catch (JsonReaderException)
             {

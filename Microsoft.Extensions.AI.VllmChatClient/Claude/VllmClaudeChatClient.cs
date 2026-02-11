@@ -55,7 +55,7 @@ namespace Microsoft.Extensions.AI
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
 
-            if (response.Choices.Length == 0)
+            if (response.Choices is null || response.Choices.Length == 0)
             {
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
@@ -81,7 +81,7 @@ namespace Microsoft.Extensions.AI
             return new ReasoningChatResponse(retMessage, reason)
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
-                FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
+                FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToFinishReason(response.Choices[0].FinishReason),
                 ModelId = response.Model ?? options?.ModelId ?? Metadata.DefaultModelId,
                 ResponseId = response.Id,
                 Usage = ParseClaudeUsage(response),

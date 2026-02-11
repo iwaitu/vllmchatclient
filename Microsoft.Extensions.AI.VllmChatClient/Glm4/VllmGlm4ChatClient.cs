@@ -5,6 +5,7 @@ using Microsoft.Shared.Diagnostics;
 using Newtonsoft.Json;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Extensions.AI
 {
@@ -90,15 +91,15 @@ namespace Microsoft.Extensions.AI
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
 
-            if (response.Choices.Length == 0)
+            if (response.Choices is null || response.Choices.Length == 0)
             {
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
 
-            return new(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!, funcNames))
+            return new(FromVllmMessage(response.Choices[0].Message ?? new VllmChatResponseMessage { Role = "assistant" }, funcNames))
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
-                FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
+                FinishReason = ToFinishReason(response.Choices[0].FinishReason),
                 ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
                 ResponseId = response.Id,
                 Usage = ParseVllmChatResponseUsage(response),
@@ -114,7 +115,7 @@ namespace Microsoft.Extensions.AI
                 null;
         }
 
-        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             // 检查 messages 参数是否为 null
             _ = Throw.IfNull(messages);
@@ -147,7 +148,7 @@ namespace Microsoft.Extensions.AI
             using var streamReader = new StreamReader(httpResponseStream);
             string buffer_msg = string.Empty;
             string functionName = string.Empty;
-            int maxFunctionNameLength = funcNames.Max(s => s.Length);
+            int maxFunctionNameLength = funcNames?.Any() == true ? funcNames.Max(s => s.Length) : 0;
             bool closeBuff = false;
             yield return new ChatResponseUpdate
             {
@@ -180,7 +181,7 @@ namespace Microsoft.Extensions.AI
 
                 var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmChatStreamResponse);
 
-                if (chunk == null || chunk.Choices.Count == 0)
+                if (chunk == null || chunk.Choices is null || chunk.Choices.Count == 0)
                 {
                     continue;
                 }
@@ -192,7 +193,7 @@ namespace Microsoft.Extensions.AI
                     FinishReason = ToFinishReason(chunk.Choices.FirstOrDefault()?.FinishReason),
                     ModelId = modelId,
                     ResponseId = responseId,
-                    Role = chunk.Choices.FirstOrDefault()?.Delta.Role is not null ? new ChatRole(chunk.Choices.FirstOrDefault()?.Delta?.Role) : null,
+                    Role = chunk.Choices.FirstOrDefault()?.Delta?.Role is { } role ? new ChatRole(role) : null,
                 };
                 
                 if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
@@ -200,7 +201,7 @@ namespace Microsoft.Extensions.AI
                     if (message.Content?.Length > 0 || update.Contents.Count == 0)
                     {
                         buffer_msg += message.Content;
-                        if (funcNames.Any(p=>p == buffer_msg))
+                        if (funcNames?.Any(p=>p == buffer_msg) == true)
                         {
                             functionName = buffer_msg;
                             buffer_msg = string.Empty;
@@ -234,7 +235,7 @@ namespace Microsoft.Extensions.AI
                                 }
                                 else
                                 {
-                                    update.Contents.Insert(0, new TextContent(message.Content));
+                                    update.Contents.Insert(0, new TextContent(message.Content ?? string.Empty));
                                 }
                                 
                                 
@@ -267,7 +268,7 @@ namespace Microsoft.Extensions.AI
         /// <summary>
         /// 将响应中的结束原因转换为内部枚举
         /// </summary>
-        private static ChatFinishReason? ToFinishReason(string reason) =>
+        private static ChatFinishReason? ToFinishReason(string? reason) =>
             reason switch
             {
                 null => null,
@@ -279,7 +280,7 @@ namespace Microsoft.Extensions.AI
         /// <summary>
         /// 将 Vllm 返回的消息转换为 ChatMessage 对象
         /// </summary>
-        private static ChatMessage FromVllmMessage(VllmChatResponseMessage message, IEnumerable<string> funcNames)
+        private static ChatMessage FromVllmMessage(VllmChatResponseMessage message, IEnumerable<string>? funcNames)
         {
             List<AIContent> contents = [];
 
@@ -292,18 +293,22 @@ namespace Microsoft.Extensions.AI
                 }
                 else
                 {
-                    contents.Insert(0, new TextContent(message.Content));
+                    contents.Insert(0, new TextContent(message.Content ?? string.Empty));
                 }
             }
 
-            return new ChatMessage(new(message.Role), contents);
+            return new ChatMessage(new(message.Role ?? "assistant"), contents);
         }
 
         /// <summary>
         /// 处理流式数据块中的工具调用标签
         /// </summary>
-        private static VllmFunctionToolCall? ProcessStreamChunkGlm(string buffer, IEnumerable<string> funcNames)
+        private static VllmFunctionToolCall? ProcessStreamChunkGlm(string? buffer, IEnumerable<string>? funcNames)
         {
+            if (string.IsNullOrWhiteSpace(buffer) || funcNames == null || !funcNames.Any())
+            {
+                return null;
+            }
             // 创建一个正则表达式，匹配函数名和 JSON 参数
             string namesPattern = string.Join("|", funcNames.Select(f => Regex.Escape(f)));
             string pattern = $@"^\s*(?<fn>{namesPattern})\s*(?:\r?\n(?<json>\{{.*\}})|(?<json_inline>\{{.*\}}))\s*$";
@@ -341,8 +346,8 @@ namespace Microsoft.Extensions.AI
 #else
             var id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
-            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments);
-            return new FunctionCallContent(id, function.Name, arguments);
+            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments ?? "{}");
+            return new FunctionCallContent(id, function.Name ?? "", arguments);
         }
 
         /// <summary>
@@ -434,9 +439,10 @@ namespace Microsoft.Extensions.AI
                             };
                             if(pendingText is not null)
                             {
-                                yield return requestContent;
+                                yield return pendingText;
                                 pendingText = null;
                             }
+                            yield return requestContent;
                             break;
                         }
 

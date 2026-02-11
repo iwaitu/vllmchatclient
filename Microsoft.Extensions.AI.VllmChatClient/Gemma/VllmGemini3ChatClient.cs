@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.AI.VllmChatClient.GptOss;
+﻿using System.Runtime.CompilerServices;
+using Microsoft.Extensions.AI.VllmChatClient.GptOss;
 using Microsoft.Shared.Diagnostics;
 using Newtonsoft.Json;
 using System;
@@ -197,17 +198,18 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     JsonContext.Default.VllmChatResponse,
                     cancellationToken).ConfigureAwait(false))!;
 
-                if (response.Choices.Length == 0)
+                if (response.Choices is null || response.Choices.Length == 0)
                 {
                     throw new InvalidOperationException("未返回任何响应选项。");
                 }
 
-                var responseMessage = response.Choices.FirstOrDefault()?.Message;
+                var choice = response.Choices![0]; // verified by length check
+                var message = choice.Message ?? new VllmChatResponseMessage { Role = "assistant" };
 
-                return new ReasoningChatResponse(FromVllmMessage(response.Choices.FirstOrDefault()?.Message!), response.Choices.FirstOrDefault()?.Message?.Reasoning ?? "")
+                return new ReasoningChatResponse(FromVllmMessage(message), message.Reasoning ?? "")
                 {
                     CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
-                    FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
+                    FinishReason = ToFinishReason(choice.FinishReason),
                     ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
                     ResponseId = response.Id,
                     Usage = ParseVllmChatResponseUsage(response),
@@ -215,7 +217,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
             }
         }
 
-        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             // 检查 messages 参数是否为 null
             _ = Throw.IfNull(messages);
@@ -348,7 +350,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                                         argsDict["thoughtSignature"] = signature;
                                     }
 
-                                    var fcc = new FunctionCallContent(callId, part.FunctionCall.Name, argsDict);
+                                    var fcc = new FunctionCallContent(callId, part.FunctionCall.Name ?? "", argsDict);
                                     (_functionCallNameMap ??= new()).TryAdd(callId, part.FunctionCall.Name ?? string.Empty);
 
                                     yield return new ReasoningChatResponseUpdate
@@ -483,13 +485,13 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     choice.Delta.ReasoningDetails?.Length > 0)
                 {
                     string reasoningText = "";
-                    string reasoningType = "unknown";
+
 
                     // 优先使用 reasoning 字段（基于 Python 脚本输出）
                     if (!string.IsNullOrEmpty(choice.Delta.Reasoning))
                     {
                         reasoningText = choice.Delta.Reasoning;
-                        reasoningType = "direct";
+                        reasoningText = choice.Delta.Reasoning;
                     }
                     // 检查 reasoning_details 数组
                     else if (choice.Delta.ReasoningDetails?.Length > 0)
@@ -498,18 +500,31 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                         if (reasoningDetail != null && !string.IsNullOrEmpty(reasoningDetail.Text))
                         {
                             reasoningText = reasoningDetail.Text;
-                            reasoningType = "structured";
+                            reasoningText = reasoningDetail.Text;
                         }
                     }
                     // 回退到 reasoning_content 字段
                     else if (choice.Delta.ReasoningContent != null)
                     {
                         var (hasReasoning, extractedText, extractedType) = AnalyzeReasoningStructure(choice.Delta.ReasoningContent);
-                        if (hasReasoning)
+                        if (chunk.Choices?.FirstOrDefault()?.Delta is { } message)
                         {
-                            reasoningText = extractedText;
-                            reasoningType = extractedType;
+                            var reasoningUpdate = HandleStreamingReasoningContent(message, openaiResponseId, chunk.Model ?? _metadata.DefaultModelId ?? string.Empty);
+                            if (reasoningUpdate != null)
+                            {
+                                yield return reasoningUpdate;
+                                continue;
+                            }
                         }
+                        yield return new ReasoningChatResponseUpdate
+                        {
+                            CreatedAt = DateTimeOffset.FromUnixTimeSeconds(chunk.Created).UtcDateTime,
+                            FinishReason = null,
+                            ModelId = modelId,
+                            ResponseId = openaiResponseId,
+                            Role = choice.Delta.Role is not null ? new ChatRole(choice.Delta.Role) : ChatRole.Assistant,
+                            Thinking = true,
+                        };
                     }
 
                     if (!string.IsNullOrEmpty(reasoningText))
@@ -541,7 +556,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                             var state = kvp.Value;
                             if (!string.IsNullOrEmpty(state.Name))
                             {
-                                yield return CreateToolCallUpdate(openaiResponseId, modelId, state);
+                                yield return CreateToolCallUpdate(openaiResponseId, modelId ?? _metadata.DefaultModelId ?? "", state);
                             }
                         }
                         activeFunctionCalls.Clear();
@@ -602,7 +617,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                             // 检查JSON是否完整
                             if (IsJsonComplete(state.Arguments.ToString()) || streamFinishReason.HasValue)
                             {
-                                yield return CreateToolCallUpdate(openaiResponseId, modelId, state);
+                                yield return CreateToolCallUpdate(openaiResponseId, modelId ?? _metadata.DefaultModelId ?? "", state);
                                 activeFunctionCalls.Remove(kvp.Key);
 
                                 // 如果所有工具调用都已输出，清理状态
@@ -641,7 +656,8 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                 {
                     if (!string.IsNullOrEmpty(state.Name))
                     {
-                        yield return CreateToolCallUpdate(openaiResponseId, _metadata.DefaultModelId, state);
+                        var update = CreateToolCallUpdate(openaiResponseId, _metadata.DefaultModelId ?? "", state);
+                        yield return update;
                     }
                 }
             }
@@ -721,42 +737,13 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
             var id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
 
-            IDictionary<string, object?>? arguments = null;
-
-            // 安全地解析 JSON 参数
-            if (!string.IsNullOrWhiteSpace(function.Arguments))
-            {
-                try
-                {
-                    arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments);
-                }
-                catch (Newtonsoft.Json.JsonException)
-                {
-                    // JSON 解析失败，使用原始字符串作为参数
-                    arguments = new Dictionary<string, object?>
-                    {
-                        ["raw"] = function.Arguments
-                    };
-                }
-                catch (Exception)
-                {
-                    // 其他解析错误，使用原始字符串作为参数
-                    arguments = new Dictionary<string, object?>
-                    {
-                        ["raw"] = function.Arguments
-                    };
-                }
-            }
-
-            arguments ??= new Dictionary<string, object?>();
-
-            return new FunctionCallContent(id, function.Name, arguments);
+            var argumentsIndex = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(function.Arguments ?? "{}", AIJsonUtilities.DefaultOptions);
+            return new FunctionCallContent(id, function.Name ?? "", argumentsIndex);
         }
 
         private static ChatMessage FromVllmMessage(VllmChatResponseMessage message)
         {
             var contents = new List<AIContent>();
-
 
             foreach (var function in message.ToolCalls ?? [])
             {
@@ -770,13 +757,13 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 
 
             if (contents.Count > 0)
-                return new ChatMessage(new ChatRole(message.Role), contents);
+                return new ChatMessage(new ChatRole(message.Role ?? "assistant"), contents);
 
-            var raw = message.Content.Trim();
+            var raw = message.Content?.Trim();
 
             if (!string.IsNullOrEmpty(raw))
                 contents.Add(new TextContent(raw));
-            return new ChatMessage(new ChatRole(message.Role), contents);
+            return new ChatMessage(new ChatRole(message.Role ?? "assistant"), contents);
         }
 
         /// <summary>
@@ -948,9 +935,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                                             Type = "function",
                                             Function = new VllmFunctionToolCall {
                                                 Name = fcc.Name,
-                                                Arguments = System.Text.Json.JsonSerializer.Serialize(
-                                                    fcc.Arguments,
-                                                    ToolCallJsonSerializerOptions.GetTypeInfo(typeof(IDictionary<string, object?>)))
+                                                Arguments = System.Text.Json.JsonSerializer.Serialize(fcc.Arguments, this.ToolCallJsonSerializerOptions)
                                             }
                                         }
                                     }
@@ -1036,7 +1021,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     case FunctionCallContent fcc:
                         // 如果参数中包含 thoughtSignature，将其挂载到 GeminiPart 的 ThoughtSignature 字段
                         string? sig = null;
-                        if (fcc.Arguments.ContainsKey("thoughtSignature"))
+                        if (fcc.Arguments?.ContainsKey("thoughtSignature") == true)
                         {
                             var sigObj = fcc.Arguments["thoughtSignature"];
                             sig = sigObj?.ToString();
@@ -1048,7 +1033,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                             FunctionCall = new GeminiFunctionCall
                             {
                                 Name = fcc.Name,
-                                Args = fcc.Arguments as Dictionary<string, object?> ?? new Dictionary<string, object?>(fcc.Arguments)
+                                Args = fcc.Arguments as Dictionary<string, object?> ?? new Dictionary<string, object?>(fcc.Arguments ?? new Dictionary<string, object?>())
                             }
                         });
                         break;
@@ -1066,7 +1051,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                         {
                             FunctionResponse = new GeminiFunctionResponse
                             {
-                                Name = string.IsNullOrEmpty(fnName) ? frc.CallId : fnName,
+                                Name = string.IsNullOrEmpty(fnName) ? (frc.CallId ?? string.Empty) : fnName,
                                 Response = responseData
                             }
                         });
@@ -1355,7 +1340,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     }
                     aiContents.Add(new FunctionCallContent(
                         callId,
-                        part.FunctionCall.Name,
+                        part.FunctionCall.Name ?? "",
                         args
                     ));
                     (_functionCallNameMap ??= new()).TryAdd(callId, part.FunctionCall.Name ?? string.Empty);
@@ -1407,6 +1392,40 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                 serviceType == typeof(ChatClientMetadata) ? _metadata :
                 serviceType.IsInstanceOfType(this) ? this :
                 null;
+        }
+
+
+        private ChatResponseUpdate? HandleStreamingReasoningContent(Delta delta, string responseId, string modelId)
+        {
+            if (delta.ReasoningContent != null)
+            {
+                return BuildTextUpdate(responseId, delta.ReasoningContent, true);
+            }
+
+            if (!string.IsNullOrEmpty(delta.Reasoning))
+            {
+                return BuildTextUpdate(responseId, delta.Reasoning, true);
+            }
+
+            if (delta.ReasoningDetails?.FirstOrDefault(x => x.Type == "reasoning.text") is { } detail && !string.IsNullOrEmpty(detail.Text))
+            {
+                return BuildTextUpdate(responseId, detail.Text, true);
+            }
+
+            return null;
+        }
+
+        private ChatResponseUpdate BuildTextUpdate(string responseId, string text, bool thinking)
+        {
+            return new ReasoningChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                ModelId = _metadata.DefaultModelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                Thinking = thinking,
+                Contents = new List<AIContent> { new TextContent(text) }
+            };
         }
 
         /// <summary>

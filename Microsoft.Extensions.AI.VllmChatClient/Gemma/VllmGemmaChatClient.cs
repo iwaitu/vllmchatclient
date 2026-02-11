@@ -3,6 +3,7 @@
 
 using Microsoft.Shared.Diagnostics;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using JsonSerializer = System.Text.Json.JsonSerializer;
@@ -91,7 +92,7 @@ namespace Microsoft.Extensions.AI
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
 
-            if (response.Choices.Length == 0)
+            if (response.Choices is null || response.Choices.Length == 0)
             {
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
@@ -115,7 +116,7 @@ namespace Microsoft.Extensions.AI
                 null;
         }
 
-        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             // 检查 messages 参数是否为 null
             _ = Throw.IfNull(messages);
@@ -147,7 +148,6 @@ namespace Microsoft.Extensions.AI
             string buffer_name = string.Empty;
             string buffer_params = string.Empty;
             string buff_toolcall = string.Empty;
-            bool closeBuff = false;
             var funcList = new List<VllmFunctionToolCall>();
 #if NET
             while ((await streamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is { } line)
@@ -173,25 +173,26 @@ namespace Microsoft.Extensions.AI
                 }
 
                 var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmChatStreamResponse);
+                if (chunk is null) continue;
                 string? modelId = chunk.Model ?? _metadata.DefaultModelId;
-                if (chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
+                if (chunk.Choices?.FirstOrDefault()?.Delta?.ToolCalls?.Length == 1)
                 {
                     if (string.IsNullOrEmpty(buffer_name))
                     {
-                        buffer_name = chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Name ?? "";
+                        buffer_name = chunk.Choices?.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Name ?? "";
                     }
-                    buffer_params += chunk.Choices.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Arguments?.ToString() ?? "";
+                    buffer_params += chunk.Choices?.FirstOrDefault()?.Delta?.ToolCalls?.FirstOrDefault()?.Function?.Arguments?.ToString() ?? "";
                 }
                 ChatResponseUpdate update = new()
                 {
                     CreatedAt = DateTimeOffset.FromUnixTimeSeconds(chunk.Created).UtcDateTime,
-                    FinishReason = ToFinishReason(chunk.Choices.FirstOrDefault()?.FinishReason),
+                    FinishReason = ToFinishReason(chunk.Choices?.FirstOrDefault()?.FinishReason),
                     ModelId = modelId,
                     ResponseId = responseId,
-                    Role = chunk.Choices.FirstOrDefault()?.Delta.Role is not null ? new ChatRole(chunk.Choices.FirstOrDefault()?.Delta.Role) : null,
+                    Role = chunk.Choices?.FirstOrDefault()?.Delta?.Role is { } role ? new ChatRole(role) : null,
                 };
 
-                if (chunk.Choices.FirstOrDefault()?.Delta is { } message)
+                    if (chunk.Choices?.FirstOrDefault()?.Delta is { } message)
                 {
                     buffer_msg += message.Content ?? string.Empty;
                     var buffer_copy = buffer_msg;
@@ -265,6 +266,9 @@ namespace Microsoft.Extensions.AI
 
         private ChatResponseUpdate BuildToolCallUpdate(string responseId, VllmFunctionToolCall call)
         {
+            var callId = Guid.NewGuid().ToString().Substring(0, 8);
+            var arguments = JsonSerializer.Serialize(call.Arguments, ToolCallJsonSerializerOptions.GetTypeInfo(typeof(object)));
+            var dictArgs = JsonSerializer.Deserialize(arguments, ToolCallJsonSerializerOptions.GetTypeInfo(typeof(Dictionary<string, object?>))) as Dictionary<string, object?> ?? new Dictionary<string, object?>();
             return new ChatResponseUpdate
             {
                 CreatedAt = DateTimeOffset.Now,
@@ -272,7 +276,7 @@ namespace Microsoft.Extensions.AI
                 ModelId = _metadata.DefaultModelId,
                 ResponseId = responseId,
                 Role = ChatRole.Assistant,
-                Contents = new List<AIContent> { ToFunctionCallContent(call) }
+                Contents = new List<AIContent> { new FunctionCallContent(callId, call.Name ?? "", dictArgs) }
             };
         }
 
@@ -296,7 +300,7 @@ namespace Microsoft.Extensions.AI
         /// <summary>
         /// 将响应中的结束原因转换为内部枚举
         /// </summary>
-        private static ChatFinishReason? ToFinishReason(string reason) =>
+        private static ChatFinishReason? ToFinishReason(string? reason) =>
             reason switch
             {
                 null => null,
@@ -313,7 +317,7 @@ namespace Microsoft.Extensions.AI
             var contents = new List<AIContent>();
 
             if (string.IsNullOrEmpty(message.Content))
-                return new ChatMessage(new ChatRole(message.Role), contents);
+                return new ChatMessage(new ChatRole(message.Role ?? "assistant"), contents);
 
 
             var raw = message.Content;
@@ -339,7 +343,7 @@ namespace Microsoft.Extensions.AI
             if (!string.IsNullOrEmpty(rest))
                 contents.Add(new TextContent(rest));
 
-            return new ChatMessage(new ChatRole(message.Role), contents);
+            return new ChatMessage(new ChatRole(message.Role ?? "assistant"), contents);
         }
 
 
@@ -354,8 +358,8 @@ namespace Microsoft.Extensions.AI
 #else
             var id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
-            var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(function.Arguments);
-            return new FunctionCallContent(id, function.Name, arguments);
+            var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(function.Arguments ?? "{}");
+            return new FunctionCallContent(id, function.Name ?? "", arguments);
 
 
         }
@@ -467,7 +471,8 @@ namespace Microsoft.Extensions.AI
                         break;
 
                     case FunctionResultContent frc:
-                        string resultStr = frc.Result is string s
+                        string resultStr =
+                            frc.Result is string s
                             ? s
                             : JsonSerializer.Serialize(frc.Result,
                                   ToolCallJsonSerializerOptions.GetTypeInfo(typeof(object)));

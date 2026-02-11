@@ -212,20 +212,21 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
                 JsonContext.Default.VllmChatResponse,
                 cancellationToken).ConfigureAwait(false))!;
 
-            if (response.Choices.Length == 0)
+            if (response.Choices is null || response.Choices.Length == 0)
             {
                 throw new InvalidOperationException("未返回任何响应选项。");
             }
 
-            var responseMessage = response.Choices.FirstOrDefault()?.Message;
-            string reasoning = response.Choices.FirstOrDefault()?.Message?.Reasoning ?? ""; 
+            var choice = response.Choices[0];
+            var responseMessage = choice.Message;
+            string reasoning = choice.Message?.Reasoning ?? ""; 
             
             var retMessage = FromVllmMessage(responseMessage!, options);
 
             return new ReasoningChatResponse(retMessage, reasoning)
             {
                 CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
-                FinishReason = ToFinishReason(response.Choices.FirstOrDefault()?.FinishReason),
+                FinishReason = ToFinishReason(choice.FinishReason),
                 ModelId = response.Model ?? options?.ModelId ?? Metadata.DefaultModelId,
                 ResponseId = response.Id,
                 Usage = ParseGptOssUsage(response),

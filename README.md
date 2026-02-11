@@ -840,6 +840,16 @@ await foreach (var update in client.GetStreamingResponseAsync(messages, options2
 
 Contributions are welcome! Please feel free to submit issues, feature requests, or pull requests。
 
+### 📦 NuGet 自动发布 / NuGet Auto-Publishing
+
+本项目已配置自动发布到 NuGet.org。详细指南请参考：
+- [中文指南](docs/NUGET_PUBLISHING_GUIDE.md)
+- [English Guide](docs/NUGET_PUBLISHING_GUIDE_EN.md)
+
+This project is configured for automatic publishing to NuGet.org. For detailed instructions, see:
+- [中文指南](docs/NUGET_PUBLISHING_GUIDE.md)
+- [English Guide](docs/NUGET_PUBLISHING_GUIDE_EN.md)
+
 ---
 
 ## 📄 License

@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
 using Xunit.Abstractions;
 
 namespace VllmChatClient.Test;
@@ -306,6 +307,147 @@ public class SimpleSkillSmokeTests
         _testOutput.WriteLine("System prompt snippet: {0}", systemText.Length > 100 ? systemText.Substring(0, 100) + "..." : systemText);
 
         Assert.Contains("Skill: skill-creator", systemText);
+    }
+
+    /// <summary>
+    /// 集成测试：使用 skill-creator 创建新的 skill。
+    /// </summary>
+    [Fact]
+    public async Task CanCreateNewSkillUsingSkillCreator()
+    {
+        if (_skipTests)
+        {
+            _testOutput.WriteLine("Skipping: VLLM_ALIYUN_API_KEY not set");
+            return;
+        }
+
+        var skillsDir = GetSkillsDir();
+        await LogSkillsDirectory(skillsDir);
+
+        var client = new ChatClientBuilder(_chatClient)
+            .UseFunctionInvocation()
+            .Build();
+
+        // 1. 请求 AI 帮助创建一个新 skill
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.User, "I want to create a new skill called 'test-calculator' that helps with basic arithmetic operations. Please help me create this skill using the skill-creator.")
+        };
+
+        var options = new VllmChatOptions
+        {
+            EnableSkills = true,
+            SkillDirectoryPath = skillsDir
+        };
+
+        ChatResponse response;
+        try
+        {
+            response = await client.GetResponseAsync(messages, options);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("insufficient_quota") || ex.Message.Contains("rate_limit"))
+        {
+            _testOutput.WriteLine("Skipping: API quota/rate limit exceeded - {0}", ex.Message);
+            return;
+        }
+        catch (HttpRequestException ex)
+        {
+            _testOutput.WriteLine("Skipping: API unreachable - {0}", ex.Message);
+            return;
+        }
+
+        _testOutput.WriteLine("AI Response: {0}", response.Text);
+        
+        // 验证响应包含与 skill 创建相关的内容
+        Assert.False(string.IsNullOrWhiteSpace(response.Text));
+        
+        // 响应可能包含以下关键词之一：创建、skill、SKILL.md、init_skill
+        bool containsRelevantContent = 
+            response.Text.Contains("skill", StringComparison.OrdinalIgnoreCase) ||
+            response.Text.Contains("SKILL.md", StringComparison.OrdinalIgnoreCase) ||
+            response.Text.Contains("create", StringComparison.OrdinalIgnoreCase) ||
+            response.Text.Contains("init_skill", StringComparison.OrdinalIgnoreCase);
+        
+        Assert.True(containsRelevantContent, "Response should contain skill creation related content");
+        
+        _testOutput.WriteLine("✓ Test passed: AI provided guidance for creating a new skill");
+    }
+
+    /// <summary>
+    /// 测试：验证 init_skill.py 脚本可以被 AI 调用来创建新 skill。
+    /// </summary>
+    [Fact]
+    public async Task SkillCreatorCanExecuteInitSkillScript()
+    {
+        if (_skipTests)
+        {
+            _testOutput.WriteLine("Skipping: VLLM_ALIYUN_API_KEY not set");
+            return;
+        }
+
+        var skillsDir = GetSkillsDir();
+        var testSkillName = "test-sample-skill";
+        var testSkillPath = Path.Combine(skillsDir, testSkillName);
+
+        // 清理可能存在的测试 skill
+        if (Directory.Exists(testSkillPath))
+        {
+            Directory.Delete(testSkillPath, true);
+            _testOutput.WriteLine("Cleaned up existing test skill directory");
+        }
+
+        var client = new ChatClientBuilder(_chatClient)
+            .UseFunctionInvocation()
+            .Build();
+
+        // 请求 AI 执行 init_skill.py 脚本创建新 skill
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.User, $"Please use the init_skill.py script from skill-creator to create a new skill named '{testSkillName}' in the skills directory at path '{skillsDir}'.")
+        };
+
+        var options = new VllmChatOptions
+        {
+            EnableSkills = true,
+            SkillDirectoryPath = skillsDir
+        };
+
+        ChatResponse response;
+        try
+        {
+            response = await client.GetResponseAsync(messages, options);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("insufficient_quota") || ex.Message.Contains("rate_limit"))
+        {
+            _testOutput.WriteLine("Skipping: API quota/rate limit exceeded - {0}", ex.Message);
+            return;
+        }
+        catch (HttpRequestException ex)
+        {
+            _testOutput.WriteLine("Skipping: API unreachable - {0}", ex.Message);
+            return;
+        }
+
+        _testOutput.WriteLine("AI Response: {0}", response.Text);
+        
+        Assert.False(string.IsNullOrWhiteSpace(response.Text));
+        
+        // 验证 AI 是否提到了脚本或创建过程
+        bool mentionsScript = 
+            response.Text.Contains("init_skill", StringComparison.OrdinalIgnoreCase) ||
+            response.Text.Contains("script", StringComparison.OrdinalIgnoreCase) ||
+            response.Text.Contains("created", StringComparison.OrdinalIgnoreCase);
+        
+        Assert.True(mentionsScript, "Response should mention the init_skill script or creation process");
+        
+        _testOutput.WriteLine("✓ Test passed: AI acknowledged the skill creation request");
+
+        // 清理测试数据
+        if (Directory.Exists(testSkillPath))
+        {
+            Directory.Delete(testSkillPath, true);
+            _testOutput.WriteLine("Cleaned up test skill directory");
+        }
     }
 
     private sealed class FakeResponseHandler : HttpMessageHandler

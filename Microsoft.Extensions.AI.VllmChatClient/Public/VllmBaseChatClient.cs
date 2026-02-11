@@ -825,6 +825,43 @@ namespace Microsoft.Extensions.AI
                 },
                 "ReadSkillFile",
                 "Read the full content of a specific skill file. For top-level files, use filename directly. For subdirectory skills, use directory name.");
+
+            yield return AIFunctionFactory.Create(
+                [Description("Create or overwrite a skill file. The content should be the full markdown content of the skill.")]
+                (string fileName, string content) =>
+                {
+                    if (string.IsNullOrWhiteSpace(fileName))
+                    {
+                        return "Error: No filename provided.";
+                    }
+                    if (string.IsNullOrWhiteSpace(content))
+                    {
+                        return "Error: No content provided.";
+                    }
+
+                    try
+                    {
+                        var filePath = Path.Combine(skillsDir, fileName);
+                        var directory = Path.GetDirectoryName(filePath);
+                        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                        {
+                            Directory.CreateDirectory(directory);
+                        }
+
+                        File.WriteAllText(filePath, content);
+                        
+                        // Invalidate cache for this directory so the new skill is picked up immediately
+                        _skillInstructionCache.TryRemove(skillsDir, out _);
+
+                        return $"Skill file '{fileName}' created successfully.";
+                    }
+                    catch (Exception ex)
+                    {
+                        return $"Error creating skill file: {ex.Message}";
+                    }
+                },
+                "CreateSkillFile",
+                "Create a new skill file with the specified content.");
         }
     }
 }

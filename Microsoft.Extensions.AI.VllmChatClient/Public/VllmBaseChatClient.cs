@@ -421,7 +421,16 @@ namespace Microsoft.Extensions.AI
 #else
             var id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
-            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments);
+            IDictionary<string, object?>? arguments = null;
+            try
+            {
+                arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments);
+            }
+            catch (JsonReaderException)
+            {
+                // Fallback for malformed JSON or empty arguments
+                arguments = new Dictionary<string, object?>();
+            }
             return new FunctionCallContent(id, function.Name ?? string.Empty, arguments);
         }
 
@@ -788,8 +797,12 @@ namespace Microsoft.Extensions.AI
 
             yield return AIFunctionFactory.Create(
                 [Description("Read the full content of a specific skill file. For top-level files, use filename directly. For subdirectory skills, use 'dirname/SKILL.md' format.")]
-                (string fileName) =>
+                ([Description("The name of the skill file to read")] string? fileName = null) =>
                 {
+                    if (string.IsNullOrWhiteSpace(fileName))
+                    {
+                        return "Error: No filename provided.";
+                    }
                     var filePath = Path.Combine(skillsDir, fileName);
                     if (!File.Exists(filePath))
                     {

@@ -1,29 +1,23 @@
 ﻿using Microsoft.Extensions.AI;
 using Microsoft.Extensions.AI.VllmChatClient.Glm4;
-using Microsoft.Extensions.AI.VllmChatClient.Kimi;
-using Microsoft.VisualStudio.TestPlatform.CommunicationUtilities;
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using Xunit.Abstractions;
 
 namespace VllmChatClient.Test
 {
     
-    public class Glm4647Tests
+    public class Glm5Tests
     {
         private readonly IChatClient _client;
         private readonly ITestOutputHelper _output;
         private readonly GlmChatOptions _chatOptions;
         private readonly bool _skipTests;
         //private const string MODEL = "glm-4.7";
-        private const string MODEL = "glm-4.7-flash";
+        //private const string MODEL = "glm-5";
+        private const string MODEL = "glm-4.5";
         //private const string MODEL = "glm-4.6";
         static int functionCallTime = 0;
 
@@ -45,13 +39,13 @@ namespace VllmChatClient.Test
             return "附近100米有一家爱民书店。";
         }
 
-        public Glm4647Tests(ITestOutputHelper output)
+        public Glm5Tests(ITestOutputHelper output)
         {
             _output = output; // 修复 CS8618: 正确初始化 _output 字段
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ZHIPU_API_KEY");
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
-            _client = new VllmGlm46ChatClient("https://open.bigmodel.cn/api/paas/v4/{1}", cloud_apiKey, MODEL); // 智普官方平台支持思维链
+            _client = new VllmGlm5ChatClient("https://open.bigmodel.cn/api/paas/v4/{1}", cloud_apiKey, MODEL); // 智普官方平台支持思维链
             //_client = new VllmGlm46ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL); // 阿里云百炼平台思维链命令格式与智普官方平台不同，暂不支持思维链
             _chatOptions = new GlmChatOptions { ThinkingEnabled = true };
             //_chatOptions = new GlmChatOptions { Temperature = 0.5f };    //测试glm-4.7-flash 模型，该模型不支持思维链功能，直接将选项置空以避免不必要的参数传递
@@ -462,7 +456,7 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"请输出json格式的问候语,json 中必须包含 name 属性,不要输出代码块，例如：{\"name\":\"菲菲\"}")
             };
-            _chatOptions.MaxOutputTokens = 100;
+            _chatOptions.MaxOutputTokens = 1000;
             var res = await _client.GetResponseAsync(messages, _chatOptions);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
@@ -473,19 +467,19 @@ namespace VllmChatClient.Test
             }
             _output.WriteLine($"Response: {res.Text}");
 
-            var textContent = res.Messages[0].Contents.OfType<TextContent>().FirstOrDefault();
+            var textContent = res.Text;
             Assert.NotNull(textContent);
 
             // 验证不包含代码块标记
-            Assert.All(textContent.Text.Split('\n'), line =>
+            Assert.All(textContent.Split('\n'), line =>
             {
                 Assert.DoesNotContain("```", line);
                 Assert.DoesNotContain("```json", line);
             });
 
             // 从文本中提取 JSON 片段并验证
-            var jsonMatch = Regex.Match(textContent.Text, @"(\{[^}]*\}|\[[^\]]*\])", RegexOptions.Singleline);
-            Assert.True(jsonMatch.Success, $"未找到JSON片段: '{textContent.Text}'");
+            var jsonMatch = Regex.Match(textContent, @"(\{[^}]*\}|\[[^\]]*\])", RegexOptions.Singleline);
+            Assert.True(jsonMatch.Success, $"未找到JSON片段: '{textContent}'");
             var jsonText = jsonMatch.Value;
             try
             {

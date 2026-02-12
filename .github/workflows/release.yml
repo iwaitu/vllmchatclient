@@ -1,17 +1,9 @@
 name: Release
 
 on:
+  push:
+    branches: [ main, master ]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g., 1.5.0)'
-        required: true
-        type: string
-      prerelease:
-        description: 'Is this a prerelease?'
-        required: false
-        default: false
-        type: boolean
 
 env:
   DOTNET_VERSION: '8.0.x'
@@ -32,41 +24,31 @@ jobs:
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
-    - name: Validate version format
-      run: |
-        if [[ ! "${{ github.event.inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "Error: Version must be in format X.Y.Z (e.g., 1.5.0)"
-          exit 1
-        fi
-
-    - name: Update project version
+    - name: Read version from project file
+      id: project_version
       shell: pwsh
       run: |
-        $projectPath = "${{ env.PROJECT_PATH }}"
-        $newVersion = "${{ github.event.inputs.version }}"
-        
-        Write-Host "Updating version to: $newVersion"
-        
-        $content = Get-Content $projectPath -Raw
-        $pattern = '<Version>[\d\.]+(-[a-zA-Z0-9]+)?</Version>'
-        $replacement = "<Version>$newVersion</Version>"
-        $newContent = $content -replace $pattern, $replacement
-        
-        Set-Content $projectPath $newContent -NoNewline
-        Write-Host "Project file updated successfully"
-
-    - name: Commit version update
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add ${{ env.PROJECT_PATH }}
-        git commit -m "chore: release version ${{ github.event.inputs.version }}"
-        git push
+        [xml]$proj = Get-Content "${{ env.PROJECT_PATH }}"
+        $version = $proj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($version)) {
+          Write-Error "Version not found in project file."
+          exit 1
+        }
+        "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        Write-Host "Using version: $version"
 
     - name: Create Git Tag
+      id: tag
       run: |
-        git tag "v${{ github.event.inputs.version }}"
-        git push origin "v${{ github.event.inputs.version }}"
+        version="${{ steps.project_version.outputs.version }}"
+        if git rev-parse "v$version" >/dev/null 2>&1; then
+          echo "Tag v$version already exists."
+          echo "created=false" >> $GITHUB_OUTPUT
+        else
+          git tag "v$version"
+          git push origin "v$version"
+          echo "created=true" >> $GITHUB_OUTPUT
+        fi
 
     - name: Build and Pack
       run: |
@@ -76,40 +58,33 @@ jobs:
 
     - name: Create GitHub Release
       id: create_release
+      if: steps.tag.outputs.created == 'true'
       uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: "v${{ github.event.inputs.version }}"
-        release_name: "Release ${{ github.event.inputs.version }}"
+        tag_name: "v${{ steps.project_version.outputs.version }}"
+        release_name: "Release ${{ steps.project_version.outputs.version }}"
         body: |
           ## What's Changed
-          Release version ${{ github.event.inputs.version }}
+          Release version ${{ steps.project_version.outputs.version }}
           
           ### Installation
           ```bash
-          dotnet add package Ivilson.AI.VllmChatClient --version ${{ github.event.inputs.version }}
+          dotnet add package Ivilson.AI.VllmChatClient --version ${{ steps.project_version.outputs.version }}
           ```
           
-          **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ github.event.inputs.previous_version }}...v${{ github.event.inputs.version }}
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ steps.project_version.outputs.version }}
         draft: false
-        prerelease: ${{ github.event.inputs.prerelease }}
+        prerelease: false
 
     - name: Upload NuGet package to release
       uses: actions/upload-release-asset@v1
+      if: steps.tag.outputs.created == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/Ivilson.AI.VllmChatClient.${{ github.event.inputs.version }}.nupkg
-        asset_name: Ivilson.AI.VllmChatClient.${{ github.event.inputs.version }}.nupkg
+        asset_path: ./artifacts/Ivilson.AI.VllmChatClient.${{ steps.project_version.outputs.version }}.nupkg
+        asset_name: Ivilson.AI.VllmChatClient.${{ steps.project_version.outputs.version }}.nupkg
         asset_content_type: application/zip
-
-    - name: Publish to NuGet.org
-      run: |
-        for package in ./artifacts/*.nupkg; do
-          echo "Publishing $package..."
-          dotnet nuget push "$package" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
-        done
-      env:
-        NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}

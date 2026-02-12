@@ -6,8 +6,6 @@ on:
     tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
-  release:
-    types: [ published ]
 
 env:
   DOTNET_VERSION: '8.0.x'
@@ -23,7 +21,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0 # »ñÈ¡ÍêÕûÀúÊ·¼ÇÂ¼ÒÔ±ã°æ±¾¿ØÖÆ
+        fetch-depth: 0 # è·å–å®Œæ•´å†å²è®°å½•ä»¥ä¾¿ç‰ˆæœ¬æ§åˆ¶
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
@@ -44,7 +42,7 @@ jobs:
     - name: Build solution
       run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
 
-    # ÍêÈ«Ìø¹ıËùÓĞ²âÊÔÔËĞĞ
+    # å®Œå…¨è·³è¿‡æ‰€æœ‰æµ‹è¯•è¿è¡Œ
     - name: Skip all tests in CI/CD
       run: |
         echo "?? Skipping all tests in CI/CD environment"
@@ -66,7 +64,7 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+    if: startsWith(github.ref, 'refs/tags/v')
     
     steps:
     - name: Checkout code
@@ -92,7 +90,7 @@ jobs:
       env:
         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 
-  # ¿ÉÑ¡£º·¢²¼µ½ GitHub Packages
+  # å¯é€‰ï¼šå‘å¸ƒåˆ° GitHub Packages
   publish-github:
     needs: build
     runs-on: ubuntu-latest

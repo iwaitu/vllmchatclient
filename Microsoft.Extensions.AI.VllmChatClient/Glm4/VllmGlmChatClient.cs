@@ -4,9 +4,9 @@ using System.Net.Http;
 
 namespace Microsoft.Extensions.AI.VllmChatClient.Glm4
 {
-    public class VllmGlm5ChatClient : VllmBaseChatClient
+    public class VllmGlmChatClient : VllmBaseChatClient
     {
-        public VllmGlm5ChatClient(string endpoint, string? token = null, string? modelId = "glm-5", HttpClient? httpClient = null)
+        public VllmGlmChatClient(string endpoint, string? token = null, string? modelId = "glm-4", HttpClient? httpClient = null)
             : base(endpoint, token, modelId, httpClient)
         {
         }
@@ -14,8 +14,8 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Glm4
         private protected override VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
             var request = base.ToVllmChatRequest(messages, options, stream);
-            
-            // Ö§³Ö VllmChatOptions ¼°ÆäÅÉÉúÀà£¨°üÀ¨ GlmChatOptions£©µÄË¼Î¬Á´¿ª¹Ø
+
+            // æ”¯æŒ VllmChatOptions æˆ–ç»§æ‰¿ç±»ï¼ˆå¦‚ GlmChatOptionsï¼‰çš„æ€ç»´é“¾æ§åˆ¶
             if (options is VllmChatOptions vllmOptions)
             {
                 request.Thinking = new VllmThinkingOptions

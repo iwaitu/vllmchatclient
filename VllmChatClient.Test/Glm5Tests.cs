@@ -45,8 +45,8 @@ namespace VllmChatClient.Test
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ZHIPU_API_KEY");
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
-            _client = new VllmGlm5ChatClient("https://open.bigmodel.cn/api/paas/v4/{1}", cloud_apiKey, MODEL); // 智普官方平台支持思维链
-            //_client = new VllmGlm46ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL); // 阿里云百炼平台思维链命令格式与智普官方平台不同，暂不支持思维链
+            _client = new VllmGlmChatClient("https://open.bigmodel.cn/api/paas/v4/{1}", cloud_apiKey, MODEL); // 智普官方平台支持思维链
+            //_client = new VllmGlmChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL); // 阿里云百炼平台思维链命令格式与智普官方平台不同，暂不支持思维链
             _chatOptions = new GlmChatOptions { ThinkingEnabled = true };
             //_chatOptions = new GlmChatOptions { Temperature = 0.5f };    //测试glm-4.7-flash 模型，该模型不支持思维链功能，直接将选项置空以避免不必要的参数传递
         }

@@ -1,19 +1,19 @@
-# ?? Õâ¸ö¹¤×÷Á÷ÒÑ±»½ûÓÃ
-# GitVersion.MsBuild »á×Ô¶¯¹ÜÀí°æ±¾ºÅ£¬ÎŞĞèÊÖ¶¯¸üĞÂÏîÄ¿ÎÄ¼ş
+# ?? è¿™ä¸ªå·¥ä½œæµå·²è¢«ç¦ç”¨
+# GitVersion.MsBuild ä¼šè‡ªåŠ¨ç®¡ç†ç‰ˆæœ¬å·ï¼Œæ— éœ€æ‰‹åŠ¨æ›´æ–°é¡¹ç›®æ–‡ä»¶
 # 
-# Èç¹ûĞèÒªÊÖ¶¯¹ÜÀí°æ±¾£¬Çë£º
-# 1. ´ÓÏîÄ¿ÎÄ¼şÖĞÒÆ³ı GitVersion.MsBuild °üÒıÓÃ
-# 2. ÔÚÏîÄ¿ÎÄ¼şÖĞÌí¼Ó <Version>x.y.z</Version> ±êÇ©
-# 3. ÖØĞÂÆôÓÃ´Ë¹¤×÷Á÷
+# å¦‚æœéœ€è¦æ‰‹åŠ¨ç®¡ç†ç‰ˆæœ¬ï¼Œè¯·ï¼š
+# 1. ä»é¡¹ç›®æ–‡ä»¶ä¸­ç§»é™¤ GitVersion.MsBuild åŒ…å¼•ç”¨
+# 2. åœ¨é¡¹ç›®æ–‡ä»¶ä¸­æ·»åŠ  <Version>x.y.z</Version> æ ‡ç­¾
+# 3. é‡æ–°å¯ç”¨æ­¤å·¥ä½œæµ
 
 name: Auto Version Update (DISABLED)
 
 on:
-  # ½ûÓÃËùÓĞ´¥·¢Æ÷
+  # ç¦ç”¨æ‰€æœ‰è§¦å‘å™¨
   workflow_dispatch:
     inputs:
       force_enable:
-        description: 'Ç¿ÖÆÆôÓÃ´Ë¹¤×÷Á÷ (ÊäÈë "ENABLE" È·ÈÏ)'
+        description: 'å¼ºåˆ¶å¯ç”¨æ­¤å·¥ä½œæµ (è¾“å…¥ "ENABLE" ç¡®è®¤)'
         required: true
         default: 'DISABLED'
         type: string
@@ -29,22 +29,22 @@ jobs:
     steps:
     - name: Workflow Disabled Notice
       run: |
-        echo "?? ´Ë¹¤×÷Á÷ÒÑ±»½ûÓÃ"
+        echo "?? æ­¤å·¥ä½œæµå·²è¢«ç¦ç”¨"
         echo ""
-        echo "?? Ô­Òò:"
-        echo "  - ÏîÄ¿ÒÑÅäÖÃ GitVersion.MsBuild ×Ô¶¯°æ±¾¹ÜÀí"
-        echo "  - °æ±¾ºÅÓÉ Git ÀúÊ·ºÍÓïÒå»¯Ìá½»ÏûÏ¢×Ô¶¯¼ÆËã"
-        echo "  - ÊÖ¶¯°æ±¾¸üĞÂ¿ÉÄÜÓë×Ô¶¯°æ±¾¹ÜÀí³åÍ»"
+        echo "?? åŸå› :"
+        echo "  - é¡¹ç›®å·²é…ç½® GitVersion.MsBuild è‡ªåŠ¨ç‰ˆæœ¬ç®¡ç†"
+        echo "  - ç‰ˆæœ¬å·ç”± Git å†å²å’Œè¯­ä¹‰åŒ–æäº¤æ¶ˆæ¯è‡ªåŠ¨è®¡ç®—"
+        echo "  - æ‰‹åŠ¨ç‰ˆæœ¬æ›´æ–°å¯èƒ½ä¸è‡ªåŠ¨ç‰ˆæœ¬ç®¡ç†å†²çª"
         echo ""
-        echo "?? ÈçºÎ¹ÜÀí°æ±¾:"
-        echo "  - Ê¹ÓÃÓïÒå»¯Ìá½»ÏûÏ¢£º'feat: +semver: minor'"
-        echo "  - GitVersion »á¸ù¾İÌá½»ÀúÊ·×Ô¶¯¼ÆËã°æ±¾"
-        echo "  - ¹¹½¨Ê± GitVersion.MsBuild ×Ô¶¯ÉèÖÃ°æ±¾ºÅ"
+        echo "?? å¦‚ä½•ç®¡ç†ç‰ˆæœ¬:"
+        echo "  - ä½¿ç”¨è¯­ä¹‰åŒ–æäº¤æ¶ˆæ¯ï¼š'feat: +semver: minor'"
+        echo "  - GitVersion ä¼šæ ¹æ®æäº¤å†å²è‡ªåŠ¨è®¡ç®—ç‰ˆæœ¬"
+        echo "  - æ„å»ºæ—¶ GitVersion.MsBuild è‡ªåŠ¨è®¾ç½®ç‰ˆæœ¬å·"
         echo ""
-        echo "?? Èç¹ûĞèÒªÊÖ¶¯¹ÜÀí°æ±¾:"
-        echo "  1. ÒÆ³ıÏîÄ¿ÎÄ¼şÖĞµÄ GitVersion.MsBuild °üÒıÓÃ"
-        echo "  2. Ìí¼Ó <Version>x.y.z</Version> µ½ÏîÄ¿ÎÄ¼ş"
-        echo "  3. ÉèÖÃ force_enable Îª 'ENABLE' ÖØĞÂÔËĞĞ"
+        echo "?? å¦‚æœéœ€è¦æ‰‹åŠ¨ç®¡ç†ç‰ˆæœ¬:"
+        echo "  1. ç§»é™¤é¡¹ç›®æ–‡ä»¶ä¸­çš„ GitVersion.MsBuild åŒ…å¼•ç”¨"
+        echo "  2. æ·»åŠ  <Version>x.y.z</Version> åˆ°é¡¹ç›®æ–‡ä»¶"
+        echo "  3. è®¾ç½® force_enable ä¸º 'ENABLE' é‡æ–°è¿è¡Œ"
         
         exit 1
 
@@ -82,21 +82,21 @@ jobs:
         $projectPath = "${{ env.PROJECT_PATH }}"
         $newVersion = "${{ steps.gitversion.outputs.nuGetVersionV2 }}"
         
-        Write-Host "?? Ç¿ÖÆÆôÓÃÄ£Ê½ - ¸üĞÂ°æ±¾µ½: $newVersion"
+        Write-Host "?? å¼ºåˆ¶å¯ç”¨æ¨¡å¼ - æ›´æ–°ç‰ˆæœ¬åˆ°: $newVersion"
         
-        # ¼ì²é°æ±¾ÊÇ·ñÎª¿Õ
+        # æ£€æŸ¥ç‰ˆæœ¬æ˜¯å¦ä¸ºç©º
         if ([string]::IsNullOrWhiteSpace($newVersion)) {
-            Write-Host "? ´íÎó: GitVersion Êä³öµÄ°æ±¾Îª¿Õ"
+            Write-Host "? é”™è¯¯: GitVersion è¾“å‡ºçš„ç‰ˆæœ¬ä¸ºç©º"
             exit 1
         }
         
-        # ¶ÁÈ¡²¢¸üĞÂÏîÄ¿ÎÄ¼ş
+        # è¯»å–å¹¶æ›´æ–°é¡¹ç›®æ–‡ä»¶
         $content = Get-Content $projectPath -Raw
         $pattern = '<Version>[\d\.]+([-\w]*)?</Version>'
         $replacement = "<Version>$newVersion</Version>"
         $newContent = $content -replace $pattern, $replacement
         
-        # Èç¹ûÃ»ÓĞÕÒµ½Version±êÇ©£¬ÔòÔÚµÚÒ»¸öPropertyGroupÖĞÌí¼ÓÒ»¸ö
+        # å¦‚æœæ²¡æœ‰æ‰¾åˆ°Versionæ ‡ç­¾ï¼Œåˆ™åœ¨ç¬¬ä¸€ä¸ªPropertyGroupä¸­æ·»åŠ ä¸€ä¸ª
         if ($content -eq $newContent) {
             $propertyGroupPattern = '(<PropertyGroup[^>]*>)'
             if ($content -match $propertyGroupPattern) {
@@ -106,8 +106,8 @@ jobs:
         }
         
         Set-Content $projectPath $newContent -NoNewline
-        Write-Host "? ÏîÄ¿ÎÄ¼şÒÑ¸üĞÂ"
-        Write-Host "??? ĞÂ°æ±¾: $newVersion"
+        Write-Host "? é¡¹ç›®æ–‡ä»¶å·²æ›´æ–°"
+        Write-Host "??? æ–°ç‰ˆæœ¬: $newVersion"
 
     - name: Commit version update
       run: |

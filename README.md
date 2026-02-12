@@ -214,8 +214,6 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmGemini3ChatClient` | Cloud API (Google Gemini) | gemini-3-pro-preview | Signature (hidden) | ✅ Stream |
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
 | `VllmDeepseekV3ChatClient` | Cloud API (DashScope) | DeepSeek-V3.2 | ✅ (via `VllmChatOptions`) | ✅ Stream |
-| `VllmGlmZ1ChatClient` | Local vLLM | GLM-4 | ✅ Full | ✅ Stream |
-| `VllmGlm4ChatClient` | Local vLLM | GLM-4 | ❌ | ✅ Stream |
 | `VllmGlmChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-5 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5 | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
 | `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) / kimi-k2.5 | ✅ (thinking model) | ✅ Stream |
 | `VllmMiniMaxChatClient` | Cloud API (DashScope) | MiniMax-M2.1 | ✅ | ✅ Stream |

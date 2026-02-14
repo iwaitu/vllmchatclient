@@ -16,6 +16,8 @@ internal sealed class VllmOpenAIChatRequest
     public VllmReasoningOptions? Reasoning { get; set; }
     public int? MaxTokens { get; set; }
     public VllmRequestOptions? Options { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("tool_choice")]
+    public object? ToolChoice { get; set; }
 }
 
 internal sealed class VllmThinkingOptions

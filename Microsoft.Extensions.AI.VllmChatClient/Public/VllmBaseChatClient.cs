@@ -676,91 +676,97 @@ namespace Microsoft.Extensions.AI
                 Tools = GetTools(options),
             };
 
+            if (options?.ToolMode is AutoChatToolMode)
+            {
+                request.ToolChoice = "auto";
+            }
+            else if (options?.ToolMode is RequiredChatToolMode required)
+            {
+                if (string.IsNullOrEmpty(required.RequiredFunctionName))
+                {
+                    request.ToolChoice = "required";
+                }
+                else
+                {
+                    request.ToolChoice = new { type = "function", function = new { name = required.RequiredFunctionName } };
+                }
+            }
+            else if (options?.ToolMode is NoneChatToolMode)
+            {
+                request.ToolChoice = "none";
+            }
+
             ApplyRequestOptions(request, options);
             return request;
         }
 
         private protected virtual IEnumerable<VllmOpenAIChatRequestMessage> ToVllmChatRequestMessages(ChatMessage content)
         {
-            VllmOpenAIChatRequestMessage? currentTextMessage = null;
+            if (content.Role == ChatRole.Tool)
+            {
+                foreach (var item in content.Contents)
+                {
+                    if (item is FunctionResultContent frc)
+                    {
+                        string resultStr = frc.Result is string s
+                            ? s
+                            : JsonSerializer.Serialize(frc.Result,
+                                  ToolCallJsonSerializerOptions.GetTypeInfo(typeof(object)));
+
+                        yield return new VllmOpenAIChatRequestMessage
+                        {
+                            Role = "tool",
+                            ToolCallId = frc.CallId,
+                            Content = resultStr
+                        };
+                    }
+                }
+                yield break;
+            }
+
+            var toolCalls = new List<VllmToolCall>();
+            var images = new List<string>();
+            var sb = new System.Text.StringBuilder();
+
             foreach (var item in content.Contents)
             {
                 if (item is DataContent dataContent && dataContent.HasTopLevelMediaType("image"))
                 {
-                    IList<string> images = currentTextMessage?.Images ?? [];
                     images.Add(Convert.ToBase64String(dataContent.Data
 #if NET
                         .Span));
 #else
-                .ToArray()));
+                        .ToArray()));
 #endif
-
-                    if (currentTextMessage is not null)
-                    {
-                        currentTextMessage.Images = images;
-                    }
-                    else
-                    {
-                        yield return new VllmOpenAIChatRequestMessage
-                        {
-                            Role = content.Role.Value,
-                            Images = images,
-                        };
-                    }
                 }
-                else
+                else if (item is TextContent textContent)
                 {
-                    if (currentTextMessage is not null)
+                    sb.Append(textContent.Text);
+                }
+                else if (item is FunctionCallContent fcc)
+                {
+                    toolCalls.Add(new VllmToolCall
                     {
-                        yield return currentTextMessage;
-                        currentTextMessage = null;
-                    }
-
-                    switch (item)
-                    {
-                        case TextContent textContent:
-                            currentTextMessage = new VllmOpenAIChatRequestMessage
-                            {
-                                Role = content.Role.Value,
-                                Content = textContent.Text,
-                            };
-                            break;
-
-                        case FunctionCallContent fcc:
-                            {
-                                var toolCallJson = JsonSerializer.Serialize(new
-                                {
-                                    name = fcc.Name,
-                                    arguments = fcc.Arguments
-                                }, ToolCallJsonSerializerOptions);
-
-                                yield return new VllmOpenAIChatRequestMessage
-                                {
-                                    Role = "assistant",
-                                    Content = $"<tool_call>\n{toolCallJson}\n</tool_call>",
-                                };
-                                break;
-                            }
-
-                        case FunctionResultContent frc:
-                            {
-                                var resultContent = frc.Result?.ToString() ?? "";
-                                yield return new VllmOpenAIChatRequestMessage
-                                {
-                                    Role = "user",
-                                    Content = $"<tool_response>\n{resultContent}\n</tool_response>",
-                                    ToolCallId = frc.CallId
-                                };
-                                break;
-                            }
-                    }
+                        Id = fcc.CallId,
+                        Type = "function",
+                        Function = new VllmFunctionToolCall
+                        {
+                            Name = fcc.Name,
+                            Arguments = JsonSerializer.Serialize(
+                                fcc.Arguments,
+                                ToolCallJsonSerializerOptions.GetTypeInfo(typeof(IDictionary<string, object?>)))
+                        }
+                    });
                 }
             }
 
-            if (currentTextMessage is not null)
+            yield return new VllmOpenAIChatRequestMessage
             {
-                yield return currentTextMessage;
-            }
+                Role = content.Role.Value,
+                Content = sb.Length > 0 ? sb.ToString() : (toolCalls.Count > 0 ? string.Empty : null),
+                Images = images.Count > 0 ? images : null,
+                ToolCalls = toolCalls.Count > 0 ? toolCalls.ToArray() : null
+            };
         }
 
         private protected virtual IEnumerable<VllmTool>? GetTools(ChatOptions? options)

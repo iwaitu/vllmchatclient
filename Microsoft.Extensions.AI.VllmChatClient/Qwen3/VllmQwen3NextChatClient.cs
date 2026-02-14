@@ -8,6 +8,13 @@ namespace Microsoft.Extensions.AI
 {
     public class VllmQwen3NextChatClient : VllmBaseChatClient
     {
+        private protected override VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
+        {
+            var request = base.ToVllmChatRequest(messages, options, stream);
+            request.ToolChoice = null;
+            return request;
+        }
+
         public VllmQwen3NextChatClient(string endpoint, string? token = null, string? modelId = "qwen3", HttpClient? httpClient = null)
             : base(endpoint, token, modelId, httpClient)
         {
@@ -25,7 +32,7 @@ namespace Microsoft.Extensions.AI
                         if (string.IsNullOrWhiteSpace(modelId) ||
                             !modelId.StartsWith("qwen3-vl", StringComparison.OrdinalIgnoreCase))
                         {
-                            throw new InvalidOperationException("��ǰģ�Ͳ�֧�ֶ�ģ̬");
+                            throw new InvalidOperationException("当前模型不支持多模态");
                         }
                     }
                 }

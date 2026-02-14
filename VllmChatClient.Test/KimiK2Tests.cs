@@ -96,7 +96,10 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
-            var options = CreateChatOptions();
+            var options = new VllmChatOptions
+            {
+                ThinkingEnabled = false // DISABLE THINKING
+            };
             string reason = string.Empty;
             string anwser = string.Empty;
             await foreach (var message in _client.GetStreamingResponseAsync(messages, options))
@@ -142,6 +145,10 @@ namespace VllmChatClient.Test
             };
 
             var options = CreateChatOptions();
+            if (options is VllmChatOptions vopts)
+            {
+                vopts.ThinkingEnabled = false;
+            }
             var res = await _client.GetResponseAsync(messages, options);
 
             Assert.NotNull(res);
@@ -198,8 +205,11 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")               //串行调用两个函数
             };
-            var chatOptions = CreateChatOptions();
-            chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)];
+            var chatOptions = new VllmChatOptions
+            {
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)],
+                ThinkingEnabled = false // DISABLE THINKING
+            };
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
             Assert.True(res.Messages.Count >= 1);
@@ -232,8 +242,11 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
-            var chatOptions = CreateChatOptions();
-            chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)];
+            var chatOptions = new VllmChatOptions
+            {
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)],
+                ThinkingEnabled = false // DISABLE THINKING
+            };
             string res = string.Empty;
             string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
@@ -275,8 +288,11 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
-            var chatOptions = CreateChatOptions();
-            chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)];
+            var chatOptions = new VllmChatOptions
+            {
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)],
+                ThinkingEnabled = false // DISABLE THINKING
+            };
             string res = string.Empty;
             string reason = string.Empty;
             await foreach (var update in _client.GetStreamingResponseAsync(messages, chatOptions))
@@ -417,8 +433,11 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。"),
             };
-            var chatOptions = CreateChatOptions();
-            chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search),AIFunctionFactory.Create(FindBookStore)];
+            var chatOptions = new VllmChatOptions
+            {
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)],
+                ThinkingEnabled = false // DISABLE THINKING
+            };
             var res = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
@@ -427,15 +446,13 @@ namespace VllmChatClient.Test
             {
                 var functionCalls = res.Messages[0].Contents.OfType<FunctionCallContent>().ToList();
                 Assert.NotEmpty(functionCalls);
+                
+                // Add the assistant message with all function calls ONCE
+                var assistantMessage = new ChatMessage(ChatRole.Assistant, functionCalls.Cast<AIContent>().ToList());
+                messages.Add(assistantMessage);
 
                 foreach (var functionCall in functionCalls)
                 {
-                    var funcMsg = new ChatResponse();
-                    var msgContent = new ChatMessage();
-                    msgContent.Contents.Add(functionCall);
-                    funcMsg.Messages.Add(msgContent);
-                    messages.AddMessages(funcMsg);
-
                     Assert.NotNull(functionCall);
                     var anwser = string.Empty;
                     if ("GetWeather" == functionCall.Name)
@@ -497,8 +514,11 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用 codeblock。")
             };
-            var options = CreateChatOptions();
-            options.MaxOutputTokens = 100;
+            var options = new VllmChatOptions
+            {
+                MaxOutputTokens = 100,
+                ThinkingEnabled = false // DISABLE THINKING
+            };
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
             Assert.Single(res.Messages);

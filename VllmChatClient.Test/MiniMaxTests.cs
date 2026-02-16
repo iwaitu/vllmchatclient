@@ -18,7 +18,7 @@ namespace VllmChatClient.Test
     {
         private readonly IChatClient _client;
         private readonly ITestOutputHelper _output;
-        private const string MODEL = "MiniMax-M2.1";
+        private const string MODEL = "MiniMax/MiniMax-M2.5";
         private readonly bool _skipTests;
         static int functionCallTime = 0;
 
@@ -50,9 +50,11 @@ namespace VllmChatClient.Test
         public MiniMaxTests(ITestOutputHelper output)
         {
             _output = output; // 修复 CS8618: 正确初始化 _output 字段
-            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            //var cloud_apiKey = Environment.GetEnvironmentVariable("ALIYUN_CODE_PLAN_API"); //VLLM_ALIYUN_API_KEY
+            //_client = new VllmMiniMaxChatClient("https://coding.dashscope.aliyuncs.com/v1/{1}", cloud_apiKey, MODEL);
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY"); //VLLM_ALIYUN_API_KEY
             _client = new VllmMiniMaxChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL);
-            //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_KIMI_API_KEY");
+            ////var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_KIMI_API_KEY");
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
             //_client = new VllmKimiK2ChatClient("https://api.moonshot.cn/{0}/{1}", cloud_apiKey, MODEL);
@@ -497,28 +499,29 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用 codeblock。")
             };
             var options = CreateChatOptions();
-            options.MaxOutputTokens = 100;
+            options.MaxOutputTokens = 500;
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
-            var textContent = res.Messages[0].Contents.OfType<TextContent>().FirstOrDefault();
+            var textContent = res.Messages[0].Text;
             Assert.NotNull(textContent);
 
             // 验证不包含代码块标记
-            Assert.All(textContent.Text.Split('\n'), line =>
+            Assert.All(textContent.Split('\n'), line =>
             {
                 Assert.DoesNotContain("```", line);
                 Assert.DoesNotContain("```json", line);
             });
 
             // 从文本中提取 JSON 片段并验证
-            var jsonMatch = Regex.Match(textContent.Text, @"(\{[^}]*\}|\[[^\]]*\])", RegexOptions.Singleline);
-            Assert.True(jsonMatch.Success, $"未找到JSON片段: '{textContent.Text}'");
+            var jsonMatch = Regex.Match(textContent, @"(\{[^}]*\}|\[[^\]]*\])", RegexOptions.Singleline);
+            Assert.True(jsonMatch.Success, $"未找到JSON片段: '{textContent}'");
             var jsonText = jsonMatch.Value;
             try
             {
                 var json = System.Text.Json.JsonDocument.Parse(jsonText);
                 Assert.NotNull(json);
+                _output.WriteLine($"Extracted JSON: {jsonText}");
             }
             catch (System.Text.Json.JsonException ex)
             {

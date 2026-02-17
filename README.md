@@ -9,12 +9,12 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.1** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5** with advanced reasoning capabilities.
 
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: OpenAI GPT 系列, Claude 4.6 / 4.5, Qwen3, Qwen3-Next (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-5 / GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.1
+- ✅ **Multi-model Support**: OpenAI GPT 系列, Claude 4.6 / 4.5, Qwen3, Qwen3-Next, Qwen 3.5 (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-5 / GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.5
 
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models (GLM supports Zhipu official thinking parameter via `GlmChatOptions.ThinkingEnabled`)
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
@@ -64,6 +64,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ### 🔄 `VllmQwen3NextChatClient` 重构 — 统一多模型适配
 
 - **`VllmQwen3NextChatClient` 已适配多个模型系列**，通过构造函数 `modelId` 或 `ChatOptions.ModelId` 切换，无需再使用独立的 Client 类：
+  - `qwen3.5-397b-a17b`（Qwen 3.5，最新）
   - `qwen3-next-80b-a3b-thinking` / `qwen3-next-80b-a3b-instruct`
   - `qwen3-vl-30b-a3b-thinking` / `qwen3-vl-30b-a3b-instruct`（多模态，支持图片输入）
   - `qwen3-vl-32b-thinking` / `qwen3-vl-32b-instruct`（多模态）
@@ -89,6 +90,8 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ### 📝 其他更新
 
+- 新增 **Qwen 3.5** 支持（`qwen3.5-397b-a17b`），通过 `VllmQwen3NextChatClient` 接入。
+- 新增 **MiniMax-M2.5** 支持，`VllmMiniMaxChatClient` 兼容 M2.5 / M2.1。
 - 新增 **GLM 4.7 Flash** 支持。
 - 新增 GLM 4.6/4.7/5 思维链支持：`VllmGlmChatClient`，支持推理分段流式输出（思考/答案）与函数调用。
 - 新增 `GlmChatOptions`：通过 `ThinkingEnabled` 开关控制是否在请求体中发送智普官方平台所需的 `thinking: { type: "enabled" }`（默认关闭）。
@@ -161,8 +164,9 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - Controlled via `EnableSkills` (default `true`) / `SkillDirectoryPath`.
 - Built-in tools `ListSkillFiles` and `ReadSkillFile` allow models to query and read skill files during conversation.
 
-### 🆕 Qwen3-Next Multi-Model Adaptation
+### 🆕 Qwen3-Next / Qwen 3.5 Multi-Model Adaptation
 - **VllmQwen3NextChatClient** now supports multiple model families via `modelId`:
+  - `qwen3.5-397b-a17b` (Qwen 3.5, latest)
   - `qwen3-next-80b-a3b-thinking` / `qwen3-next-80b-a3b-instruct`
   - `qwen3-vl-30b-a3b-thinking` / `qwen3-vl-30b-a3b-instruct` (multimodal, image input)
   - `qwen3-vl-32b-thinking` / `qwen3-vl-32b-instruct` (multimodal)
@@ -189,11 +193,16 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - Tests: `Gemini3Test` 全部通过（含多轮与并行工具调用）、`GeminiDebugTest` 覆盖原生 API 思维签名与多轮函数调用调试。
 - Docs: 详见 `docs/Gemini3*` 文档合集。
 
-### 🆕 MiniMax-M2.1 Support
-- **VllmMiniMaxChatClient** added for MiniMax-M2.1 model support.
+### 🆕 MiniMax-M2.5 Support
+- **VllmMiniMaxChatClient** added for MiniMax-M2.5 / M2.1 model support.
 - Full streaming chat and function calling (parallel tool calls supported).
 - Compatible with DashScope API endpoint.
 - Tests: `MiniMaxTests` covering chat, streaming, function calls (serial/parallel/manual), and JSON output.
+
+### 🆕 Qwen 3.5 Support
+- **VllmQwen3NextChatClient** now supports Qwen 3.5 (`qwen3.5-397b-a17b`) via DashScope API.
+- Full reasoning chain and function calling support.
+- Use the same `VllmQwen3NextChatClient` with `modelId = "qwen3.5-397b-a17b"`.
 
 ---
 
@@ -216,7 +225,8 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmDeepseekV3ChatClient` | Cloud API (DashScope) | DeepSeek-V3.2 | ✅ (via `VllmChatOptions`) | ✅ Stream |
 | `VllmGlmChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-5 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5 | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
 | `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) / kimi-k2.5 | ✅ (thinking model) | ✅ Stream |
-| `VllmMiniMaxChatClient` | Cloud API (DashScope) | MiniMax-M2.1 | ✅ | ✅ Stream |
+| `VllmMiniMaxChatClient` | Cloud API (DashScope) | MiniMax-M2.5 / M2.1 | ✅ | ✅ Stream |
+| `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3.5-397b-a17b | ✅ (thinking model) | ✅ Stream |
 
 > 注：Gemini 3 的推理采用加密的 thought signature，不输出可读推理文本；函数调用在当前测试中无需显式回传签名亦可完成多轮调用。
 

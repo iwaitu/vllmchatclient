@@ -388,11 +388,7 @@ namespace VllmChatClient.Test
 
             foreach (var functionCall in functionCalls)
             {
-                var funcMsg = new ChatResponse();
-                var msgContent = new ChatMessage();
-                msgContent.Contents.Add(functionCall);
-                funcMsg.Messages.Add(msgContent);
-                messages.AddMessages(funcMsg);
+                messages.Add(new ChatMessage(ChatRole.Assistant, [functionCall]));
 
                 Assert.NotNull(functionCall);
                 var anwser = string.Empty;

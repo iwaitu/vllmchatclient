@@ -70,6 +70,13 @@ namespace Microsoft.Extensions.AI
             return null;
         }
 
+        /// <summary>
+        /// Whether to enable legacy text-based tool-call parsing fallback, e.g. &lt;tool_call&gt;...&lt;/tool_call&gt;.
+        /// Default is false to prefer standard OpenAI-compatible tool_calls fields.
+        /// </summary>
+        protected virtual bool EnableLegacyToolCallTextFallback(ChatOptions? options)
+            => options is VllmChatOptions vllmOptions && vllmOptions.EnableLegacyToolCallTextFallback;
+
         public JsonSerializerOptions ToolCallJsonSerializerOptions
         {
             get => _toolCallJsonSerializerOptions;
@@ -171,9 +178,10 @@ namespace Microsoft.Extensions.AI
                 .ConfigureAwait(false);
 
             using var streamReader = new StreamReader(httpResponseStream);
+            bool enableLegacyToolCallTextFallback = EnableLegacyToolCallTextFallback(options);
             string bufferMsg = string.Empty;
             // 按 tool_calls[].index 缓冲多个并行工具调用
-            var toolCallBuffers = new Dictionary<int, (string Name, string Arguments)>();
+            var toolCallBuffers = new Dictionary<int, (string? Id, string Name, string Arguments)>();
             bool thinking = true;
             string bufferToolCall = string.Empty;
             yield return new ChatResponseUpdate
@@ -217,7 +225,7 @@ namespace Microsoft.Extensions.AI
 
                 var choice = chunk.Choices[0];
 
-                // 按 index 缓冲每个工具调用的 name 和 arguments 片段
+                // 按 index 缓冲每个工具调用的 id/name/arguments 片段
                 if (choice.Delta?.ToolCalls is { Length: > 0 } deltaToolCalls)
                 {
                     foreach (var tc in deltaToolCalls)
@@ -225,7 +233,12 @@ namespace Microsoft.Extensions.AI
                         int idx = tc.Index ?? 0;
                         if (!toolCallBuffers.TryGetValue(idx, out var buf))
                         {
-                            buf = (string.Empty, string.Empty);
+                            buf = (null, string.Empty, string.Empty);
+                        }
+
+                        if (!string.IsNullOrEmpty(tc.Id))
+                        {
+                            buf.Id = tc.Id;
                         }
 
                         if (!string.IsNullOrEmpty(tc.Function?.Name))
@@ -249,28 +262,25 @@ namespace Microsoft.Extensions.AI
                             {
                                 Name = kvp.Value.Name,
                                 Arguments = kvp.Value.Arguments
-                            });
+                            }, kvp.Value.Id);
                         }
                     }
 
                     toolCallBuffers.Clear();
-                    continue;
                 }
 
                 if (choice.Delta is { } message)
                 {
-                    bufferMsg += message.Content ?? string.Empty;
-                    var bufferCopy = bufferMsg;
-                    var funcList = new List<VllmFunctionToolCall>();
-
                     var reasoningUpdate = HandleStreamingReasoningContent(message, responseId, chunk.Model ?? Metadata.DefaultModelId ?? string.Empty);
                     if (reasoningUpdate != null)
                     {
+                        // reasoning 可能与 tool_calls/content 同帧共存，不能直接 continue
                         yield return reasoningUpdate;
-                        continue;
                     }
 
-                    thinking = false;
+                    bufferMsg += message.Content ?? string.Empty;
+                    var bufferCopy = bufferMsg;
+                    var funcList = new List<(VllmFunctionToolCall Call, string? CallId)>();
 
                     // 逐 chunk 检测已完成的工具调用（单工具场景兼容）
                     foreach (var call in message.ToolCalls ?? [])
@@ -293,46 +303,50 @@ namespace Microsoft.Extensions.AI
 
                             if (isJsonComplete)
                             {
-                                funcList.Add(new VllmFunctionToolCall
+                                funcList.Add((new VllmFunctionToolCall
                                 {
                                     Name = buf.Name,
                                     Arguments = buf.Arguments
-                                });
+                                }, buf.Id));
                                 toolCallBuffers.Remove(idx);
                             }
                         }
                     }
 
-                    ToolcallParser.TryFlushClosedToolCallBlocks(ref bufferCopy, out var tcalls);
-                    funcList.AddRange(tcalls);
+                    if (enableLegacyToolCallTextFallback)
+                    {
+                        ToolcallParser.TryFlushClosedToolCallBlocks(ref bufferCopy, out var tcalls);
+                        funcList.AddRange(tcalls.Select(call => (call, (string?)null)));
+                    }
 
                     if (funcList.Count > 0)
                     {
                         foreach (var call in funcList)
                         {
-                            yield return BuildToolCallUpdate(responseId, call);
+                            yield return BuildToolCallUpdate(responseId, call.Call, call.CallId);
                         }
 
                         bufferCopy = string.Empty;
                         continue;
                     }
 
-                    bool inToolCallBlock = ToolcallParser.IsInsideIncompleteToolCall(bufferCopy);
-                    bool isUnclosed = ToolcallParser.HasUnclosedToolCall(bufferMsg);
+                    bool inToolCallBlock = enableLegacyToolCallTextFallback && ToolcallParser.IsInsideIncompleteToolCall(bufferCopy);
+                    bool isUnclosed = enableLegacyToolCallTextFallback && ToolcallParser.HasUnclosedToolCall(bufferMsg);
 
                     if (!inToolCallBlock && !isUnclosed &&
-                        funcList.Count == 0 &&
                         !string.IsNullOrEmpty(message.Content))
                     {
-                        if (message.Content is "<" or "<tool")
+                        if (enableLegacyToolCallTextFallback && (message.Content is "<" or "<tool"))
                         {
                             bufferToolCall += message.Content;
                         }
-                        if (bufferToolCall.Length > 0 && bufferToolCall.Length < 11)
+                        if (enableLegacyToolCallTextFallback && bufferToolCall.Length > 0 && bufferToolCall.Length < 11)
                         {
                             bufferToolCall += message.Content;
                             continue;
                         }
+
+                        thinking = false;
                         yield return BuildTextUpdate(responseId, message.Content, thinking);
                     }
                 }
@@ -349,7 +363,7 @@ namespace Microsoft.Extensions.AI
                         {
                             Name = kvp.Value.Name,
                             Arguments = kvp.Value.Arguments
-                        });
+                        }, kvp.Value.Id);
                     }
                 }
 
@@ -357,12 +371,12 @@ namespace Microsoft.Extensions.AI
             }
 
             // 流结束后，flush bufferMsg 中可能残留的 <tool_call> 块
-            if (!string.IsNullOrEmpty(bufferMsg))
+            if (enableLegacyToolCallTextFallback && !string.IsNullOrEmpty(bufferMsg))
             {
                 ToolcallParser.TryFlushClosedToolCallBlocks(ref bufferMsg, out var remainingCalls);
                 foreach (var call in remainingCalls)
                 {
-                    yield return BuildToolCallUpdate(responseId, call);
+                    yield return BuildToolCallUpdate(responseId, call, null);
                 }
             }
         }
@@ -382,7 +396,7 @@ namespace Microsoft.Extensions.AI
             };
         }
 
-        private protected virtual ChatResponseUpdate BuildToolCallUpdate(string responseId, VllmFunctionToolCall call)
+        private protected virtual ChatResponseUpdate BuildToolCallUpdate(string responseId, VllmFunctionToolCall call, string? callId = null)
         {
             return new ChatResponseUpdate
             {
@@ -391,7 +405,7 @@ namespace Microsoft.Extensions.AI
                 ModelId = _metadata.DefaultModelId,
                 ResponseId = responseId,
                 Role = ChatRole.Assistant,
-                Contents = new List<AIContent> { ToFunctionCallContent(call) }
+                Contents = new List<AIContent> { ToFunctionCallContent(call, callId) }
             };
         }
 
@@ -424,14 +438,17 @@ namespace Microsoft.Extensions.AI
             var contents = new List<AIContent>();
 
             var hasToolCalls = message.ToolCalls?.Length > 0;
-            var allowToolCallParsing = options?.ToolMode is not NoneChatToolMode && options?.Tools is { Count: > 0 };
+            var allowLegacyToolCallTextFallback = EnableLegacyToolCallTextFallback(options);
+            var allowToolCallParsing = allowLegacyToolCallTextFallback &&
+                                       options?.ToolMode is not NoneChatToolMode &&
+                                       options?.Tools is { Count: > 0 };
             foreach (var toolcall in message.ToolCalls ?? [])
             {
                 contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
                 {
                     Name = toolcall.Function?.Name ?? "",
                     Arguments = toolcall.Function?.Arguments?.ToString() ?? "{}"
-                }));
+                }, toolcall.Id));
             }
 
             if (message.Content != null)
@@ -471,7 +488,7 @@ namespace Microsoft.Extensions.AI
 
                 if (!string.IsNullOrEmpty(restText))
                 {
-                    var cleanedText = allowToolCallParsing || hasToolCalls
+                    var cleanedText = allowLegacyToolCallTextFallback || hasToolCalls
                         ? ToolcallParser.StripToolCallResidues(restText)
                         : restText;
                     contents.Add(new TextContent(cleanedText));
@@ -480,13 +497,17 @@ namespace Microsoft.Extensions.AI
             return new ChatMessage(new ChatRole(message.Role ?? "assistant"), contents);
         }
 
-        private protected static FunctionCallContent ToFunctionCallContent(VllmFunctionToolCall function)
+        private protected static FunctionCallContent ToFunctionCallContent(VllmFunctionToolCall function, string? callId = null)
         {
+            string id = callId ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(id))
+            {
 #if NET
-            var id = System.Security.Cryptography.RandomNumberGenerator.GetHexString(8);
+                id = System.Security.Cryptography.RandomNumberGenerator.GetHexString(8);
 #else
-            var id = Guid.NewGuid().ToString().Substring(0, 8);
+                id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
+            }
             IDictionary<string, object?>? arguments = null;
             try
             {

@@ -350,11 +350,7 @@ namespace VllmChatClient.Test
 
             foreach (var content in res.Messages[0].Contents)
             {
-                var funcMsg = new ChatResponse();
-                var msgContent = new ChatMessage();
-                msgContent.Contents.Add(content);
-                funcMsg.Messages.Add(msgContent);
-                messages.AddMessages(funcMsg);
+                messages.Add(new ChatMessage(ChatRole.Assistant, [content]));
 
                 Assert.True(content is FunctionCallContent);
                 var functionCall = content as FunctionCallContent;

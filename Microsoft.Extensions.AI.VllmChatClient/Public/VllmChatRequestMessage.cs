@@ -15,16 +15,23 @@ public class RawJsonStringConverter : JsonConverter<string>
     {
         if (!string.IsNullOrWhiteSpace(value))
         {
-            // 判断 value 是否可能是 JSON 对象或数组
+            // For OpenAI-compatible chat.completions, `content` may be:
+            // - string
+            // - array of content-part objects
+            // but NOT a single JSON object.
+            // So only emit raw JSON when the payload is an array; objects stay as plain strings.
             var trimmed = value.TrimStart();
-            if (trimmed.StartsWith("{") || trimmed.StartsWith("["))
+            if (trimmed.StartsWith("["))
             {
                 try
                 {
                     using (JsonDocument doc = JsonDocument.Parse(value))
                     {
-                        doc.WriteTo(writer);
-                        return;
+                        if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                        {
+                            doc.WriteTo(writer);
+                            return;
+                        }
                     }
                 }
                 catch (JsonException)

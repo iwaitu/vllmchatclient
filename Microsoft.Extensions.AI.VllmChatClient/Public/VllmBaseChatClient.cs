@@ -345,7 +345,7 @@ namespace Microsoft.Extensions.AI
                             bufferToolCall += message.Content;
                             continue;
                         }
-
+                        message.Content = message.Content.Replace("</think>", "");
                         thinking = false;
                         yield return BuildTextUpdate(responseId, message.Content, thinking);
                     }

@@ -107,6 +107,56 @@ data: [DONE]
         Assert.Equal("88 + 99", functionCall.Arguments?["expression"]?.ToString());
     }
 
+    [Fact]
+    public async Task NonStreamingToolCalls_WithEmptyFunctionName_ThrowsInvalidOperationException()
+    {
+        const string jsonResponse = """
+{
+  "id": "chatcmpl-test-empty-name",
+  "object": "chat.completion",
+  "created": 1771436118,
+  "model": "qwen3.5-plus",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_nonstream_empty",
+            "type": "function",
+            "function": {
+              "arguments": "{\"path\":\"src/test.cs\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 5,
+    "total_tokens": 15
+  }
+}
+""";
+
+        using var httpClient = new HttpClient(new FakeJsonHandler(jsonResponse));
+        var client = new VllmQwen3NextChatClient("https://example.test/{0}/{1}", "fake-token", "qwen3.5-plus", httpClient);
+
+        var messages = new List<ChatMessage> { new(ChatRole.User, "do something") };
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create((string path) => path, "read_file")]
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetResponseAsync(messages, options));
+        Assert.Contains("empty function.name", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("call_nonstream_empty", ex.Message, StringComparison.Ordinal);
+    }
+
     private sealed class FakeStreamingHandler(string ssePayload) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

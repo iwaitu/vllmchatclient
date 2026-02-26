@@ -144,8 +144,9 @@ public class SimpleSkillSmokeTests
 
         Assert.Contains("ListSkillFiles", toolNames);
         Assert.Contains("ReadSkillFile", toolNames);
+        Assert.Contains("CreateSkillFile", toolNames); // from simple skill
         Assert.Contains("GetWeather", toolNames);
-        Assert.Equal(3, toolNames.Count);
+        Assert.Equal(4, toolNames.Count);
     }
 
     /// <summary>

@@ -442,13 +442,32 @@ namespace Microsoft.Extensions.AI
             var allowToolCallParsing = allowLegacyToolCallTextFallback &&
                                        options?.ToolMode is not NoneChatToolMode &&
                                        options?.Tools is { Count: > 0 };
-            foreach (var toolcall in message.ToolCalls ?? [])
+            if (message.ToolCalls is { Length: > 0 } messageToolCalls)
             {
-                contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
+                var invalidToolCalls = messageToolCalls
+                    .Where(tc => string.IsNullOrWhiteSpace(tc.Function?.Name))
+                    .Select(tc => new
+                    {
+                        tc.Id,
+                        ArgumentsLength = tc.Function?.Arguments?.ToString()?.Length ?? 0
+                    })
+                    .ToList();
+
+                if (invalidToolCalls.Count > 0)
                 {
-                    Name = toolcall.Function?.Name ?? "",
-                    Arguments = toolcall.Function?.Arguments?.ToString() ?? "{}"
-                }, toolcall.Id));
+                    throw new InvalidOperationException(
+                        $"Provider returned {invalidToolCalls.Count} tool_calls with empty function.name in non-stream response. " +
+                        $"Ids=[{string.Join(", ", invalidToolCalls.Select(x => x.Id ?? ""))}]");
+                }
+
+                foreach (var toolcall in messageToolCalls)
+                {
+                    contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
+                    {
+                        Name = toolcall.Function?.Name ?? "",
+                        Arguments = toolcall.Function?.Arguments?.ToString() ?? "{}"
+                    }, toolcall.Id));
+                }
             }
 
             if (message.Content != null)
@@ -499,6 +518,13 @@ namespace Microsoft.Extensions.AI
 
         private protected static FunctionCallContent ToFunctionCallContent(VllmFunctionToolCall function, string? callId = null)
         {
+            if (string.IsNullOrWhiteSpace(function?.Name))
+            {
+                var argsLength = function?.Arguments?.Length ?? 0;
+                throw new InvalidOperationException(
+                    $"Cannot create FunctionCallContent: function name is empty. callId={callId ?? "(null)"}, argumentsLength={argsLength}.");
+            }
+
             string id = callId ?? string.Empty;
             if (string.IsNullOrWhiteSpace(id))
             {
@@ -518,7 +544,7 @@ namespace Microsoft.Extensions.AI
                 // Fallback for malformed JSON or empty arguments
                 arguments = new Dictionary<string, object?>();
             }
-            return new FunctionCallContent(id, function.Name ?? string.Empty, arguments);
+            return new FunctionCallContent(id, function.Name, arguments);
         }
 
         protected static JsonElement? ToVllmChatResponseFormat(ChatResponseFormat? format)

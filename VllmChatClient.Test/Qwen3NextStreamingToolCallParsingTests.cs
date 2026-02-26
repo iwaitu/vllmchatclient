@@ -157,6 +157,165 @@ data: [DONE]
         Assert.Contains("call_nonstream_empty", ex.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task NonStreamingToolCalls_WithEmptyFunctionName_RetriesOnceAndSucceeds()
+    {
+        const string badJsonResponse = """
+{
+  "id": "chatcmpl-bad",
+  "object": "chat.completion",
+  "created": 1771436118,
+  "model": "qwen3.5-plus",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_bad_empty_name",
+            "type": "function",
+            "function": {
+              "arguments": "{\"expression\":\"1 + 1\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+}
+""";
+
+        const string goodJsonResponse = """
+{
+  "id": "chatcmpl-good",
+  "object": "chat.completion",
+  "created": 1771436119,
+  "model": "qwen3.5-plus",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_good_1",
+            "type": "function",
+            "function": {
+              "name": "calculate",
+              "arguments": "{\"expression\":\"1 + 1\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+}
+""";
+
+        using var httpClient = new HttpClient(new SequenceJsonHandler([badJsonResponse, goodJsonResponse]));
+        var client = new VllmQwen3NextChatClient("https://example.test/{0}/{1}", "fake-token", "qwen3.5-plus", httpClient);
+
+        var messages = new List<ChatMessage> { new(ChatRole.User, "1+1") };
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create((string expression) => expression, "calculate")]
+        };
+
+        var response = await client.GetResponseAsync(messages, options);
+        var functionCall = response.Messages.Single().Contents.OfType<FunctionCallContent>().Single();
+
+        Assert.Equal("calculate", functionCall.Name);
+        Assert.Equal("call_good_1", functionCall.CallId);
+        Assert.Equal("1 + 1", functionCall.Arguments?["expression"]?.ToString());
+    }
+
+    [Fact]
+    public async Task NonStreamingToolCalls_WithInvalidArgumentsJson_RetriesOnceAndSucceeds()
+    {
+        const string badJsonResponse = """
+{
+  "id": "chatcmpl-bad-args",
+  "object": "chat.completion",
+  "created": 1771436118,
+  "model": "qwen3.5-plus",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_bad_args",
+            "type": "function",
+            "function": {
+              "name": "calculate",
+              "arguments": "{\"expression\":"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+}
+""";
+
+        const string goodJsonResponse = """
+{
+  "id": "chatcmpl-good-args",
+  "object": "chat.completion",
+  "created": 1771436119,
+  "model": "qwen3.5-plus",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_good_args",
+            "type": "function",
+            "function": {
+              "name": "calculate",
+              "arguments": "{\"expression\":\"2 + 2\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+}
+""";
+
+        using var httpClient = new HttpClient(new SequenceJsonHandler([badJsonResponse, goodJsonResponse]));
+        var client = new VllmQwen3NextChatClient("https://example.test/{0}/{1}", "fake-token", "qwen3.5-plus", httpClient);
+
+        var messages = new List<ChatMessage> { new(ChatRole.User, "2+2") };
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create((string expression) => expression, "calculate")]
+        };
+
+        var response = await client.GetResponseAsync(messages, options);
+        var functionCall = response.Messages.Single().Contents.OfType<FunctionCallContent>().Single();
+
+        Assert.Equal("calculate", functionCall.Name);
+        Assert.Equal("call_good_args", functionCall.CallId);
+        Assert.Equal("2 + 2", functionCall.Arguments?["expression"]?.ToString());
+    }
+
     private sealed class FakeStreamingHandler(string ssePayload) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -176,6 +335,22 @@ data: [DONE]
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class SequenceJsonHandler(IReadOnlyList<string> jsonPayloads) : HttpMessageHandler
+    {
+        private int _index;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var idx = Interlocked.Increment(ref _index) - 1;
+            var payload = idx < jsonPayloads.Count ? jsonPayloads[idx] : jsonPayloads[^1];
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
             };
             return Task.FromResult(response);
         }

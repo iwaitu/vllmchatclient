@@ -1,7 +1,8 @@
-﻿using Microsoft.Shared.Diagnostics;
+using Microsoft.Shared.Diagnostics;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -94,53 +95,83 @@ namespace Microsoft.Extensions.AI
         public virtual async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
             _ = Throw.IfNull(messages);
-
             string apiEndpoint = GetChatEndpoint();
-            using var httpResponse = await _httpClient.PostAsJsonAsync(
-                apiEndpoint,
-                ToVllmChatRequest(messages, options, stream: false),
-                JsonContext.Default.VllmOpenAIChatRequest,
-                cancellationToken).ConfigureAwait(false);
+            const int maxAttempts = 2; // retry at most once for malformed tool-call protocol payloads
 
-            if (!httpResponse.IsSuccessStatusCode)
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
+                using var httpResponse = await _httpClient.PostAsJsonAsync(
+                    apiEndpoint,
+                    ToVllmChatRequest(messages, options, stream: false),
+                    JsonContext.Default.VllmOpenAIChatRequest,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (!httpResponse.IsSuccessStatusCode)
+                {
+                    await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
+                }
+
+                var response = (await httpResponse.Content.ReadFromJsonAsync(
+                    JsonContext.Default.VllmChatResponse,
+                    cancellationToken).ConfigureAwait(false))!;
+
+                if (response.Choices is null || response.Choices.Length == 0)
+                {
+                    throw new InvalidOperationException("未返回任何响应选项。");
+                }
+
+                var choice = response.Choices[0];
+                var responseMessage = choice.Message;
+                string reason = responseMessage?.ReasoningContent?.ToString() ?? string.Empty;
+
+                if (string.IsNullOrEmpty(reason))
+                {
+                    reason = responseMessage?.Reasoning ?? string.Empty;
+                }
+
+                if (string.IsNullOrEmpty(reason) && responseMessage?.ReasoningDetails?.FirstOrDefault(x => x.Type == "reasoning.text") is { } detail)
+                {
+                    reason = detail.Text;
+                }
+
+                try
+                {
+                    var retMessage = FromVllmMessage(responseMessage!, options);
+                    bool hasToolCall = retMessage.Contents.Any(c => c is FunctionCallContent);
+
+                    return new ReasoningChatResponse(retMessage, reason)
+                    {
+                        CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
+                        FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToFinishReason(response.Choices?.FirstOrDefault()?.FinishReason),
+                        ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
+                        ResponseId = response.Id,
+                        Usage = ParseVllmChatResponseUsage(response),
+                    };
+                }
+                catch (InvalidOperationException ex) when (
+                    attempt < maxAttempts &&
+                    string.Equals(choice.FinishReason, "tool_calls", StringComparison.OrdinalIgnoreCase) &&
+                    IsMalformedToolCallProtocolException(ex))
+                {
+                    // Retry once for provider protocol inconsistency:
+                    // finish_reason == tool_calls but tool_calls payload is malformed (e.g., empty function.name)
+                    int backoffMs = 100 + Random.Shared.Next(0, 201);
+                    Trace.TraceWarning(
+                        "[{0}] Malformed tool-call protocol payload in non-stream GetResponseAsync. Retry attempt {1}/{2} after {3}ms (finish_reason=tool_calls, responseId={4}, model={5}). Error={6}",
+                        ProviderName,
+                        attempt + 1,
+                        maxAttempts,
+                        backoffMs,
+                        response.Id ?? "(null)",
+                        response.Model ?? options?.ModelId ?? _metadata.DefaultModelId ?? "(null)",
+                        ex.Message);
+
+                    await Task.Delay(backoffMs, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
             }
 
-            var response = (await httpResponse.Content.ReadFromJsonAsync(
-                JsonContext.Default.VllmChatResponse,
-                cancellationToken).ConfigureAwait(false))!;
-
-            if (response.Choices is null || response.Choices.Length == 0)
-            {
-                throw new InvalidOperationException("未返回任何响应选项。");
-            }
-
-            var choice = response.Choices[0];
-            var responseMessage = choice.Message;
-            string reason = responseMessage?.ReasoningContent?.ToString() ?? string.Empty;
-
-            if (string.IsNullOrEmpty(reason))
-            {
-                reason = responseMessage?.Reasoning ?? string.Empty;
-            }
-
-            if (string.IsNullOrEmpty(reason) && responseMessage?.ReasoningDetails?.FirstOrDefault(x => x.Type == "reasoning.text") is { } detail)
-            {
-                reason = detail.Text;
-            }
-
-            var retMessage = FromVllmMessage(responseMessage!, options);
-            bool hasToolCall = retMessage.Contents.Any(c => c is FunctionCallContent);
-
-            return new ReasoningChatResponse(retMessage, reason)
-            {
-                CreatedAt = DateTimeOffset.FromUnixTimeSeconds(response.Created).UtcDateTime,
-                FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToFinishReason(response.Choices?.FirstOrDefault()?.FinishReason),
-                ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
-                ResponseId = response.Id,
-                Usage = ParseVllmChatResponseUsage(response),
-            };
+            throw new InvalidOperationException("Unreachable: GetResponseAsync retry loop exhausted unexpectedly.");
         }
 
         public virtual object? GetService(Type serviceType, object? serviceKey = null)
@@ -534,17 +565,52 @@ namespace Microsoft.Extensions.AI
                 id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
             }
-            IDictionary<string, object?>? arguments = null;
+            var rawArguments = function.Arguments ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(rawArguments))
+            {
+                rawArguments = "{}";
+                Trace.TraceWarning(
+                    "[{0}] Tool call arguments is empty/whitespace; normalizing to {{}} for function '{1}' (callId={2}).",
+                    "vllm",
+                    function.Name,
+                    id);
+            }
+
+            IDictionary<string, object?>? arguments;
             try
             {
-                arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments ?? "{}");
+                using var doc = JsonDocument.Parse(rawArguments);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot create FunctionCallContent: function arguments JSON root must be object. callId={id}, functionName={function.Name}, rootKind={doc.RootElement.ValueKind}.");
+                }
+
+                arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(rawArguments)
+                    ?? new Dictionary<string, object?>();
             }
-            catch (JsonReaderException)
+            catch (System.Text.Json.JsonException ex)
             {
-                // Fallback for malformed JSON or empty arguments
-                arguments = new Dictionary<string, object?>();
+                throw new InvalidOperationException(
+                    $"Cannot create FunctionCallContent: function arguments is not valid JSON. callId={id}, functionName={function.Name}, argumentsLength={rawArguments.Length}.",
+                    ex);
+            }
+            catch (Newtonsoft.Json.JsonException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot create FunctionCallContent: function arguments is not valid JSON. callId={id}, functionName={function.Name}, argumentsLength={rawArguments.Length}.",
+                    ex);
             }
             return new FunctionCallContent(id, function.Name, arguments);
+        }
+
+        private static bool IsMalformedToolCallProtocolException(InvalidOperationException ex)
+        {
+            var message = ex.Message ?? string.Empty;
+            return message.Contains("empty function.name", StringComparison.OrdinalIgnoreCase)
+                   || message.Contains("function name is empty", StringComparison.OrdinalIgnoreCase)
+                   || message.Contains("function arguments is not valid JSON", StringComparison.OrdinalIgnoreCase)
+                   || message.Contains("function arguments JSON root must be object", StringComparison.OrdinalIgnoreCase);
         }
 
         protected static JsonElement? ToVllmChatResponseFormat(ChatResponseFormat? format)

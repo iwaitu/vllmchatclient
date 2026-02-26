@@ -577,31 +577,122 @@ namespace Microsoft.Extensions.AI
             }
 
             IDictionary<string, object?>? arguments;
+            if (TryParseFunctionArgumentsAsObject(rawArguments, out arguments))
+            {
+                return new FunctionCallContent(id, function.Name, arguments);
+            }
+
+            var normalizedCandidates = BuildNormalizedToolArgumentCandidates(rawArguments);
+            foreach (var candidate in normalizedCandidates)
+            {
+                if (TryParseFunctionArgumentsAsObject(candidate, out arguments))
+                {
+                    Trace.TraceWarning(
+                        "[{0}] Tool call arguments required normalization for function '{1}' (callId={2}).",
+                        "vllm",
+                        function.Name,
+                        id);
+                    return new FunctionCallContent(id, function.Name, arguments);
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"Cannot create FunctionCallContent: function arguments is not valid JSON. callId={id}, functionName={function.Name}, argumentsLength={rawArguments.Length}.");
+        }
+
+        private protected static bool TryParseFunctionArgumentsAsObject(string rawArguments, out IDictionary<string, object?> arguments)
+        {
+            arguments = new Dictionary<string, object?>();
             try
             {
                 using var doc = JsonDocument.Parse(rawArguments);
                 if (doc.RootElement.ValueKind != JsonValueKind.Object)
                 {
-                    throw new InvalidOperationException(
-                        $"Cannot create FunctionCallContent: function arguments JSON root must be object. callId={id}, functionName={function.Name}, rootKind={doc.RootElement.ValueKind}.");
+                    return false;
                 }
 
                 arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(rawArguments)
                     ?? new Dictionary<string, object?>();
+                return true;
             }
             catch (System.Text.Json.JsonException ex)
             {
-                throw new InvalidOperationException(
-                    $"Cannot create FunctionCallContent: function arguments is not valid JSON. callId={id}, functionName={function.Name}, argumentsLength={rawArguments.Length}.",
-                    ex);
+                Trace.TraceWarning("[{0}] Tool call arguments JSON parse failed: {1}", "vllm", ex.Message);
+                return false;
             }
             catch (Newtonsoft.Json.JsonException ex)
             {
-                throw new InvalidOperationException(
-                    $"Cannot create FunctionCallContent: function arguments is not valid JSON. callId={id}, functionName={function.Name}, argumentsLength={rawArguments.Length}.",
-                    ex);
+                Trace.TraceWarning("[{0}] Tool call arguments JSON parse failed: {1}", "vllm", ex.Message);
+                return false;
             }
-            return new FunctionCallContent(id, function.Name, arguments);
+        }
+
+        private protected static IEnumerable<string> BuildNormalizedToolArgumentCandidates(string rawArguments)
+        {
+            var candidates = new List<string>();
+
+            static void AddCandidate(List<string> list, string? candidate)
+            {
+                if (!string.IsNullOrWhiteSpace(candidate) && !list.Contains(candidate, StringComparer.Ordinal))
+                {
+                    list.Add(candidate);
+                }
+            }
+
+            var trimmed = rawArguments.Trim();
+            AddCandidate(candidates, trimmed);
+
+            var wrapped = $"{{{trimmed.Trim(',')}}}";
+            AddCandidate(candidates, wrapped);
+
+            foreach (var baseCandidate in candidates.ToArray())
+            {
+                var fixedDanglingQuote = Regex.Replace(
+                    baseCandidate,
+                    @"(?<prefix>[{,]\s*)(?<key>[A-Za-z_][A-Za-z0-9_-]*)""\s*:",
+                    "${prefix}\"${key}\":");
+                AddCandidate(candidates, fixedDanglingQuote);
+
+                var fixedUnquotedKeys = Regex.Replace(
+                    fixedDanglingQuote,
+                    @"(?<prefix>[{,]\s*)(?<key>[A-Za-z_][A-Za-z0-9_-]*)(?<suffix>\s*:)",
+                    "${prefix}\"${key}\"${suffix}");
+                AddCandidate(candidates, fixedUnquotedKeys);
+            }
+
+            var keyValueFragment = Regex.Match(trimmed, @"^\s*""?(?<key>[A-Za-z_][A-Za-z0-9_-]*)""?\s*:\s*(?<value>.+?)\s*$", RegexOptions.Singleline);
+            if (keyValueFragment.Success)
+            {
+                var key = keyValueFragment.Groups["key"].Value;
+                var value = keyValueFragment.Groups["value"].Value.Trim();
+                if (!LooksLikeJsonValue(value))
+                {
+                    value = JsonSerializer.Serialize(value.Trim('"'));
+                }
+
+                AddCandidate(candidates, $"{{\"{key}\":{value}}}");
+            }
+
+            AddCandidate(candidates, $"{{\"input\":{JsonSerializer.Serialize(trimmed)}}}");
+            return candidates;
+        }
+
+        private protected static bool LooksLikeJsonValue(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            value = value.Trim();
+            return value.StartsWith("\"", StringComparison.Ordinal)
+                   || value.StartsWith("{", StringComparison.Ordinal)
+                   || value.StartsWith("[", StringComparison.Ordinal)
+                   || value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                   || value.Equals("false", StringComparison.OrdinalIgnoreCase)
+                   || value.Equals("null", StringComparison.OrdinalIgnoreCase)
+                   || char.IsDigit(value[0])
+                   || value[0] == '-';
         }
 
         private static bool IsMalformedToolCallProtocolException(InvalidOperationException ex)

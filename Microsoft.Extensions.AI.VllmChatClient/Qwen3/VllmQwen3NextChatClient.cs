@@ -8,6 +8,8 @@ namespace Microsoft.Extensions.AI
 {
     public class VllmQwen3NextChatClient : VllmBaseChatClient
     {
+        protected override bool EnableLegacyToolCallTextFallback(ChatOptions? options) => true;
+
         private protected override VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
             var request = base.ToVllmChatRequest(messages, options, stream);

@@ -316,6 +316,74 @@ data: [DONE]
         Assert.Equal("2 + 2", functionCall.Arguments?["expression"]?.ToString());
     }
 
+    [Fact]
+    public async Task NonStreamingToolCalls_WithToolCallTextBlock_AreParsedForQwen3Next()
+    {
+        const string jsonResponse = """
+{
+  "id": "chatcmpl-toolcall-text",
+  "object": "chat.completion",
+  "created": 1771436118,
+  "model": "qwen3.5-plus",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "<tool_call>\n{\n  \"name\": \"execute_code_task\",\n  \"arguments\": {\n    \"task_id\": \"TASK_FIX_001\"\n  }\n}\n</tool_call>"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}
+""";
+
+        using var httpClient = new HttpClient(new FakeJsonHandler(jsonResponse));
+        var client = new VllmQwen3NextChatClient("https://example.test/{0}/{1}", "fake-token", "qwen3.5-plus", httpClient);
+
+        var messages = new List<ChatMessage> { new(ChatRole.User, "执行任务") };
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create((string task_id) => task_id, "execute_code_task")]
+        };
+
+        var response = await client.GetResponseAsync(messages, options);
+        var functionCall = response.Messages.Single().Contents.OfType<FunctionCallContent>().Single();
+
+        Assert.Equal("execute_code_task", functionCall.Name);
+        Assert.Equal("TASK_FIX_001", functionCall.Arguments?["task_id"]?.ToString());
+    }
+
+    [Fact]
+    public async Task StreamingToolCalls_WithToolCallTextBlock_AreParsedForQwen3Next()
+    {
+        const string streamPayload = """
+data: {"choices":[{"delta":{"role":"assistant","content":"<tool_call>\n{\n  \"name\": \"execute_code_task\",\n"},"finish_reason":null,"index":0}],"object":"chat.completion.chunk","usage":null,"created":1771436118,"model":"qwen3.5-plus","id":"chatcmpl-stream-text"}
+data: {"choices":[{"delta":{"content":"  \"arguments\": {\n    \"task_id\": \"TASK_FIX_001\"\n  }\n}\n</tool_call>"},"finish_reason":null,"index":0}],"object":"chat.completion.chunk","usage":null,"created":1771436118,"model":"qwen3.5-plus","id":"chatcmpl-stream-text"}
+data: {"choices":[{"delta":{"content":""},"finish_reason":"stop","index":0}],"object":"chat.completion.chunk","usage":null,"created":1771436118,"model":"qwen3.5-plus","id":"chatcmpl-stream-text"}
+data: [DONE]
+""";
+
+        using var httpClient = new HttpClient(new FakeStreamingHandler(streamPayload));
+        var client = new VllmQwen3NextChatClient("https://example.test/{0}/{1}", "fake-token", "qwen3.5-plus", httpClient);
+
+        var messages = new List<ChatMessage> { new(ChatRole.User, "执行任务") };
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create((string task_id) => task_id, "execute_code_task")]
+        };
+
+        var calls = new List<FunctionCallContent>();
+        await foreach (var update in client.GetStreamingResponseAsync(messages, options))
+        {
+            calls.AddRange(update.Contents.OfType<FunctionCallContent>());
+        }
+
+        var functionCall = Assert.Single(calls);
+        Assert.Equal("execute_code_task", functionCall.Name);
+        Assert.Equal("TASK_FIX_001", functionCall.Arguments?["task_id"]?.ToString());
+    }
+
     private sealed class FakeStreamingHandler(string ssePayload) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

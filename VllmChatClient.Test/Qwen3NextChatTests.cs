@@ -348,6 +348,42 @@ namespace VllmChatClient.Test
             }
         }
 
+        [Fact]
+        public async Task Nothinking_TestJsonOuput()
+        {
+            if (_skipTests)
+            {
+                return;
+            }
+
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User, "请直接输出json格式的问候语，不要使用 codeblock。")
+            };
+
+            var options = new VllmChatOptions
+            {
+                ThinkingEnabled = false,
+                MaxOutputTokens = 128,
+            };
+
+            var response = await _client.GetResponseAsync(messages, options);
+            Assert.NotNull(response);
+            Assert.Single(response.Messages);
+
+            var text = response.Text;
+            Assert.False(string.IsNullOrWhiteSpace(text));
+
+            var cleaned = Regex.Replace(text, "<think>.*?</think>\\n*", string.Empty, RegexOptions.Singleline).Trim();
+            var jsonMatch = Regex.Match(cleaned, @"(\{[^}]*\}|\[[^\]]*\])", RegexOptions.Singleline);
+            Assert.True(jsonMatch.Success, $"未找到JSON片段: '{cleaned}'");
+
+            var json = JsonDocument.Parse(jsonMatch.Value);
+            Assert.NotNull(json);
+            _output.WriteLine(cleaned);
+        }
+
 
         [Description("获取南宁的天气情况")]
         static string GetWeather() => "现在正在下雨。";
@@ -430,28 +466,29 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用 codeblock。")
+                new ChatMessage(ChatRole.User,"请输出json格式的问候语")
             };
             var options = new ChatOptions
             {
-                MaxOutputTokens = 100,
+                MaxOutputTokens = 250,
+                Temperature = 0.9f,
             };
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
-            var textContent = res.Messages[0].Contents.OfType<TextContent>().FirstOrDefault();
+            var textContent = res.Messages[0].Text;
             Assert.NotNull(textContent);
 
             // 验证不包含代码块标记
-            Assert.All(textContent.Text.Split('\n'), line =>
+            Assert.All(textContent.Split('\n'), line =>
             {
                 Assert.DoesNotContain("```", line);
                 Assert.DoesNotContain("```json", line);
             });
 
             // 从文本中提取 JSON 片段并验证
-            var jsonMatch = Regex.Match(textContent.Text, @"(\{[^}]*\}|\[[^\]]*\])", RegexOptions.Singleline);
-            Assert.True(jsonMatch.Success, $"未找到JSON片段: '{textContent.Text}'");
+            var jsonMatch = Regex.Match(textContent, @"(\{[^}]*\}|\[[^\]]*\])", RegexOptions.Singleline);
+            Assert.True(jsonMatch.Success, $"未找到JSON片段: '{textContent}'");
             var jsonText = jsonMatch.Value;
             try
             {

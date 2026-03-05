@@ -93,15 +93,23 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 
             _httpClient = httpClient ?? VllmUtilities.SharedClient;
 
-            // Gemini API 使用 x-goog-api-key 头进行认证，而不是 Bearer token
+            // 根据提供商设置认证头：
+            // - Gemini 原生 API: x-goog-api-key
+            // - OpenAI 兼容提供商（如 OpenRouter）: Authorization Bearer
             if (!string.IsNullOrEmpty(token))
             {
-                // 移除可能存在的旧 Authorization 头
-                _httpClient.DefaultRequestHeaders.Remove("Authorization");
-                
-                // 设置 Gemini API 特定的认证头
                 _httpClient.DefaultRequestHeaders.Remove("x-goog-api-key");
-                _httpClient.DefaultRequestHeaders.Add("x-goog-api-key", token);
+                _httpClient.DefaultRequestHeaders.Remove("Authorization");
+
+                if (_useGeminiNativeApi)
+                {
+                    _httpClient.DefaultRequestHeaders.Add("x-goog-api-key", token);
+                }
+                else
+                {
+                    _httpClient.DefaultRequestHeaders.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                }
             }
 
             // 确定元数据使用的 URI
@@ -703,7 +711,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                 Role = ChatRole.Assistant,
                 Thinking = false,
                 Reasoning = "",
-                Contents = new List<AIContent> { ToFunctionCallContent(functionCall, state.ThoughtSignature) }
+                Contents = new List<AIContent> { ToFunctionCallContent(functionCall, state.Id, state.ThoughtSignature) }
             };
         }
 
@@ -739,13 +747,15 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
         /// <summary>
         /// 将工具调用转换为 FunctionCallContent 对象
         /// </summary>
-        private static FunctionCallContent ToFunctionCallContent(VllmFunctionToolCall function, string? thoughtSignature = null)
+        private static FunctionCallContent ToFunctionCallContent(VllmFunctionToolCall function, string? callId = null, string? thoughtSignature = null)
         {
+            var id = string.IsNullOrWhiteSpace(callId)
 #if NET
-            var id = System.Security.Cryptography.RandomNumberGenerator.GetHexString(8);
+                ? System.Security.Cryptography.RandomNumberGenerator.GetHexString(8)
 #else
-            var id = Guid.NewGuid().ToString().Substring(0, 8);
+                ? Guid.NewGuid().ToString().Substring(0, 8)
 #endif
+                : callId;
 
             var argumentsIndex = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(function.Arguments ?? "{}", AIJsonUtilities.DefaultOptions);
             var fcc = new FunctionCallContent(id, function.Name ?? "", argumentsIndex);
@@ -845,40 +855,57 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                 Tools = options?.ToolMode is not NoneChatToolMode && options?.Tools is { Count: > 0 } tools ? tools.OfType<AIFunction>().Select(ToVllmTool) : null,
             };
 
-            // 初始化 extra_body 用于 generationConfig
-            var generationConfig = new Dictionary<string, object?>();
+            // 仅 Gemini 原生 API 使用 generationConfig
+            var generationConfig = _useGeminiNativeApi ? new Dictionary<string, object?>() : null;
 
             // 处理 GeminiChatOptions 的 ReasoningLevel
             if (options is GeminiChatOptions geminiOptions)
             {
-                // 根据 ReasoningLevel 设置 thinkingConfig
-                if (geminiOptions.ReasoningLevel == GeminiReasoningLevel.Low)
+                if (_useGeminiNativeApi)
                 {
-                    generationConfig["thinkingConfig"] = new Dictionary<string, object?>
+                    // Gemini 原生：通过 generationConfig.thinkingConfig 控制推理级别
+                    if (geminiOptions.ReasoningLevel == GeminiReasoningLevel.Low)
                     {
-                        ["thinkingLevel"] = "low"
+                        generationConfig!["thinkingConfig"] = new Dictionary<string, object?>
+                        {
+                            ["thinkingLevel"] = "low"
+                        };
+                    }
+                    // Normal 级别使用默认行为（high），不需要显式设置
+                }
+                else
+                {
+                    // OpenAI 兼容提供商（如 OpenRouter）：映射为 top-level reasoning.enabled
+                    request.Reasoning = new VllmReasoningOptions
+                    {
+                        Enabled = true
                     };
                 }
-                // Normal 级别使用默认行为（high），不需要显式设置
             }
 
             if (options is not null)
             {
                 if (options.Temperature is float temperature)
                 {
-                    generationConfig["temperature"] = temperature;
+                    if (generationConfig is not null)
+                    {
+                        generationConfig["temperature"] = temperature;
+                    }
                     (request.Options ??= new()).temperature = temperature;
                 }
 
                 if (options.TopP is float topP)
                 {
-                    generationConfig["topP"] = topP;
+                    if (generationConfig is not null)
+                    {
+                        generationConfig["topP"] = topP;
+                    }
                     (request.Options ??= new()).top_p = topP;
                 }
             }
 
             // 将 generationConfig 添加到 extra_body 中
-            if (generationConfig.Count > 0)
+            if (generationConfig is { Count: > 0 })
             {
                 (request.Options ??= new()).extra_body = new Dictionary<string, object?>
                 {
@@ -988,10 +1015,16 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                                     : System.Text.Json.JsonSerializer.Serialize(frc.Result,
                                           ToolCallJsonSerializerOptions.GetTypeInfo(typeof(object)));
 
+                                string? functionName = null;
+                                if (!string.IsNullOrWhiteSpace(frc.CallId) && _functionCallNameMap?.TryGetValue(frc.CallId, out var mappedName) == true)
+                                {
+                                    functionName = mappedName;
+                                }
+
                                 yield return new VllmOpenAIChatRequestMessage
                                 {
                                     Role = "tool",
-                                    Name = "", // 可选
+                                    Name = functionName,
                                     ToolCallId = frc.CallId,
                                     Content = resultStr
                                 };

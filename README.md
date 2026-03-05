@@ -99,6 +99,9 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - 修复/完善 `VllmKimiK2ChatClient` 思维链解析。
 - 新增标签提取示例（基于 JSON 解析与正则匹配）。
 - 新增 Gemini 3 支持（`VllmGemini3ChatClient`），详见 `docs/Gemini3*` 系列文档。
+- Gemini 3 兼容双提供商：同一个 `VllmGemini3ChatClient` 可同时适配 **Google 原生 API** 与 **OpenRouter**（自动按 endpoint 切换认证头）。
+- OpenRouter 兼容增强：请求体映射 `reasoning.enabled`，并修复工具回传消息字段（`tool_call_id` / `tool_calls`）以支持多轮函数调用。
+- OpenRouter 的 `thoughtSignature` 在部分模型/响应中可能缺失，测试已调整为“有则校验、无则跳过严格断言”。
 
 ---
 
@@ -193,6 +196,15 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - Tests: `Gemini3Test` 全部通过（含多轮与并行工具调用）、`GeminiDebugTest` 覆盖原生 API 思维签名与多轮函数调用调试。
 - Docs: 详见 `docs/Gemini3*` 文档合集。
 
+### 🆕 Gemini 3 OpenRouter Compatibility
+- `VllmGemini3ChatClient` now supports both **Google native Gemini API** and **OpenRouter** in one client.
+- Auth header auto-switch by endpoint:
+  - Google native: `x-goog-api-key`
+  - OpenRouter/OpenAI-compatible: `Authorization: Bearer ...`
+- OpenRouter reasoning mapping: sends top-level `reasoning.enabled` to match provider requirements.
+- Tool-calling protocol compatibility: fixed `tool_call_id` / `tool_calls` request field names, and improved multi-turn tool-result roundtrip compatibility.
+- In OpenRouter tests, `thoughtSignature` may be absent depending on model/provider behavior; assertions are now provider-tolerant.
+
 ### 🆕 MiniMax-M2.5 Support
 - **VllmMiniMaxChatClient** added for MiniMax-M2.5 / M2.1 model support.
 - Full streaming chat and function calling (parallel tool calls supported).
@@ -220,7 +232,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3-vl-235b-a22b-thinking / qwen3-vl-235b-a22b-instruct (manual verified) | ✅ (thinking model) | ✅ Stream |
 | `VllmQwqChatClient` | Local vLLM | QwQ-32B | ✅ Full | ✅ Stream |
 | `VllmGemmaChatClient` | Local vLLM | Gemma3-27B | ❌ | ✅ Stream |
-| `VllmGemini3ChatClient` | Cloud API (Google Gemini) | gemini-3-pro-preview | Signature (hidden) | ✅ Stream |
+| `VllmGemini3ChatClient` | Cloud API (Google Gemini / OpenRouter) | gemini-3-pro-preview / google/gemini-3.1-* | Signature (hidden, provider-dependent) | ✅ Stream |
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
 | `VllmDeepseekV3ChatClient` | Cloud API (DashScope) | DeepSeek-V3.2 | ✅ (via `VllmChatOptions`) | ✅ Stream |
 | `VllmGlmChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-5 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5 | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
@@ -228,7 +240,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmMiniMaxChatClient` | Cloud API (DashScope) | MiniMax-M2.5 / M2.1 | ✅ | ✅ Stream |
 | `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3.5-397b-a17b | ✅ (thinking model) | ✅ Stream |
 
-> 注：Gemini 3 的推理采用加密的 thought signature，不输出可读推理文本；函数调用在当前测试中无需显式回传签名亦可完成多轮调用。
+> 注：Gemini 3 的推理采用加密的 thought signature，不输出可读推理文本；OpenRouter 场景下 thoughtSignature 可能缺失，函数调用在当前实现中无需显式回传签名亦可完成多轮调用。
 
 ---
 

@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.AI;
+﻿
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.AI.VllmChatClient.Gemma;
 using Microsoft.VisualBasic;
 using System;
@@ -13,26 +14,26 @@ using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace VllmChatClient.Test
 {
-    public class Gemini3Test
+    public class Gemini3OpenrouteTests
     {
         private readonly ITestOutputHelper _output;
         private readonly string _apiKey;
         private readonly VllmGemini3ChatClient _client;
         private readonly bool _skipTests;
 
-        public Gemini3Test(ITestOutputHelper output)
+        public Gemini3OpenrouteTests(ITestOutputHelper output)
         {
             _output = output;
             // 从环境变量获取 Gemini API Key
-            _apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY") ?? "";
-            
+            _apiKey = Environment.GetEnvironmentVariable("OPEN_ROUTE_API_KEY") ?? "";
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(_apiKey);
 
+            
             _client = new VllmGemini3ChatClient(
-                "https://generativelanguage.googleapis.com/v1beta",
+                "https://openrouter.ai/api/v1",
                 _apiKey,
-                "gemini-3-pro-preview"
+                "google/gemini-3.1-flash-lite-preview"
             );
         }
 
@@ -74,7 +75,7 @@ namespace VllmChatClient.Test
                 Assert.NotNull(response);
                 Assert.NotEmpty(response.Messages);
                 _output.WriteLine($"Response: {response.Text}");
-                
+
                 if (response is ReasoningChatResponse reasoningResponse)
                 {
                     _output.WriteLine($"Reasoning: {reasoningResponse.Reason}");
@@ -114,12 +115,12 @@ namespace VllmChatClient.Test
 
                 Assert.NotNull(response);
                 Assert.NotEmpty(response.Messages);
-                
+
                 if (response is ReasoningChatResponse reasoningResponse)
                 {
                     _output.WriteLine($"Reasoning: {reasoningResponse.Reason}");
                 }
-                
+
                 _output.WriteLine($"Response: {response.Text}");
             }
             catch (Exception ex)
@@ -184,7 +185,7 @@ namespace VllmChatClient.Test
                 throw;
             }
         }
-        
+
         /// <summary>
         /// 测试基础连接性和错误信息输出
         /// </summary>
@@ -198,7 +199,7 @@ namespace VllmChatClient.Test
             }
 
             _output.WriteLine($"API Key (first 10 chars): {_apiKey.Substring(0, Math.Min(10, _apiKey.Length))}...");
-            
+
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.User, "Hello")
@@ -213,7 +214,7 @@ namespace VllmChatClient.Test
             {
                 var response = await _client.GetResponseAsync(messages, options);
                 _output.WriteLine($"Success! Response: {response.Text}");
-                
+
                 if (response is ReasoningChatResponse reasoningResponse)
                 {
                     _output.WriteLine($"Reasoning Length: {reasoningResponse.Reason?.Length ?? 0}");
@@ -301,7 +302,7 @@ namespace VllmChatClient.Test
                 if (functionCalls.Count > 0)
                 {
                     _output.WriteLine("\n✓ Function call detected!");
-                    
+
                     foreach (var fc in functionCalls)
                     {
                         _output.WriteLine($"  Function: {fc.Name}");
@@ -316,8 +317,8 @@ namespace VllmChatClient.Test
                         messages.Add(response.Messages[0]);
                         messages.Add(new ChatMessage(
                             ChatRole.User,
-                            new List<AIContent> 
-                            { 
+                            new List<AIContent>
+                            {
                                 new FunctionResultContent(fc.CallId, result)
                             }
                         ));
@@ -328,7 +329,7 @@ namespace VllmChatClient.Test
                     {
                         var finalResponse = await _client.GetResponseAsync(messages, options);
                         _output.WriteLine($"Final response: {finalResponse.Text}");
-                        
+
                         Assert.NotNull(finalResponse);
                         Assert.NotEmpty(finalResponse.Text);
                     }
@@ -383,42 +384,42 @@ namespace VllmChatClient.Test
             try
             {
                 _output.WriteLine("=== Manual multi-turn function calling ===");
-                
+
                 // 第一轮：获取函数调用
                 var response1 = await _client.GetResponseAsync(messages, options);
                 Assert.NotNull(response1);
-                
+
                 var functionCalls = response1.Messages[0].Contents.OfType<FunctionCallContent>().ToList();
                 _output.WriteLine($"Function calls received: {functionCalls.Count}");
-                
+
                 if (functionCalls.Count > 0)
                 {
                     // 追加 assistant 的函数调用
                     messages.Add(response1.Messages[0]);
-                    
+
                     // 执行函数并追加结果
                     foreach (var fc in functionCalls)
                     {
                         var result = GetWeather(fc.Arguments.TryGetValue("city", out var c) ? c?.ToString() ?? "" : "");
-                        messages.Add(new ChatMessage(ChatRole.User, new List<AIContent> 
-                        { 
-                            new FunctionResultContent(fc.CallId, result) 
+                        messages.Add(new ChatMessage(ChatRole.User, new List<AIContent>
+                        {
+                            new FunctionResultContent(fc.CallId, result)
                         }));
                         _output.WriteLine($"Executed {fc.Name}: {result}");
                     }
-                    
+
                     // 第二轮：获取最终回答
                     var response2 = await _client.GetResponseAsync(messages, options);
                     _output.WriteLine($"Final response: {response2.Text}");
-                    
+
                     Assert.NotNull(response2);
-                    
+
                     // 验证响应包含天气信息
-                    var hasWeatherInfo = response2.Text.Contains("天气") || 
+                    var hasWeatherInfo = response2.Text.Contains("天气") ||
                                          response2.Text.Contains("温度") ||
                                          response2.Text.Contains("°C") ||
                                          response2.Text.Contains("多云");
-                    
+
                     if (hasWeatherInfo)
                     {
                         _output.WriteLine("\n✓ Response contains weather information");
@@ -482,22 +483,22 @@ namespace VllmChatClient.Test
                 if (functionCalls.Count >= 2)
                 {
                     _output.WriteLine("\n✓ Parallel function calls detected!");
-                    
+
                     foreach (var fc in functionCalls)
                     {
                         _output.WriteLine($"\nFunction: {fc.Name}");
                         _output.WriteLine($"  Call ID: {fc.CallId}");
                         _output.WriteLine($"  Arguments: {System.Text.Json.JsonSerializer.Serialize(fc.Arguments)}");
-                        
+
                         if (fc.AdditionalProperties?.ContainsKey("thoughtSignature") == true)
                         {
-                             var sig = fc.AdditionalProperties["thoughtSignature"]?.ToString();
-                             var displaySig = sig?.Length > 20 ? sig.Substring(0, 20) + "..." : sig;
-                             _output.WriteLine($"  thoughtSignature: [Present] {displaySig}");
+                            var sig = fc.AdditionalProperties["thoughtSignature"]?.ToString();
+                            var displaySig = sig?.Length > 20 ? sig.Substring(0, 20) + "..." : sig;
+                            _output.WriteLine($"  thoughtSignature: [Present] {displaySig}");
                         }
-                        else 
+                        else
                         {
-                             _output.WriteLine($"  thoughtSignature: [Absent]");
+                            _output.WriteLine($"  thoughtSignature: [Absent]");
                         }
                     }
 
@@ -508,17 +509,22 @@ namespace VllmChatClient.Test
                         (fc.AdditionalProperties?.ContainsKey("thoughtSignature") == true) ||
                         fc.Arguments.ContainsKey("thoughtSignature"));
 
-                    Assert.True(firstHasSignature, "First function call MUST have thoughtSignature in AdditionalProperties.");
                     Assert.True(firstArgsClean, "thoughtSignature should not appear in Arguments.");
-                    Assert.False(otherHasSignature, "Only the first function call should include thoughtSignature.");
-
-                    _output.WriteLine("\n✓ Verified: Only the first function call has thoughtSignature, complying with Gemini docs.");
+                    if (firstHasSignature)
+                    {
+                        Assert.False(otherHasSignature, "Only the first function call should include thoughtSignature.");
+                        _output.WriteLine("\n✓ Verified: Only the first function call has thoughtSignature, complying with Gemini docs.");
+                    }
+                    else
+                    {
+                        _output.WriteLine("\nℹ️ OpenRouter response has no thoughtSignature; skip strict thoughtSignature assertion.");
+                    }
 
                     // ==================================================================================
                     // Execute tools and get final response
                     // ==================================================================================
                     _output.WriteLine("\n=== Turn 2: Executing tools and getting final response ===");
-                    
+
                     // Add the assistant's message (the one with tool calls) to history
                     messages.Add(response.Messages[0]);
 
@@ -528,18 +534,18 @@ namespace VllmChatClient.Test
                         var result = GetWeather(city);
                         _output.WriteLine($"  Executed {fc.Name}({city}) => {result}");
 
-                        messages.Add(new ChatMessage(ChatRole.User, new List<AIContent> 
-                        { 
-                            new FunctionResultContent(fc.CallId, result) 
+                        messages.Add(new ChatMessage(ChatRole.User, new List<AIContent>
+                        {
+                            new FunctionResultContent(fc.CallId, result)
                         }));
                     }
 
                     var finalResponse = await _client.GetResponseAsync(messages, options);
                     _output.WriteLine($"\nFinal Response: {finalResponse.Text}");
-                    
+
                     if (finalResponse is ReasoningChatResponse reasoningResp)
                     {
-                         _output.WriteLine($"Final Reasoning: {reasoningResp.Reason}");
+                        _output.WriteLine($"Final Reasoning: {reasoningResp.Reason}");
                     }
                 }
                 else if (functionCalls.Count == 1)
@@ -711,11 +717,6 @@ namespace VllmChatClient.Test
                 return;
             }
 
-            if (ShouldSkip())
-            {
-                return;
-            }
-
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.User, "我明天要去北京出差，请帮我查看天气并告诉我需要带什么")
@@ -823,7 +824,7 @@ namespace VllmChatClient.Test
 
                         // 验证最终回答包含相关信息
                         Assert.False(string.IsNullOrWhiteSpace(response.Text), "Final response should not be empty");
-                        
+
                         // 验证至少调用了一些函数
                         Assert.True(totalFunctionCalls > 0, $"Expected at least one function call, but got {totalFunctionCalls}");
 
@@ -843,11 +844,6 @@ namespace VllmChatClient.Test
                     _output.WriteLine($"\n⚠️ Reached maximum turns ({maxTurns}) without final answer");
                     _output.WriteLine($"Total function calls made: {totalFunctionCalls}");
                 }
-            }
-            catch (HttpRequestException ex) when (ex.InnerException is System.Net.Sockets.SocketException)
-            {
-                _output.WriteLine($"\n⚠️ Network connectivity issue to Gemini endpoint, skip assertions for this run: {ex.Message}");
-                return;
             }
             catch (Exception ex)
             {
@@ -902,3 +898,4 @@ namespace VllmChatClient.Test
         }
     }
 }
+

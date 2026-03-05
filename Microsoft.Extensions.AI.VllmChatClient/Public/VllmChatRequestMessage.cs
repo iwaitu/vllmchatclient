@@ -50,7 +50,9 @@ internal class VllmOpenAIChatRequestMessage
     [JsonConverter(typeof(RawJsonStringConverter))]
     public string? Content { get; set; } = default!;
     public string? Name { get; set; }
+    [JsonPropertyName("tool_call_id")]
     public string? ToolCallId { get; set; }
+    [JsonPropertyName("tool_calls")]
     public VllmToolCall[]? ToolCalls { get; set; }  // function call时用
     public IList<string>? Images { get; set; }
 }

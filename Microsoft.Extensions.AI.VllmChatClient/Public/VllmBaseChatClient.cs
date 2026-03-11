@@ -538,7 +538,12 @@ namespace Microsoft.Extensions.AI
 
                 if (!string.IsNullOrEmpty(restText))
                 {
-                    var cleanedText = allowLegacyToolCallTextFallback || hasToolCalls
+                    var shouldStripToolCallResidues = hasToolCalls
+                        || contents.Any(c => c is FunctionCallContent)
+                        || restText.Contains("<tool_call>", StringComparison.OrdinalIgnoreCase)
+                        || restText.Contains("</tool_call>", StringComparison.OrdinalIgnoreCase);
+
+                    var cleanedText = shouldStripToolCallResidues
                         ? ToolcallParser.StripToolCallResidues(restText)
                         : restText;
                     contents.Add(new TextContent(cleanedText));

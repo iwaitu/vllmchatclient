@@ -18,16 +18,17 @@ namespace VllmChatClient.Test
 
         public Qwen3NextChatTests(ITestOutputHelper output)
         {
-            //var apiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY");
-            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY");
+            //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
-            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.5-397b-a17b");
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.5-122b-a10b");
+            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.5-397b-a17b");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-235b-a22b-thinking-2507"); //测试通过
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-235b-a22b-instruct-2507"); //测试通过
-            //_client = new VllmQwen3NextChatClient("http://localhost:8000/v1/{1}", apiKey, "qwen3-next-80b-a3b-instruct");
+            _client = new VllmQwen3NextChatClient("https://chatservice.nngeo.net/v1/{1}", cloud_apiKey, "Qwen3.5-122B-A10B");
             _output = output;
         }
 
@@ -349,6 +350,34 @@ namespace VllmChatClient.Test
         }
 
         [Fact]
+        public async Task ChatWithImageTest()
+        {
+            var userMessage = new ChatMessage(ChatRole.User, "详细描述图片的内容");
+
+            var imageUrl = "https://ofasys-multimodal-wlcb-3-toshanghai.oss-accelerate.aliyuncs.com/wpf272043/keepme/image/receipt.png";
+            using var http = new HttpClient();
+            var response = await http.GetAsync(imageUrl);
+            response.EnsureSuccessStatusCode();
+
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            Assert.False(string.IsNullOrWhiteSpace(mediaType));
+            Assert.StartsWith("image/", mediaType!, StringComparison.OrdinalIgnoreCase);
+
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            Assert.NotEmpty(bytes);
+
+            userMessage.Contents.Add(new DataContent(bytes, mediaType!));
+
+            var result = await _client.GetResponseAsync([userMessage], new ChatOptions());
+            Assert.NotNull(result);
+            Assert.NotNull(result.Messages);
+            Assert.NotEmpty(result.Messages);
+            Assert.False(string.IsNullOrWhiteSpace(result.Text));
+
+            _output.WriteLine($"Response: {result.Text}");
+        }
+
+        [Fact]
         public async Task Nothinking_TestJsonOuput()
         {
             if (_skipTests)
@@ -359,13 +388,13 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User, "请直接输出json格式的问候语，不要使用 codeblock。")
+                new ChatMessage(ChatRole.User, "请仅输出单个json对象格式的问候语，不要输出任何解释、前后缀文本、markdown或 codeblock。")
             };
 
             var options = new VllmChatOptions
             {
                 ThinkingEnabled = false,
-                MaxOutputTokens = 128,
+                MaxOutputTokens = 1024,
             };
 
             var response = await _client.GetResponseAsync(messages, options);
@@ -375,12 +404,24 @@ namespace VllmChatClient.Test
             var text = response.Text;
             Assert.False(string.IsNullOrWhiteSpace(text));
 
-            var cleaned = Regex.Replace(text, "<think>.*?</think>\\n*", string.Empty, RegexOptions.Singleline).Trim();
-            var jsonMatch = Regex.Match(cleaned, @"(\{[^}]*\}|\[[^\]]*\])", RegexOptions.Singleline);
-            Assert.True(jsonMatch.Success, $"未找到JSON片段: '{cleaned}'");
+            if (response is ReasoningChatResponse reasoningResponse)
+            {
+                Assert.True(string.IsNullOrWhiteSpace(reasoningResponse.Reason), $"关闭思维链后不应返回 reasoning 内容: '{reasoningResponse.Reason}'");
+            }
 
-            var json = JsonDocument.Parse(jsonMatch.Value);
+            var cleaned = Regex.Replace(text, "<think>.*?</think>\\n*", string.Empty, RegexOptions.Singleline).Trim();
+
+            Assert.DoesNotContain("<think>", cleaned, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("</think>", cleaned, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("```", cleaned, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("```json", cleaned, StringComparison.OrdinalIgnoreCase);
+
+            var jsonText = TryExtractFirstJsonValue(cleaned);
+            Assert.False(string.IsNullOrWhiteSpace(jsonText), $"未找到JSON片段: '{cleaned}'");
+
+            var json = JsonDocument.Parse(jsonText!);
             Assert.NotNull(json);
+            Assert.True(json.RootElement.ValueKind is JsonValueKind.Object or JsonValueKind.Array, $"输出不是有效JSON对象或数组: '{jsonText}'");
             _output.WriteLine(cleaned);
         }
 
@@ -394,6 +435,89 @@ namespace VllmChatClient.Test
         {
             functionCallTime += 1;
             return "南宁市青秀区方圆广场北面站前路1号。";
+        }
+
+        private static string? TryExtractFirstJsonValue(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return null;
+            }
+
+            text = text.Trim();
+
+            try
+            {
+                using var _ = JsonDocument.Parse(text);
+                return text;
+            }
+            catch (JsonException)
+            {
+            }
+
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (text[i] is not ('{' or '['))
+                {
+                    continue;
+                }
+
+                int depth = 0;
+                bool inString = false;
+                bool escape = false;
+
+                for (int j = i; j < text.Length; j++)
+                {
+                    var c = text[j];
+
+                    if (escape)
+                    {
+                        escape = false;
+                        continue;
+                    }
+
+                    if (c == '\\')
+                    {
+                        escape = true;
+                        continue;
+                    }
+
+                    if (c == '"')
+                    {
+                        inString = !inString;
+                        continue;
+                    }
+
+                    if (inString)
+                    {
+                        continue;
+                    }
+
+                    if (c is '{' or '[')
+                    {
+                        depth++;
+                    }
+                    else if (c is '}' or ']')
+                    {
+                        depth--;
+                        if (depth == 0)
+                        {
+                            var candidate = text[i..(j + 1)];
+                            try
+                            {
+                                using var _ = JsonDocument.Parse(candidate);
+                                return candidate;
+                            }
+                            catch (JsonException)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return null;
         }
 
         [Fact]
@@ -466,11 +590,11 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
-                new ChatMessage(ChatRole.User,"请输出json格式的问候语")
+                new ChatMessage(ChatRole.User,"请输出json格式的问候语，不要使用代码块")
             };
             var options = new ChatOptions
             {
-                MaxOutputTokens = 250,
+                MaxOutputTokens = 1024,
                 Temperature = 0.9f,
             };
             var res = await _client.GetResponseAsync(messages, options);

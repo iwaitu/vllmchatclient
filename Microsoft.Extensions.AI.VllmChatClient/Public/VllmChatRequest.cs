@@ -13,6 +13,7 @@ internal sealed class VllmOpenAIChatRequest
     public IEnumerable<VllmTool>? Tools { get; set; }
     public VllmThinkingOptions? Thinking { get; set; }
     public bool? EnableThinking { get; set; }
+    public Dictionary<string, object?>? ChatTemplateKwargs { get; set; }
     public VllmReasoningOptions? Reasoning { get; set; }
     public int? MaxTokens { get; set; }
     public VllmRequestOptions? Options { get; set; }

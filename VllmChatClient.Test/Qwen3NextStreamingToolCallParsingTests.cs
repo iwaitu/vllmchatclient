@@ -384,6 +384,86 @@ data: [DONE]
         Assert.Equal("TASK_FIX_001", functionCall.Arguments?["task_id"]?.ToString());
     }
 
+    [Fact]
+    public async Task NonStreamingJsonText_WithoutToolCalls_PreservesOuterBracesForQwen3Next()
+    {
+        const string jsonResponse = """
+{
+  "id": "chatcmpl-json-text",
+  "object": "chat.completion",
+  "created": 1771436118,
+  "model": "qwen3.5-plus",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"greeting\": \"你好，我是菲菲，有什么可以帮你的吗？\"\n}"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}
+""";
+
+        using var httpClient = new HttpClient(new FakeJsonHandler(jsonResponse));
+        var client = new VllmQwen3NextChatClient("https://example.test/{0}/{1}", "fake-token", "qwen3.5-plus", httpClient);
+
+        var response = await client.GetResponseAsync([new ChatMessage(ChatRole.User, "输出 JSON")], new VllmChatOptions
+        {
+            ThinkingEnabled = false
+        });
+
+        var text = response.Messages.Single().Text;
+        Assert.NotNull(text);
+        Assert.StartsWith("{", text.TrimStart(), StringComparison.Ordinal);
+        Assert.EndsWith("}", text.TrimEnd(), StringComparison.Ordinal);
+
+        using var parsed = System.Text.Json.JsonDocument.Parse(text);
+        Assert.Equal("你好，我是菲菲，有什么可以帮你的吗？", parsed.RootElement.GetProperty("greeting").GetString());
+    }
+
+    [Fact]
+    public async Task NonStreamingQwen35_NoThinkingRequest_WritesTopLevelVllmFields()
+    {
+        const string jsonResponse = """
+{
+  "id": "chatcmpl-enable-thinking",
+  "object": "chat.completion",
+  "created": 1771436118,
+  "model": "qwen3.5-plus",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"ok\":true}"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}
+""";
+
+        var handler = new CaptureJsonHandler(jsonResponse);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmQwen3NextChatClient("https://example.test/{0}/{1}", "fake-token", "qwen3.5-plus", httpClient);
+
+        _ = await client.GetResponseAsync([new ChatMessage(ChatRole.User, "输出 JSON")], new VllmChatOptions
+        {
+            ThinkingEnabled = false
+        });
+
+        Assert.False(string.IsNullOrWhiteSpace(handler.LastRequestBody));
+        using var doc = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody!);
+        Assert.True(doc.RootElement.TryGetProperty("enable_thinking", out var enableThinking));
+        Assert.False(enableThinking.GetBoolean());
+
+        Assert.True(doc.RootElement.TryGetProperty("chat_template_kwargs", out var chatTemplateKwargs));
+        Assert.True(chatTemplateKwargs.TryGetProperty("enable_thinking", out var nestedEnableThinking));
+        Assert.False(nestedEnableThinking.GetBoolean());
+    }
+
     private sealed class FakeStreamingHandler(string ssePayload) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -421,6 +501,24 @@ data: [DONE]
                 Content = new StringContent(payload, Encoding.UTF8, "application/json")
             };
             return Task.FromResult(response);
+        }
+    }
+
+    private sealed class CaptureJsonHandler(string jsonPayload) : HttpMessageHandler
+    {
+        public string? LastRequestBody { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastRequestBody = request.Content is null
+                ? null
+                : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
+            };
+            return response;
         }
     }
 }

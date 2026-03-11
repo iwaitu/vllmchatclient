@@ -14,6 +14,21 @@ namespace Microsoft.Extensions.AI
         {
             var request = base.ToVllmChatRequest(messages, options, stream);
             request.ToolChoice = null;
+
+            if (options is VllmChatOptions vllmOptions)
+            {
+                request.EnableThinking = vllmOptions.ThinkingEnabled;
+
+                var modelId = options?.ModelId ?? Metadata.DefaultModelId;
+                if (!string.IsNullOrWhiteSpace(modelId) && modelId.StartsWith("qwen3.5", StringComparison.OrdinalIgnoreCase))
+                {
+                    request.ChatTemplateKwargs = new Dictionary<string, object?>
+                    {
+                        ["enable_thinking"] = vllmOptions.ThinkingEnabled
+                    };
+                }
+            }
+
             return request;
         }
 
@@ -31,8 +46,11 @@ namespace Microsoft.Extensions.AI
                     if (item is DataContent dataContent && dataContent.HasTopLevelMediaType("image"))
                     {
                         var modelId = options?.ModelId ?? Metadata.DefaultModelId;
-                        if (string.IsNullOrWhiteSpace(modelId) ||
-                            !modelId.StartsWith("qwen3-vl", StringComparison.OrdinalIgnoreCase))
+                        var supportsMultimodal = !string.IsNullOrWhiteSpace(modelId) &&
+                            (modelId.StartsWith("qwen3-vl", StringComparison.OrdinalIgnoreCase) ||
+                             modelId.StartsWith("qwen3.5", StringComparison.OrdinalIgnoreCase));
+
+                        if (!supportsMultimodal)
                         {
                             throw new InvalidOperationException("当前模型不支持多模态");
                         }

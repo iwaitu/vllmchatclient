@@ -10,3 +10,6 @@
 
 ## Project-Specific Rules
 - The new client class name should be `VllmOpenAiGptClient`.
+- For Qwen3.5 provider compatibility, use the following request format based on the API URL:
+  - Use top-level `enable_thinking` for `aliyuncs.com` official endpoints.
+  - Otherwise, use `chat_template_kwargs.enable_thinking`.

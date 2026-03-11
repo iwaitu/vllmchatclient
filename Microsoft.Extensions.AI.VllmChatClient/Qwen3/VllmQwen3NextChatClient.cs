@@ -10,6 +10,16 @@ namespace Microsoft.Extensions.AI
     {
         protected override bool EnableLegacyToolCallTextFallback(ChatOptions? options) => true;
 
+        private bool UseAliyunThinkingParameter()
+        {
+            var endpoint = ApiChatEndpoint
+                .Replace("{0}", "v1", StringComparison.Ordinal)
+                .Replace("{1}", "chat/completions", StringComparison.Ordinal);
+
+            return Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
+                && uri.Host.EndsWith("aliyuncs.com", StringComparison.OrdinalIgnoreCase);
+        }
+
         private protected override VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
             var request = base.ToVllmChatRequest(messages, options, stream);
@@ -17,15 +27,22 @@ namespace Microsoft.Extensions.AI
 
             if (options is VllmChatOptions vllmOptions)
             {
-                request.EnableThinking = vllmOptions.ThinkingEnabled;
-
                 var modelId = options?.ModelId ?? Metadata.DefaultModelId;
                 if (!string.IsNullOrWhiteSpace(modelId) && modelId.StartsWith("qwen3.5", StringComparison.OrdinalIgnoreCase))
                 {
-                    request.ChatTemplateKwargs = new Dictionary<string, object?>
+                    if (UseAliyunThinkingParameter())
                     {
-                        ["enable_thinking"] = vllmOptions.ThinkingEnabled
-                    };
+                        request.EnableThinking = vllmOptions.ThinkingEnabled;
+                        request.ChatTemplateKwargs = null;
+                    }
+                    else
+                    {
+                        request.EnableThinking = null;
+                        request.ChatTemplateKwargs = new Dictionary<string, object?>
+                        {
+                            ["enable_thinking"] = vllmOptions.ThinkingEnabled
+                        };
+                    }
                 }
             }
 

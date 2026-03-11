@@ -91,6 +91,12 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ### 📝 其他更新
 
 - 新增 **Qwen 3.5** 支持（`qwen3.5-397b-a17b`），通过 `VllmQwen3NextChatClient` 接入。
+- `VllmQwen3NextChatClient` 新增 **Qwen3.5 提供商兼容逻辑**：
+  - 当 API URL 的 host 以 `aliyuncs.com` 结尾时，按阿里云官方接口发送顶层 `enable_thinking`。
+  - 其他端点（如自建 vLLM / OpenAI 兼容网关）按顶层 `chat_template_kwargs.enable_thinking` 发送。
+- `VllmQwen3NextChatClient` 默认启用 legacy 文本工具调用兜底，兼容 Qwen3/Qwen3.5 返回的 `<tool_call>...</tool_call>` 格式。
+- 修复 Qwen3Next 非流式普通 JSON 文本误清洗问题：仅在存在真实工具调用残留时清理标签，避免误删 JSON 外层花括号。
+- Qwen3.5 前缀模型已放宽为支持多模态输入（图片）。
 - 新增 **MiniMax-M2.5** 支持，`VllmMiniMaxChatClient` 兼容 M2.5 / M2.1。
 - 新增 **GLM 4.7 Flash** 支持。
 - 新增 GLM 4.6/4.7/5 思维链支持：`VllmGlmChatClient`，支持推理分段流式输出（思考/答案）与函数调用。
@@ -262,6 +268,42 @@ docker run -it --gpus all -p 8000:8000 \
   --gpu_memory_utilization 0.8 \
   --served-model-name "qwen3"
 ```
+
+### 🆕 Qwen3.5 Thinking Toggle Compatibility
+
+`VllmQwen3NextChatClient` now switches the no-thinking request format based on the API URL:
+
+- **Alibaba Cloud / DashScope** (`*.aliyuncs.com`) → top-level `enable_thinking`
+- **Self-hosted vLLM / OpenAI-compatible gateways** → top-level `chat_template_kwargs.enable_thinking`
+
+```csharp
+using Microsoft.Extensions.AI;
+
+var client = new VllmQwen3NextChatClient(
+    "https://your-vllm-endpoint/v1/{1}",
+    apiKey,
+    "qwen3.5-122b-a10b");
+
+var messages = new List<ChatMessage>
+{
+    new(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+    new(ChatRole.User, "请仅输出单个json对象格式的问候语，不要输出任何解释、前后缀文本、markdown或 codeblock。")
+};
+
+var options = new VllmChatOptions
+{
+    ThinkingEnabled = false,
+    MaxOutputTokens = 1024,
+};
+
+var response = await client.GetResponseAsync(messages, options);
+Console.WriteLine(response.Text);
+```
+
+For Qwen3.5 models, `VllmQwen3NextChatClient` also supports:
+
+- multimodal image input for `qwen3.5*` model IDs
+- legacy text tool-call fallback for `<tool_call>...</tool_call>` outputs
 
 ### QwQ vLLM Deployment:
 ```bash

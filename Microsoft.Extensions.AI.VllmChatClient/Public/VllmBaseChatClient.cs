@@ -721,14 +721,16 @@ namespace Microsoft.Extensions.AI
 
         private protected virtual IEnumerable<ChatMessage> PrepareMessagesWithSkills(IEnumerable<ChatMessage> messages, ChatOptions? options)
         {
+            var messageList = messages.ToList();
+
             if (options is not VllmChatOptions vllmOptions)
             {
-                return messages;
+                return messageList;
             }
 
             if (!vllmOptions.EnableSkills && string.IsNullOrWhiteSpace(vllmOptions.SkillDirectoryPath))
             {
-                return messages;
+                return messageList;
             }
 
             // Inject built-in skill AIFunctions into options.Tools so that
@@ -753,10 +755,24 @@ namespace Microsoft.Extensions.AI
             var skillInstruction = LoadSkillInstruction(vllmOptions.SkillDirectoryPath);
             if (string.IsNullOrWhiteSpace(skillInstruction))
             {
-                return messages;
+                return messageList;
             }
 
-            return [new ChatMessage(ChatRole.System, skillInstruction), .. messages];
+            if (messageList.Count > 0 && messageList[0].Role == ChatRole.System)
+            {
+                var existingSystemText = string.Join(
+                    "\n",
+                    messageList[0].Contents.OfType<TextContent>().Select(tc => tc.Text).Where(static text => !string.IsNullOrWhiteSpace(text)));
+
+                var mergedSystemText = string.IsNullOrWhiteSpace(existingSystemText)
+                    ? skillInstruction
+                    : $"{skillInstruction}\n\n{existingSystemText}";
+
+                messageList[0] = new ChatMessage(ChatRole.System, mergedSystemText);
+                return messageList;
+            }
+
+            return [new ChatMessage(ChatRole.System, skillInstruction), .. messageList];
         }
 
         private static string? LoadSkillInstruction(string? skillDirectoryPath)

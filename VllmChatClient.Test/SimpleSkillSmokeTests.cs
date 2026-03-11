@@ -111,6 +111,41 @@ public class SimpleSkillSmokeTests
         Assert.Contains("ReadSkillFile", toolNames);
     }
 
+    [Fact]
+    public async Task ExistingSystemMessageIsMergedWithSkillInstruction()
+    {
+        var skillsDir = GetSkillsDir();
+
+        var handler = new FakeResponseHandler();
+        using var httpClient = new HttpClient(handler);
+        var localClient = new VllmMiniMaxChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", httpClient: httpClient, modelId: MODEL);
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, "You are the project copilot."),
+            new(ChatRole.User, "hello")
+        };
+        var options = new VllmChatOptions
+        {
+            EnableSkills = true,
+            SkillDirectoryPath = skillsDir
+        };
+
+        await localClient.GetResponseAsync(messages, options);
+
+        Assert.NotNull(handler.LastRequestBody);
+        using var doc = JsonDocument.Parse(handler.LastRequestBody!);
+        var requestMessages = doc.RootElement.GetProperty("messages");
+
+        Assert.Equal(2, requestMessages.GetArrayLength());
+        Assert.Equal("system", requestMessages[0].GetProperty("role").GetString());
+        Assert.Equal("user", requestMessages[1].GetProperty("role").GetString());
+
+        var systemText = requestMessages[0].GetProperty("content").GetString()!;
+        Assert.Contains("Skill: simple", systemText);
+        Assert.Contains("You are the project copilot.", systemText);
+    }
+
     /// <summary>
     /// 验证内置工具与用户自定义工具合并。
     /// </summary>

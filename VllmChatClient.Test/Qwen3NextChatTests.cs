@@ -28,7 +28,7 @@ namespace VllmChatClient.Test
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-235b-a22b-thinking-2507"); //测试通过
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-235b-a22b-instruct-2507"); //测试通过
-            _client = new VllmQwen3NextChatClient("http://localhost:8000/v1/{1}", cloud_apiKey, "Qwen3.5-122B-A10B");
+            _client = new VllmQwen3NextChatClient("http://localhost:8000/v1/{1}", cloud_apiKey, "qwen3.5-122b-a10b");
             _output = output;
         }
 
@@ -375,6 +375,66 @@ namespace VllmChatClient.Test
             Assert.False(string.IsNullOrWhiteSpace(result.Text));
 
             _output.WriteLine($"Response: {result.Text}");
+        }
+
+        [Fact]
+        public async Task Nothinking_TestStreamJsonOuput()
+        {
+            if (_skipTests)
+            {
+                return;
+            }
+
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User, "请仅输出单个json对象格式的问候语，不要输出任何解释、前后缀文本、markdown或 codeblock。")
+            };
+
+            var options = new VllmChatOptions
+            {
+                ThinkingEnabled = false,
+                MaxOutputTokens = 1024,
+            };
+
+            string text = string.Empty;
+            string reason = string.Empty;
+            await foreach (var update in _client.GetStreamingResponseAsync(messages, options))
+            {
+                if (update is ReasoningChatResponseUpdate reasoningUpdate)
+                {
+                    if (reasoningUpdate.Thinking)
+                    {
+                        reason += reasoningUpdate.Text;
+                    }
+                    else
+                    {
+                        text += reasoningUpdate.Text;
+                    }
+                }
+                else
+                {
+                    text += update.Text;
+                }
+            }
+
+            Assert.False(string.IsNullOrWhiteSpace(text));
+            Assert.True(string.IsNullOrWhiteSpace(reason), $"关闭思维链后流式输出不应返回 reasoning 内容: '{reason}'");
+
+            var cleaned = Regex.Replace(text, "<think>.*?</think>\\n*", string.Empty, RegexOptions.Singleline).Trim();
+
+            Assert.DoesNotContain("<think>", cleaned, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("</think>", cleaned, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("```", cleaned, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("```json", cleaned, StringComparison.OrdinalIgnoreCase);
+
+            var jsonText = TryExtractFirstJsonValue(cleaned);
+            Assert.False(string.IsNullOrWhiteSpace(jsonText), $"未找到JSON片段: '{cleaned}'");
+
+            var json = JsonDocument.Parse(jsonText!);
+            Assert.NotNull(json);
+            Assert.True(json.RootElement.ValueKind is JsonValueKind.Object or JsonValueKind.Array, $"输出不是有效JSON对象或数组: '{jsonText}'");
+            _output.WriteLine(cleaned);
         }
 
         [Fact]

@@ -9,12 +9,12 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Nemotron-3 Super 120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5** with advanced reasoning capabilities.
 
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: OpenAI GPT 系列, Claude 4.6 / 4.5, Qwen3, Qwen3-Next, Qwen 3.5 (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-5 / GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.5
+- ✅ **Multi-model Support**: OpenAI GPT 系列, Claude 4.6 / 4.5, Nemotron-3 Super 120B, Qwen3, Qwen3-Next, Qwen 3.5 (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-5 / GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.5
 
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models (GLM supports Zhipu official thinking parameter via `GlmChatOptions.ThinkingEnabled`)
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
@@ -29,6 +29,13 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 本次更新
+
+### 🆕 Nemotron-3 Super 120B 思维链开关支持
+
+- **新增 `VllmNemotronChatClient` 请求适配**：面向 OpenRouter 的 `nvidia/nemotron-3-super-120b-a12b:free` 模型。
+- **思维链开关**：支持通过 `VllmChatOptions.ThinkingEnabled` 控制是否发送 `reasoning: { enabled: true|false }`。
+- **OpenRouter 端点兼容**：传入 `https://openrouter.ai/api/v1` 时会自动补全为 `/chat/completions`。
+- **新增兼容性测试**：验证 `reasoning.enabled` 在开关两种状态下都能正确发送。
 
 ### 🆕 Claude 4.6 / 4.5 思维链支持
   
@@ -112,6 +119,13 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 🔥 Latest Updates
+
+### 🆕 Nemotron-3 Super 120B Reasoning Toggle Support
+
+- **`VllmNemotronChatClient` updated**: tailored for the OpenRouter `nvidia/nemotron-3-super-120b-a12b:free` model.
+- **Reasoning toggle**: use `VllmChatOptions.ThinkingEnabled` to send `reasoning: { enabled: true|false }`.
+- **OpenRouter endpoint normalization**: `https://openrouter.ai/api/v1` is automatically normalized to `/chat/completions`.
+- **Compatibility tests added**: verifies the `reasoning.enabled` payload in both enabled and disabled modes.
 
 ### 🆕 Claude 4.6 / 4.5 Thinking Chain Support
 
@@ -230,6 +244,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 |--------|------------|---------------|-----------|----------------|
 | `VllmOpenAiGptClient` | OpenRouter/Cloud | OpenAI GPT Series | ✅ Full | ✅ Stream |
 | `VllmClaudeChatClient` | OpenRouter/Cloud | Claude 4.6 / 4.5 | ✅ Full | ✅ Stream |
+| `VllmNemotronChatClient` | OpenRouter/Cloud | Nemotron-3 Super 120B (`nvidia/nemotron-3-super-120b-a12b:free`) | ✅ Toggle (`reasoning.enabled`) | ❌ |
 | `VllmGptOssChatClient` | OpenRouter/Cloud | GPT-OSS-120B/20B | ✅ Full | ✅ Stream |
 | `VllmQwen3ChatClient` | Local vLLM | Qwen3-32B/235B | ✅ Toggle | ✅ Stream |
 | `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | Multiple modelIds (e.g. qwen3-next-80b-a3b-thinking / qwen3-next-80b-a3b-instruct) | ✅ (thinking model) | ✅ Stream |
@@ -426,6 +441,36 @@ await foreach (var update in claude.GetStreamingResponseAsync(messages, options)
             Console.Write(ru.Text); // Answer phase
     }
 }
+```
+
+### 🆕 Nemotron-3 Super 120B with Reasoning Toggle (OpenRouter)
+
+```csharp
+using Microsoft.Extensions.AI;
+
+IChatClient nemotron = new VllmNemotronChatClient(
+    "https://openrouter.ai/api/v1",
+    "your-openrouter-api-key",
+    "nvidia/nemotron-3-super-120b-a12b:free");
+
+var messages = new List<ChatMessage>
+{
+    new(ChatRole.User, "How many r's are in the word strawberry?")
+};
+
+var options = new VllmChatOptions
+{
+    ThinkingEnabled = true
+};
+
+var response = await nemotron.GetResponseAsync(messages, options);
+
+if (response is ReasoningChatResponse reasoningResponse)
+{
+    Console.WriteLine($"Thinking: {reasoningResponse.Reason}");
+}
+
+Console.WriteLine($"Answer: {response.Text}");
 ```
 
 ### 🆕 OpenAI GPT Series with Reasoning (OpenRouter)

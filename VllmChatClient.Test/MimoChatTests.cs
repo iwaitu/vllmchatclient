@@ -1,34 +1,33 @@
 ﻿using Microsoft.Extensions.AI;
-using Microsoft.VisualStudio.TestPlatform.Utilities;
+using Microsoft.Extensions.AI.VllmChatClient.Mimo;
+using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Xunit.Abstractions;
 
 namespace VllmChatClient.Test
 {
 
-    public class Qwen3NextChatTests
+    public class MimoChatTests
     {
         private readonly IChatClient _client;
         static int functionCallTime = 0;
         private readonly ITestOutputHelper _output;
         private readonly bool _skipTests;
 
-        public Qwen3NextChatTests(ITestOutputHelper output)
+        public MimoChatTests(ITestOutputHelper output)
         {
-            //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY");
-            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            var cloud_apiKey = Environment.GetEnvironmentVariable("XIAOMI_API_KEY");
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
-            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.5-122b-a10b");
-            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.5-397b-a17b");
-            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking");
-            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
-            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-235b-a22b-thinking-2507"); //测试通过
-            //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-235b-a22b-instruct-2507"); //测试通过
-            //_client = new VllmQwen3NextChatClient("http://localhost:8000/v1/{1}", cloud_apiKey, "qwen3.5-122b-a10b");
+            //_client = new VllmMimoChatClient("https://api.xiaomimimo.com/v1{1}", cloud_apiKey, "mimo-v2-pro");
+            _client = new VllmMimoChatClient("https://api.xiaomimimo.com/v1{1}", cloud_apiKey, "mimo-v2-flash");
             _output = output;
         }
 
@@ -63,7 +62,7 @@ namespace VllmChatClient.Test
                 var reasonResponse = res as ReasoningChatResponse;
                 Assert.NotNull(reasonResponse?.Reason);
             }
-            
+
 
         }
 
@@ -205,7 +204,7 @@ namespace VllmChatClient.Test
             _output.WriteLine($"Response: {res}");
         }
 
-        
+
 
         [Fact]
         public async Task StreamChatManualFunctionCallTest()
@@ -231,7 +230,7 @@ namespace VllmChatClient.Test
             string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
-                if(update.FinishReason == ChatFinishReason.ToolCalls)
+                if (update.FinishReason == ChatFinishReason.ToolCalls)
                 {
                     foreach (var fc in update.Contents.OfType<FunctionCallContent>())
                     {
@@ -244,14 +243,15 @@ namespace VllmChatClient.Test
                             {
                                 Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
                             });
-                        if(fc.Name == "GetWeather")
+                        if (fc.Name == "GetWeather")
                         {
                             var result = GetWeather();
                             messages.Add(new ChatMessage(
                                 ChatRole.Tool,
                                 [new FunctionResultContent(fc.CallId, result)]));
                             continue;
-                        }else if(fc.Name == "Search")
+                        }
+                        else if (fc.Name == "Search")
                         {
                             var args = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
                             Assert.NotNull(args);
@@ -282,7 +282,7 @@ namespace VllmChatClient.Test
                         res += update.Text;
                     }
                 }
-                    
+
             }
 
             Assert.False(string.IsNullOrWhiteSpace(res));
@@ -313,9 +313,9 @@ namespace VllmChatClient.Test
             string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
-                if(update is ReasoningChatResponseUpdate reasonUpdate)
+                if (update is ReasoningChatResponseUpdate reasonUpdate)
                 {
-                    if(reasonUpdate.Thinking)
+                    if (reasonUpdate.Thinking)
                         reason += reasonUpdate.Text;
                     else
                         res += reasonUpdate.Text;

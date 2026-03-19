@@ -15,7 +15,12 @@ internal sealed class VllmOpenAIChatRequest
     public bool? EnableThinking { get; set; }
     public Dictionary<string, object?>? ChatTemplateKwargs { get; set; }
     public VllmReasoningOptions? Reasoning { get; set; }
+    public float? Temperature { get; set; }
+    public float? TopP { get; set; }
     public int? MaxTokens { get; set; }
+    public int? MaxCompletionTokens { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("extra_body")]
+    public Dictionary<string, object?>? ExtraBody { get; set; }
     public VllmRequestOptions? Options { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("tool_choice")]
     public object? ToolChoice { get; set; }

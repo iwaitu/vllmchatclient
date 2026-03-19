@@ -13,11 +13,15 @@ namespace Microsoft.Extensions.AI
     public abstract class VllmBaseChatClient : IChatClient
     {
         private static readonly JsonElement _schemalessJsonResponseFormatValue = JsonDocument.Parse("\"json\"").RootElement;
-        private static readonly ConcurrentDictionary<string, (string? instruction, DateTime timestamp)> _skillInstructionCache = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, (SkillCatalog? catalog, DateTime timestamp)> _skillCatalogCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ChatClientMetadata _metadata;
         private readonly string _apiChatEndpoint;
         private readonly HttpClient _httpClient;
         private JsonSerializerOptions _toolCallJsonSerializerOptions = AIJsonUtilities.DefaultOptions;
+
+        private sealed record SkillCatalog(string Instruction, SkillManifest[] Skills);
+
+        private sealed record SkillManifest(string Name, string Description, string FileName, string RelativePath, string FullPath);
 
         protected VllmBaseChatClient(string endpoint, string? token, string? modelId, HttpClient? httpClient)
         {
@@ -752,11 +756,13 @@ namespace Microsoft.Extensions.AI
                 }
             }
 
-            var skillInstruction = LoadSkillInstruction(vllmOptions.SkillDirectoryPath);
-            if (string.IsNullOrWhiteSpace(skillInstruction))
+            var skillCatalog = LoadSkillCatalog(vllmOptions.SkillDirectoryPath);
+            if (string.IsNullOrWhiteSpace(skillCatalog?.Instruction))
             {
                 return messageList;
             }
+
+            var skillInstruction = skillCatalog.Instruction;
 
             if (messageList.Count > 0 && messageList[0].Role == ChatRole.System)
             {
@@ -775,117 +781,268 @@ namespace Microsoft.Extensions.AI
             return [new ChatMessage(ChatRole.System, skillInstruction), .. messageList];
         }
 
-        private static string? LoadSkillInstruction(string? skillDirectoryPath)
+        private static SkillCatalog? LoadSkillCatalog(string? skillDirectoryPath)
         {
             var effectiveDirectory = string.IsNullOrWhiteSpace(skillDirectoryPath)
                 ? Path.Combine(Directory.GetCurrentDirectory(), "skills")
                 : Path.GetFullPath(skillDirectoryPath);
 
+            return LoadSkillCatalogFromDirectory(effectiveDirectory);
+        }
+
+        private static SkillCatalog? LoadSkillCatalogFromDirectory(string effectiveDirectory)
+        {
             try
             {
                 if (!Directory.Exists(effectiveDirectory))
                 {
-                    return null; // 不缓存，下次继续检查
+                    return null;
                 }
 
-                var dirInfo = new DirectoryInfo(effectiveDirectory);
-                var lastWrite = dirInfo.LastWriteTimeUtc;
-
-                // 检查缓存是否有效
-                if (_skillInstructionCache.TryGetValue(effectiveDirectory, out var cached)
-                    && cached.timestamp >= lastWrite
-                    && cached.instruction != null)
-                {
-                    return cached.instruction;
-                }
-
-                // 扫描顶层 *.md 文件
-                var topLevelSkills = Directory
-                    .EnumerateFiles(effectiveDirectory, "*.md", SearchOption.TopDirectoryOnly)
-                    .Select(file => (title: Path.GetFileNameWithoutExtension(file), path: file))
-                    .ToList();
-
-                // 扫描子目录中的 SKILL.md 文件（例如 ./skills/test/SKILL.md）
-                var subDirSkills = Directory
-                    .EnumerateDirectories(effectiveDirectory)
-                    .Select(dir =>
-                    {
-                        var skillMd = Path.Combine(dir, "SKILL.md");
-                        if (File.Exists(skillMd))
-                        {
-                            return (title: Path.GetFileName(dir), path: skillMd);
-                        }
-                        // 也支持小写 skill.md
-                        var skillMdLower = Path.Combine(dir, "skill.md");
-                        if (File.Exists(skillMdLower))
-                        {
-                            return (title: Path.GetFileName(dir), path: skillMdLower);
-                        }
-                        return (title: (string?)null, path: (string?)null);
-                    })
-                    .Where(x => x.title != null)
-                    .Select(x => (title: x.title!, path: x.path!))
-                    .ToList();
-
-                var allSkillFiles = topLevelSkills
-                    .Concat(subDirSkills)
-                    .OrderBy(x => x.title, StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-
-                if (allSkillFiles.Length == 0)
-                {
-                    return null; // 不缓存空结果
-                }
-
-                var sections = allSkillFiles
-                    .Select(skill =>
-                    {
-                        try
-                        {
-                            var content = File.ReadAllText(skill.path).Trim();
-                            return string.IsNullOrWhiteSpace(content)
-                                ? null
-                                : $"## Skill: {skill.title}\n{content}";
-                        }
-                        catch (Exception)
-                        {
-                            return null; // 单个文件失败不影响其他
-                        }
-                    })
-                    .Where(section => section is not null)
-                    .Cast<string>()
-                    .ToArray();
-
-                if (sections.Length == 0)
+                var skillFiles = EnumerateSkillFiles(effectiveDirectory).ToArray();
+                if (skillFiles.Length == 0)
                 {
                     return null;
                 }
 
-                var instruction = $"""
-                    # Skills
-                    
-                    You have {sections.Length} skill(s) loaded from the local skills directory.
-                    Based on the user's question, select the most relevant skill(s) and follow the instructions defined in them.
-                    If no skill is relevant, answer the question directly without referencing any skill.
-                    If the user's question relates to multiple skills, combine the instructions from all applicable skills.
-                    
-                    You also have two built-in tools:
-                    - **ListSkillFiles**: Lists all available skill files (.md) in the skills directory.
-                    - **ReadSkillFile**: Reads the full content of a specific skill file by filename.
-                    Use these tools when the user asks to browse, inspect, or discover available skills.
-                    
-                    {string.Join("\n\n", sections)}
-                    """;
+                var lastWrite = skillFiles.Max(skill => File.GetLastWriteTimeUtc(skill.FullPath));
 
-                // 仅缓存有效结果
-                _skillInstructionCache[effectiveDirectory] = (instruction, lastWrite);
-                return instruction;
+                if (_skillCatalogCache.TryGetValue(effectiveDirectory, out var cached)
+                    && cached.timestamp >= lastWrite
+                    && cached.catalog is not null)
+                {
+                    return cached.catalog;
+                }
+
+                var manifests = skillFiles
+                    .Select(skill => TryLoadSkillManifest(skill.FullPath, skill.RelativePath))
+                    .Where(skill => skill is not null)
+                    .Cast<SkillManifest>()
+                    .OrderBy(skill => skill.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                if (manifests.Length == 0)
+                {
+                    return null;
+                }
+
+                var catalog = new SkillCatalog(BuildSkillCatalogInstruction(manifests), manifests);
+                _skillCatalogCache[effectiveDirectory] = (catalog, lastWrite);
+                return catalog;
             }
             catch (Exception)
             {
-                // 任何异常都静默处理，视为 skill 加载失败
                 return null;
             }
+        }
+
+        private static IEnumerable<(string RelativePath, string FullPath)> EnumerateSkillFiles(string effectiveDirectory)
+        {
+            foreach (var file in Directory
+                .EnumerateFiles(effectiveDirectory, "*.md", SearchOption.TopDirectoryOnly)
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            {
+                yield return (Path.GetFileName(file)!, file);
+            }
+
+            foreach (var dir in Directory.EnumerateDirectories(effectiveDirectory).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            {
+                var dirName = Path.GetFileName(dir);
+                var skillMd = Path.Combine(dir, "SKILL.md");
+                if (File.Exists(skillMd))
+                {
+                    yield return ($"{dirName}/SKILL.md", skillMd);
+                    continue;
+                }
+
+                var skillMdLower = Path.Combine(dir, "skill.md");
+                if (File.Exists(skillMdLower))
+                {
+                    yield return ($"{dirName}/skill.md", skillMdLower);
+                }
+            }
+        }
+
+        private static SkillManifest? TryLoadSkillManifest(string filePath, string relativePath)
+        {
+            try
+            {
+                var content = File.ReadAllText(filePath);
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    return null;
+                }
+
+                var fallbackName = GetFallbackSkillName(filePath, relativePath);
+                var descriptionSource = content;
+                string? name = null;
+                string? description = null;
+
+                var frontMatterMatch = Regex.Match(
+                    content,
+                    @"\A---\s*\r?\n(?<frontmatter>[\s\S]*?)\r?\n---\s*(?:\r?\n)?(?<body>[\s\S]*)\z",
+                    RegexOptions.CultureInvariant);
+
+                if (frontMatterMatch.Success)
+                {
+                    var frontMatter = frontMatterMatch.Groups["frontmatter"].Value;
+                    descriptionSource = frontMatterMatch.Groups["body"].Value;
+                    name = TryGetFrontMatterValue(frontMatter, "name");
+                    description = TryGetFrontMatterValue(frontMatter, "description");
+                }
+
+                name = string.IsNullOrWhiteSpace(name) ? fallbackName : name.Trim();
+                description = string.IsNullOrWhiteSpace(description)
+                    ? BuildFallbackSkillDescription(descriptionSource)
+                    : NormalizeSkillDescription(description);
+
+                if (string.IsNullOrWhiteSpace(description))
+                {
+                    description = $"Use this skill when the task relates to {name}.";
+                }
+
+                return new SkillManifest(name, description, Path.GetFileName(filePath)!, relativePath, filePath);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private static string GetFallbackSkillName(string filePath, string relativePath)
+        {
+            return Path.GetFileName(filePath).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase)
+                || Path.GetFileName(filePath).Equals("skill.md", StringComparison.OrdinalIgnoreCase)
+                ? Path.GetFileName(Path.GetDirectoryName(filePath)) ?? Path.GetFileNameWithoutExtension(relativePath)
+                : Path.GetFileNameWithoutExtension(relativePath);
+        }
+
+        private static string? TryGetFrontMatterValue(string frontMatter, string key)
+        {
+            var match = Regex.Match(
+                frontMatter,
+                $@"^\s*{Regex.Escape(key)}\s*:\s*(?<value>.+?)\s*$",
+                RegexOptions.Multiline | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+            if (!match.Success)
+            {
+                return null;
+            }
+
+            return match.Groups["value"].Value.Trim().Trim('\'', '"');
+        }
+
+        private static string? BuildFallbackSkillDescription(string content)
+        {
+            foreach (var rawLine in content.Split(["\r\n", "\n"], StringSplitOptions.None))
+            {
+                var line = rawLine.Trim();
+                if (string.IsNullOrWhiteSpace(line)
+                    || line == "---"
+                    || line.StartsWith("```", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (line.StartsWith("#", StringComparison.Ordinal))
+                {
+                    line = line.TrimStart('#').Trim();
+                }
+
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                return NormalizeSkillDescription(line);
+            }
+
+            return null;
+        }
+
+        private static string NormalizeSkillDescription(string description)
+        {
+            var normalized = Regex.Replace(description.Trim(), @"\s+", " ");
+            return normalized.Length <= 240 ? normalized : normalized[..237] + "...";
+        }
+
+        private static string BuildSkillCatalogInstruction(IEnumerable<SkillManifest> manifests)
+        {
+            var sections = manifests
+                .Select(skill => $"## Skill: {skill.Name}\nDescription: {skill.Description}\nFile: {skill.RelativePath}")
+                .ToArray();
+
+            return $"""
+                # Skills
+
+                You have {sections.Length} skill(s) available from the local skills directory.
+                Only the skill metadata below is loaded into context right now.
+                Based on the user's question, first select the most relevant skill by name and description.
+                When you need the full instructions for a skill, call ReadSkillFile with the skill name or file name to load that skill's markdown content.
+                If no skill is relevant, answer the question directly without referencing any skill.
+                If multiple skills are relevant, read the necessary skill files and combine their instructions.
+
+                You also have built-in tools:
+                - ListSkillFiles: Lists available skills with their names, descriptions, and file names.
+                - ReadSkillFile: Reads the full markdown content of a specific skill on demand.
+
+                {string.Join("\n\n", sections)}
+                """;
+        }
+
+        private static SkillManifest? ResolveSkillManifest(string skillsDir, string identifier)
+        {
+            var normalizedIdentifier = identifier.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedIdentifier))
+            {
+                return null;
+            }
+
+            var catalog = LoadSkillCatalogFromDirectory(skillsDir);
+            if (catalog?.Skills is not { Length: > 0 } skills)
+            {
+                return null;
+            }
+
+            return skills
+                .Select(skill => new
+                {
+                    Skill = skill,
+                    Score =
+                        string.Equals(skill.RelativePath, normalizedIdentifier, StringComparison.OrdinalIgnoreCase) ? 0 :
+                        string.Equals(skill.FileName, normalizedIdentifier, StringComparison.OrdinalIgnoreCase) ? 1 :
+                        string.Equals(skill.Name, normalizedIdentifier, StringComparison.OrdinalIgnoreCase) ? 2 :
+                        Path.GetFileNameWithoutExtension(skill.FileName).Equals(normalizedIdentifier, StringComparison.OrdinalIgnoreCase) ? 3 :
+                        Path.GetDirectoryName(skill.RelativePath)?.Replace('\\', '/').TrimEnd('/').Equals(normalizedIdentifier, StringComparison.OrdinalIgnoreCase) == true ? 4 :
+                        int.MaxValue
+                })
+                .Where(match => match.Score != int.MaxValue)
+                .OrderBy(match => match.Score)
+                .ThenBy(match => match.Skill.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(match => match.Skill)
+                .FirstOrDefault();
+        }
+
+        private static bool TryGetPathUnderDirectory(string rootDirectory, string relativePath, out string fullPath)
+        {
+            fullPath = string.Empty;
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                return false;
+            }
+
+            var normalizedRoot = Path.GetFullPath(rootDirectory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var candidatePath = Path.GetFullPath(Path.Combine(normalizedRoot, relativePath));
+
+            if (!candidatePath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(candidatePath, normalizedRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            fullPath = candidatePath;
+            return true;
         }
 
         private protected virtual VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
@@ -1060,37 +1217,15 @@ namespace Microsoft.Extensions.AI
                         return "No skills directory found.";
                     }
 
-                    var results = new List<string>();
-
-                    // 顶层 *.md 文件
-                    var topLevelFiles = Directory.EnumerateFiles(skillsDir, "*.md", SearchOption.TopDirectoryOnly)
-                        .Select(Path.GetFileName)
-                        .Where(f => f != null)
-                        .Cast<string>();
-                    results.AddRange(topLevelFiles);
-
-                    // 子目录中的 SKILL.md
-                    foreach (var dir in Directory.EnumerateDirectories(skillsDir))
-                    {
-                        var dirName = Path.GetFileName(dir);
-                        var skillMd = Path.Combine(dir, "SKILL.md");
-                        var skillMdLower = Path.Combine(dir, "skill.md");
-                        if (File.Exists(skillMd))
-                        {
-                            results.Add($"{dirName}/ (SKILL.md)");
-                        }
-                        else if (File.Exists(skillMdLower))
-                        {
-                            results.Add($"{dirName}/ (skill.md)");
-                        }
-                    }
-
-                    return results.Count > 0
-                        ? string.Join("\n", results.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                    var manifests = LoadSkillCatalogFromDirectory(skillsDir)?.Skills;
+                    return manifests is { Length: > 0 }
+                        ? string.Join(
+                            "\n",
+                            manifests.Select(skill => $"{skill.Name} | {skill.RelativePath} | {skill.Description}"))
                         : "No skill files found.";
                 },
                 "ListSkillFiles",
-                "List all available skill files (.md) in the skills directory, including subdirectory skills.");
+                "List available skills with their names, descriptions, and file names.");
 
             yield return AIFunctionFactory.Create(
                 [Description("Read the full content of a specific skill file. For top-level files, use filename directly. For subdirectory skills, use 'dirname/SKILL.md' format.")]
@@ -1100,16 +1235,26 @@ namespace Microsoft.Extensions.AI
                     {
                         return "Error: No filename provided.";
                     }
-                    var filePath = Path.Combine(skillsDir, fileName);
+                    var manifest = ResolveSkillManifest(skillsDir, fileName);
+                    if (manifest is not null)
+                    {
+                        return File.ReadAllText(manifest.FullPath);
+                    }
+
+                    if (!TryGetPathUnderDirectory(skillsDir, fileName, out var filePath))
+                    {
+                        return $"File '{fileName}' not found.";
+                    }
+
                     if (!File.Exists(filePath))
                     {
-                        // 尝试子目录中的 SKILL.md
-                        var subDirSkill = Path.Combine(skillsDir, fileName, "SKILL.md");
+                        var subDirSkill = Path.Combine(filePath, "SKILL.md");
                         if (File.Exists(subDirSkill))
                         {
                             return File.ReadAllText(subDirSkill);
                         }
-                        var subDirSkillLower = Path.Combine(skillsDir, fileName, "skill.md");
+
+                        var subDirSkillLower = Path.Combine(filePath, "skill.md");
                         if (File.Exists(subDirSkillLower))
                         {
                             return File.ReadAllText(subDirSkillLower);
@@ -1137,7 +1282,11 @@ namespace Microsoft.Extensions.AI
 
                     try
                     {
-                        var filePath = Path.Combine(skillsDir, fileName);
+                        if (!TryGetPathUnderDirectory(skillsDir, fileName, out var filePath))
+                        {
+                            return $"Error creating skill file: '{fileName}' is outside the skills directory.";
+                        }
+
                         var directory = Path.GetDirectoryName(filePath);
                         if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                         {
@@ -1147,7 +1296,7 @@ namespace Microsoft.Extensions.AI
                         File.WriteAllText(filePath, content);
                         
                         // Invalidate cache for this directory so the new skill is picked up immediately
-                        _skillInstructionCache.TryRemove(skillsDir, out _);
+                        _skillCatalogCache.TryRemove(skillsDir, out _);
 
                         return $"Skill file '{fileName}' created successfully.";
                     }

@@ -1,8 +1,4 @@
-﻿using Microsoft.Extensions.AI;
-using System.Collections.Generic;
-using System.Net.Http;
-
-namespace Microsoft.Extensions.AI.VllmChatClient.Glm4
+﻿namespace Microsoft.Extensions.AI
 {
     public class VllmGlmChatClient : VllmBaseChatClient
     {

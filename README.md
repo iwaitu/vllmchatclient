@@ -9,12 +9,12 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Nemotron-3 Super 120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Nemotron-3 Super 120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5**, **MiMo v2 Pro / MiMo v2 Flash** with advanced reasoning capabilities.
 
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: OpenAI GPT 系列, Claude 4.6 / 4.5, Nemotron-3 Super 120B, Qwen3, Qwen3-Next, Qwen 3.5 (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-5 / GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.5
+- ✅ **Multi-model Support**: OpenAI GPT 系列, Claude 4.6 / 4.5, Nemotron-3 Super 120B, Qwen3, Qwen3-Next, Qwen 3.5 (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-5 / GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.5, MiMo v2 Pro / MiMo v2 Flash
 
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models (GLM supports Zhipu official thinking parameter via `GlmChatOptions.ThinkingEnabled`)
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
@@ -29,6 +29,13 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 本次更新
+
+### 🆕 MiMo 与命名空间调整
+
+- **新增 `VllmMimoChatClient`**：新增对小米 MiMo 云端接口的适配，支持 `mimo-v2-pro`、`mimo-v2-flash`。
+- **MiMo 请求兼容**：使用 `api-key` 请求头，并按官方 OpenAI 兼容接口发送 `extra_body: { "thinking": { "type": "enabled" | "disabled" } }`。
+- **命名空间调整**：`VllmGlmChatClient` 从 `Microsoft.Extensions.AI.VllmChatClient.Glm4` 调整为 `Microsoft.Extensions.AI`。
+- **命名空间调整**：`VllmKimiK2ChatClient` 从 `Microsoft.Extensions.AI.VllmChatClient.Kimi` 调整为 `Microsoft.Extensions.AI`。
 
 ### 🆕 Nemotron-3 Super 120B 思维链开关支持
 
@@ -98,6 +105,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ### 📝 其他更新
 
 - 新增 **Qwen 3.5** 支持（`qwen3.5-397b-a17b`），通过 `VllmQwen3NextChatClient` 接入。
+- 新增 **MiMo** 支持：`VllmMimoChatClient` 支持 `mimo-v2-pro`、`mimo-v2-flash`。
 - `VllmQwen3NextChatClient` 新增 **Qwen3.5 提供商兼容逻辑**：
   - 当 API URL 的 host 以 `aliyuncs.com` 结尾时，按阿里云官方接口发送顶层 `enable_thinking`。
   - 其他端点（如自建 vLLM / OpenAI 兼容网关）按顶层 `chat_template_kwargs.enable_thinking` 发送。
@@ -119,6 +127,13 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 🔥 Latest Updates
+
+### 🆕 MiMo Support and Namespace Changes
+
+- **`VllmMimoChatClient` added**: supports Xiaomi MiMo cloud models `mimo-v2-pro` and `mimo-v2-flash`.
+- **MiMo request compatibility**: uses the `api-key` header and sends `extra_body: { "thinking": { "type": "enabled" | "disabled" } }` for thinking control.
+- **Namespace change**: `VllmGlmChatClient` moved from `Microsoft.Extensions.AI.VllmChatClient.Glm4` to `Microsoft.Extensions.AI`.
+- **Namespace change**: `VllmKimiK2ChatClient` moved from `Microsoft.Extensions.AI.VllmChatClient.Kimi` to `Microsoft.Extensions.AI`.
 
 ### 🆕 Nemotron-3 Super 120B Reasoning Toggle Support
 
@@ -258,6 +273,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmDeepseekV3ChatClient` | Cloud API (DashScope) | DeepSeek-V3.2 | ✅ (via `VllmChatOptions`) | ✅ Stream |
 | `VllmGlmChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-5 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5 | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
 | `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) / kimi-k2.5 | ✅ (thinking model) | ✅ Stream |
+| `VllmMimoChatClient` | Cloud API (Xiaomi MiMo) | mimo-v2-pro / mimo-v2-flash | ✅ Toggle (via `extra_body.thinking.type`) | ✅ Stream |
 | `VllmMiniMaxChatClient` | Cloud API (DashScope) | MiniMax-M2.5 / M2.1 | ✅ | ✅ Stream |
 | `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3.5-397b-a17b | ✅ (thinking model) | ✅ Stream |
 
@@ -366,7 +382,6 @@ docker run -it --gpus all -p 8000:8000 \
 
 ```csharp
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.AI.VllmChatClient.Glm4;
 
 IChatClient glm46 = new VllmGlmChatClient(
     "http://localhost:8000/{0}/{1}", // or your OpenAI-compatible endpoint

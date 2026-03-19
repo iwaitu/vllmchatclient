@@ -1,8 +1,4 @@
-using Microsoft.Extensions.AI;
-using System.Collections.Generic;
-using System.Net.Http;
-
-namespace Microsoft.Extensions.AI.VllmChatClient.Kimi
+namespace Microsoft.Extensions.AI
 {
     public class VllmKimiK2ChatClient : VllmBaseChatClient
     {

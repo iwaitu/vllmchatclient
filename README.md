@@ -26,12 +26,15 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 **GitHub**: https://github.com/iwaitu/vllmchatclient
 
+**License**: MPL-2.0 (changed from MIT to Mozilla Public License 2.0)
+
 ---
 
 ## 本次更新
 
 ### 🆕 MiMo 与命名空间调整
 
+- **许可变更**：项目许可文件已从 `MIT` 修改为 `MPL-2.0`（Mozilla Public License 2.0）。
 - **新增 `VllmMimoChatClient`**：新增对小米 MiMo 云端接口的适配，支持 `mimo-v2-pro`、`mimo-v2-flash`。
 - **MiMo 请求兼容**：使用 `api-key` 请求头，并按官方 OpenAI 兼容接口发送 `extra_body: { "thinking": { "type": "enabled" | "disabled" } }`。
 - **命名空间调整**：`VllmGlmChatClient` 从 `Microsoft.Extensions.AI.VllmChatClient.Glm4` 调整为 `Microsoft.Extensions.AI`。
@@ -130,6 +133,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ### 🆕 MiMo Support and Namespace Changes
 
+- **License updated**: the project license file has changed from `MIT` to `MPL-2.0` (Mozilla Public License 2.0).
 - **`VllmMimoChatClient` added**: supports Xiaomi MiMo cloud models `mimo-v2-pro` and `mimo-v2-flash`.
 - **MiMo request compatibility**: uses the `api-key` header and sends `extra_body: { "thinking": { "type": "enabled" | "disabled" } }` for thinking control.
 - **Namespace change**: `VllmGlmChatClient` moved from `Microsoft.Extensions.AI.VllmChatClient.Glm4` to `Microsoft.Extensions.AI`.

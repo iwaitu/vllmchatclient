@@ -13,8 +13,8 @@
     <RepositoryUrl>https://github.com/iwaitu/vllmchatclient</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <Version>1.9.7</Version>
+    <PackageLicenseExpression>AGPL-3.0</PackageLicenseExpression>
+    <Version>1.9.8</Version>
   </PropertyGroup>
 
   <ItemGroup>

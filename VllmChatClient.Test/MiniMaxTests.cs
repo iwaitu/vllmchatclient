@@ -18,7 +18,7 @@ namespace VllmChatClient.Test
     {
         private readonly IChatClient _client;
         private readonly ITestOutputHelper _output;
-        private const string MODEL = "MiniMax/MiniMax-M2.5";
+        private const string MODEL = "MiniMax/MiniMax-M2.7";
         private readonly bool _skipTests;
         static int functionCallTime = 0;
 

@@ -22,7 +22,7 @@ namespace VllmChatClient.Test
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
-            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.5-122b-a10b");
+            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.6-plus");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.5-397b-a17b");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
@@ -111,12 +111,13 @@ namespace VllmChatClient.Test
                 .Build();
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我想到那附近去买书。")               //串行调用两个函数
             };
-            ChatOptions chatOptions = new()
+            VllmChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)]
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)],
+                ThinkingEnabled = true,
             };
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
@@ -394,7 +395,7 @@ namespace VllmChatClient.Test
             var options = new VllmChatOptions
             {
                 ThinkingEnabled = false,
-                MaxOutputTokens = 1024,
+                MaxOutputTokens = 2048,
             };
 
             string text = string.Empty;

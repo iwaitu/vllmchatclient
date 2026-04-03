@@ -28,7 +28,7 @@ namespace Microsoft.Extensions.AI
             if (options is VllmChatOptions vllmOptions)
             {
                 var modelId = options?.ModelId ?? Metadata.DefaultModelId;
-                if (!string.IsNullOrWhiteSpace(modelId) && modelId.StartsWith("qwen3.5", StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(modelId) && modelId.StartsWith("qwen3.", StringComparison.OrdinalIgnoreCase))
                 {
                     if (UseAliyunThinkingParameter())
                     {
@@ -65,7 +65,7 @@ namespace Microsoft.Extensions.AI
                         var modelId = options?.ModelId ?? Metadata.DefaultModelId;
                         var supportsMultimodal = !string.IsNullOrWhiteSpace(modelId) &&
                             (modelId.StartsWith("qwen3-vl", StringComparison.OrdinalIgnoreCase) ||
-                             modelId.StartsWith("qwen3.5", StringComparison.OrdinalIgnoreCase));
+                             modelId.StartsWith("qwen3.", StringComparison.OrdinalIgnoreCase));
 
                         if (!supportsMultimodal)
                         {

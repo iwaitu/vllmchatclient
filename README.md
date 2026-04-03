@@ -9,7 +9,7 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Nemotron-3 Super 120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **QwQ-32B**, **Gemma3**, **Gemma4**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5**, **MiMo v2 Pro / MiMo v2 Flash** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Nemotron-3 Super 120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **Qwen 3.6**, **QwQ-32B**, **Gemma3**, **Gemma4**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5**, **MiMo v2 Pro / MiMo v2 Flash** with advanced reasoning capabilities.
 
 
 ## 🚀 Features

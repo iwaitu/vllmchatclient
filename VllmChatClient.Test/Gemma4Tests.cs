@@ -51,19 +51,25 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲 "),
                 new ChatMessage(ChatRole.User,"你是谁？")
             };
-            var options = new ChatOptions();
+            var options = new VllmChatOptions();
+            options.ThinkingEnabled = true;
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
             Assert.Single(res.Messages); // 使用 Assert.Single 替代 Assert.Equal(1, ...)
 
             Assert.True(res.Text.Contains("菲菲"));
-            if (res.ModelId.Contains("thinking"))
+            string reason = string.Empty;
+            string anwser = string.Empty;
+            if (res is ReasoningChatResponse reasonResponse)
             {
-                var reasonResponse = res as ReasoningChatResponse;
                 Assert.NotNull(reasonResponse?.Reason);
+                reason = reasonResponse.Reason;
+                Assert.NotEmpty(reasonResponse?.Text);
+                anwser = reasonResponse.Text;
             }
-
-
+            
+            _output.WriteLine($"REASON: {reason}");
+            _output.WriteLine($"ANSWER: {anwser}");
         }
 
 

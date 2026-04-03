@@ -9,13 +9,12 @@
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Nemotron-3 Super 120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **QwQ-32B**, **Gemma3**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5**, **MiMo v2 Pro / MiMo v2 Flash** with advanced reasoning capabilities.
+A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Nemotron-3 Super 120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **QwQ-32B**, **Gemma3**, **Gemma4**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5**, **MiMo v2 Pro / MiMo v2 Flash** with advanced reasoning capabilities.
 
 
 ## 🚀 Features
 
-- ✅ **Multi-model Support**: OpenAI GPT 系列, Claude 4.6 / 4.5, Nemotron-3 Super 120B, Qwen3, Qwen3-Next, Qwen 3.5 (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3, DeepSeek-R1, DeepSeek-V3.2, GLM-5 / GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.5, MiMo v2 Pro / MiMo v2 Flash
-
+- ✅ **Multi-model Support**: OpenAI GPT 系列, Claude 4.6 / 4.5, Nemotron-3 Super 120B, Qwen3, Qwen3-Next, Qwen 3.5 (supports multiple modelIds, including Qwen3-VL), QwQ, Gemma3,Gemma4,DeepSeek-R1, DeepSeek-V3.2, GLM-5 / GLM-4 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5, GPT-OSS-120B/20B, Kimi K2 / Kimi 2.5, Gemini 3, MiniMax-M2.5, MiMo v2 Pro / MiMo v2 Flash
 - ✅ **Reasoning Chain Support**: Built-in thinking/reasoning capabilities for supported models (GLM supports Zhipu official thinking parameter via `GlmChatOptions.ThinkingEnabled`)
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
 - ✅ **Multiple Deployment Options**: Local vLLM deployment and cloud API support
@@ -126,6 +125,20 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - Gemini 3 兼容双提供商：同一个 `VllmGemini3ChatClient` 可同时适配 **Google 原生 API** 与 **OpenRouter**（自动按 endpoint 切换认证头）。
 - OpenRouter 兼容增强：请求体映射 `reasoning.enabled`，并修复工具回传消息字段（`tool_call_id` / `tool_calls`）以支持多轮函数调用。
 - OpenRouter 的 `thoughtSignature` 在部分模型/响应中可能缺失，测试已调整为“有则校验、无则跳过严格断言”。
+
+### 🆕 Gemma 4 原生 API / vLLM 双支持
+
+- **新增 `VllmGemma4ChatClient`**：统一支持 `Gemma 4` 的 **Google 原生 API** 与 **vLLM / OpenAI 兼容接口**。
+- **按 endpoint 自动切换协议**：
+  - Google 官方 URL（如 `generativelanguage.googleapis.com`）使用原生 `generateContent` / `streamGenerateContent` 请求格式。
+  - 其他 URL 使用 `vLLM/OpenAI-compatible` 的 `/chat/completions` 请求格式。
+- **认证头自动切换**：
+  - Google 原生 API 使用 `x-goog-api-key`
+  - vLLM / OpenAI-compatible 接口使用 `Authorization: Bearer ...`
+- **Google 原生 API 支持能力**：文本对话、流式输出、图片输入、thinking 控制、自动/手动工具调用。
+- **vLLM 兼容支持**：支持 `Gemma 4` 的聊天、流式、JSON 输出、图片输入，以及工具调用场景。
+- **思维链处理修复**：Google 原生返回中的 `thought` / thinking 内容不再混入最终答案文本，而是通过 `ReasoningChatResponse` / `ReasoningChatResponseUpdate` 单独暴露。
+- **测试覆盖**：已补充 `Gemma4Tests`、`Gemma4ProviderCompatibilityTests`、`Gemma4NativeToolCallingTests`，分别覆盖 Google 原生与 vLLM 两条链路。
 
 ---
 
@@ -245,23 +258,21 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - In OpenRouter tests, `thoughtSignature` may be absent depending on model/provider behavior; assertions are now provider-tolerant.
 
 ### 🆕 Gemma 4 Support
-- **VllmGemma4ChatClient** added.
-- One client now supports both:
-  - **Google native API** (`generativelanguage.googleapis.com` / `:generateContent` / `:streamGenerateContent`)
-  - **vLLM / OpenAI-compatible** endpoints (`/v1/chat/completions`)
-- Endpoint-based behavior:
-  - Google native URLs -> sends native `contents` / `generationConfig` / `tools.functionDeclarations`
-  - Other URLs -> sends vLLM-compatible chat-completions payload
-- Auth header auto-switch by endpoint:
-  - Google native: `x-goog-api-key`
-  - OpenAI-compatible/vLLM: `Authorization: Bearer ...`
-- Supports:
+- **`VllmGemma4ChatClient` added**: one client now supports both **Google native Gemma API** and **vLLM / OpenAI-compatible** endpoints.
+- **Endpoint-based protocol switching**:
+  - Google native URLs -> `generateContent` / `streamGenerateContent`
+  - Other URLs -> `/chat/completions`
+- **Auth header auto-switch**:
+  - Google native -> `x-goog-api-key`
+  - vLLM/OpenAI-compatible -> `Authorization: Bearer ...`
+- **Supported capabilities**:
   - chat / streaming chat
   - thinking toggle
   - JSON output
   - image input
   - automatic and manual tool calling
-- Google native `thought` parts are separated from final answer text and exposed through reasoning updates / `ReasoningChatResponse`.
+- **Reasoning separation**: Google native `thought` parts are exposed as reasoning updates and no longer leak into final answer text.
+- **Tests added**: provider compatibility, native tool calling, and external integration coverage for both Google native and vLLM paths.
 
 ### 🆕 MiniMax-M2.5 Support
 - **VllmMiniMaxChatClient** added for MiniMax-M2.5 / M2.1 model support.

@@ -54,6 +54,8 @@ internal class VllmOpenAIChatRequestMessage
     public string? ToolCallId { get; set; }
     [JsonPropertyName("tool_calls")]
     public VllmToolCall[]? ToolCalls { get; set; }  // function call时用
+    [JsonPropertyName("tool_responses")]
+    public VllmToolResponse[]? ToolResponses { get; set; }
     public IList<string>? Images { get; set; }
 }
 

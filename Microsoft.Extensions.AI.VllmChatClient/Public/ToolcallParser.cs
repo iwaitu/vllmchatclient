@@ -65,8 +65,24 @@ namespace Microsoft.Extensions.AI
                     list.Add(call);
             }
 
+            var gemma4Matches = Regex.Matches(
+                input,
+                @"<\|tool_call>call:(?<name>[A-Za-z_][A-Za-z0-9_]*)\{(?<args>[\s\S]*?)\}<tool_call\|>",
+                RegexOptions.Singleline);
+
+            foreach (Match match in gemma4Matches)
+            {
+                var call = TryParseGemma4ToolCall(match.Groups["name"].Value, match.Groups["args"].Value);
+                if (call != null)
+                {
+                    list.Add(call);
+                }
+            }
+
             // 把所有 tool_call 块替换为空，保留其余文本
             remainder = Regex.Replace(input, @"<tool_call>[\s\S]*?</tool_call>",
+                                      string.Empty, RegexOptions.Singleline);
+            remainder = Regex.Replace(remainder, @"<\|tool_call>call:[A-Za-z_][A-Za-z0-9_]*\{[\s\S]*?\}<tool_call\|>",
                                       string.Empty, RegexOptions.Singleline);
 
             return list;
@@ -224,8 +240,24 @@ namespace Microsoft.Extensions.AI
                     calls.Add(call);
             }
 
+            var gemma4Matches = Regex.Matches(
+                buffer,
+                @"<\|tool_call>call:(?<name>[A-Za-z_][A-Za-z0-9_]*)\{(?<args>[\s\S]*?)\}<tool_call\|>",
+                RegexOptions.Singleline);
+
+            foreach (Match match in gemma4Matches)
+            {
+                var call = TryParseGemma4ToolCall(match.Groups["name"].Value, match.Groups["args"].Value);
+                if (call != null)
+                {
+                    calls.Add(call);
+                }
+            }
+
             // 把已解析的块整体从 buffer 中移除
             buffer = Regex.Replace(buffer, pattern, string.Empty,
+                                   RegexOptions.Singleline);
+            buffer = Regex.Replace(buffer, @"<\|tool_call>call:[A-Za-z_][A-Za-z0-9_]*\{[\s\S]*?\}<tool_call\|>", string.Empty,
                                    RegexOptions.Singleline);
             return calls.Count > 0;
         }
@@ -236,7 +268,14 @@ namespace Microsoft.Extensions.AI
             int open = text.LastIndexOf("<tool_call>", StringComparison.Ordinal);
             int close = text.LastIndexOf("</tool_call>", StringComparison.Ordinal);
             // 出现 <tool_call> 但尚未出现对应的 </tool_call>
-            return open != -1 && close < open;
+            if (open != -1 && close < open)
+            {
+                return true;
+            }
+
+            int gemmaOpen = text.LastIndexOf("<|tool_call>", StringComparison.Ordinal);
+            int gemmaClose = text.LastIndexOf("<tool_call|>", StringComparison.Ordinal);
+            return gemmaOpen != -1 && gemmaClose < gemmaOpen;
         }
 
         public static int GetBraceDepth(string text)
@@ -266,6 +305,10 @@ namespace Microsoft.Extensions.AI
 
             text = Regex.Replace(text, @"</?tool_call>", string.Empty,
                                  RegexOptions.IgnoreCase);
+            text = text.Replace("<|tool_call>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                       .Replace("<tool_call|>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                       .Replace("<|tool_response>", string.Empty, StringComparison.OrdinalIgnoreCase)
+                       .Replace("<tool_response|>", string.Empty, StringComparison.OrdinalIgnoreCase);
 
             text = Regex.Replace(text,
                 @"[ \t]*}[ \t]*(?=\r?\n|$)", string.Empty);          // 行尾孤立 }
@@ -281,7 +324,55 @@ namespace Microsoft.Extensions.AI
             int openCount = Regex.Matches(input, @"<tool_call>").Count;
             int closeCount = Regex.Matches(input, @"</tool_call>").Count;
 
+            openCount += Regex.Matches(input, @"<\|tool_call>").Count;
+            closeCount += Regex.Matches(input, @"<tool_call\|>").Count;
+
             return openCount != closeCount;
+        }
+
+        private static VllmFunctionToolCall? TryParseGemma4ToolCall(string name, string args)
+        {
+            try
+            {
+                var arguments = new Dictionary<string, object?>();
+
+                foreach (Match match in Regex.Matches(args, @"(\w+):(?:<\|""\|>(.*?)<\|""\|>|([^,}]*))", RegexOptions.Singleline))
+                {
+                    string key = match.Groups[1].Value;
+                    string rawValue = (match.Groups[2].Success ? match.Groups[2].Value : match.Groups[3].Value).Trim();
+                    arguments[key] = CastGemma4Value(rawValue);
+                }
+
+                return new VllmFunctionToolCall
+                {
+                    Name = name,
+                    Arguments = System.Text.Json.JsonSerializer.Serialize(arguments)
+                };
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static object? CastGemma4Value(string value)
+        {
+            if (int.TryParse(value, out var intValue))
+            {
+                return intValue;
+            }
+
+            if (double.TryParse(value, out var doubleValue))
+            {
+                return doubleValue;
+            }
+
+            if (bool.TryParse(value, out var boolValue))
+            {
+                return boolValue;
+            }
+
+            return value.Trim('\'', '"');
         }
 
 

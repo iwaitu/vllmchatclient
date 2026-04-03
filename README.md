@@ -244,6 +244,25 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - Tool-calling protocol compatibility: fixed `tool_call_id` / `tool_calls` request field names, and improved multi-turn tool-result roundtrip compatibility.
 - In OpenRouter tests, `thoughtSignature` may be absent depending on model/provider behavior; assertions are now provider-tolerant.
 
+### 🆕 Gemma 4 Support
+- **VllmGemma4ChatClient** added.
+- One client now supports both:
+  - **Google native API** (`generativelanguage.googleapis.com` / `:generateContent` / `:streamGenerateContent`)
+  - **vLLM / OpenAI-compatible** endpoints (`/v1/chat/completions`)
+- Endpoint-based behavior:
+  - Google native URLs -> sends native `contents` / `generationConfig` / `tools.functionDeclarations`
+  - Other URLs -> sends vLLM-compatible chat-completions payload
+- Auth header auto-switch by endpoint:
+  - Google native: `x-goog-api-key`
+  - OpenAI-compatible/vLLM: `Authorization: Bearer ...`
+- Supports:
+  - chat / streaming chat
+  - thinking toggle
+  - JSON output
+  - image input
+  - automatic and manual tool calling
+- Google native `thought` parts are separated from final answer text and exposed through reasoning updates / `ReasoningChatResponse`.
+
 ### 🆕 MiniMax-M2.5 Support
 - **VllmMiniMaxChatClient** added for MiniMax-M2.5 / M2.1 model support.
 - Full streaming chat and function calling (parallel tool calls supported).
@@ -272,6 +291,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 | `VllmQwen3NextChatClient` | Cloud API (DashScope compatible) | qwen3-vl-235b-a22b-thinking / qwen3-vl-235b-a22b-instruct (manual verified) | ✅ (thinking model) | ✅ Stream |
 | `VllmQwqChatClient` | Local vLLM | QwQ-32B | ✅ Full | ✅ Stream |
 | `VllmGemmaChatClient` | Local vLLM | Gemma3-27B | ❌ | ✅ Stream |
+| `VllmGemma4ChatClient` | Google native API / Local vLLM / OpenAI-compatible | gemma-4-31b-it | ✅ Toggle | ✅ Stream |
 | `VllmGemini3ChatClient` | Cloud API (Google Gemini / OpenRouter) | gemini-3-pro-preview / google/gemini-3.1-* | Signature (hidden, provider-dependent) | ✅ Stream |
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
 | `VllmDeepseekV3ChatClient` | Cloud API (DashScope) | DeepSeek-V3.2 | ✅ (via `VllmChatOptions`) | ✅ Stream |
@@ -380,6 +400,39 @@ docker run -it --gpus all -p 8000:8000 \
 ---
 
 ## 💻 Usage Examples
+
+### 🆕 Gemma 4 Example
+
+```csharp
+using Microsoft.Extensions.AI;
+
+// Google native API
+IChatClient gemma4Native = new VllmGemma4ChatClient(
+    "https://generativelanguage.googleapis.com/v1beta",
+    Environment.GetEnvironmentVariable("GEMINI_API_KEY"),
+    "gemma-4-31b-it");
+
+// Local vLLM / OpenAI-compatible API
+IChatClient gemma4Vllm = new VllmGemma4ChatClient(
+    "http://localhost:8000/v1/{1}",
+    Environment.GetEnvironmentVariable("VLLM_API_KEY"),
+    "gemma4");
+
+var messages = new List<ChatMessage>
+{
+    new(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+    new(ChatRole.User, "请介绍一下你自己")
+};
+
+var options = new VllmChatOptions
+{
+    ThinkingEnabled = true,
+    MaxOutputTokens = 1024,
+};
+
+var response = await gemma4Native.GetResponseAsync(messages, options);
+Console.WriteLine(response.Text);
+```
 
 ### 🆕 GLM 4.6/4.7/4.7-Flash Thinking Example
 

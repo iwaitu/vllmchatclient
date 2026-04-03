@@ -37,6 +37,9 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
         [JsonPropertyName("text")]
         public string? Text { get; set; }
 
+        [JsonPropertyName("thought")]
+        public bool? Thought { get; set; }
+
         [JsonPropertyName("thoughtSignature")]
         public string? ThoughtSignature { get; set; }
 
@@ -96,6 +99,9 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 
         [JsonPropertyName("topP")]
         public float? TopP { get; set; }
+
+        [JsonPropertyName("maxOutputTokens")]
+        public int? MaxOutputTokens { get; set; }
 
         [JsonPropertyName("thinkingConfig")]
         public GeminiThinkingConfig? ThinkingConfig { get; set; }

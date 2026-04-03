@@ -17,6 +17,7 @@ namespace Microsoft.Extensions.AI;
 [JsonSerializable(typeof(VllmFunctionToolParameters))]
 [JsonSerializable(typeof(VllmRequestOptions))]
 [JsonSerializable(typeof(VllmTool))]
+[JsonSerializable(typeof(VllmToolResponse))]
 [JsonSerializable(typeof(VllmToolCall))]
 [JsonSerializable(typeof(VllmEmbeddingRequest))]
 [JsonSerializable(typeof(VllmEmbeddingResponse))]

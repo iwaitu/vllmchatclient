@@ -249,6 +249,7 @@ namespace VllmChatClient.Test
             };
             string res = string.Empty;
             string reason = string.Empty;
+            UsageDetails? usage = null;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
                 if (update is ReasoningChatResponseUpdate reasoningMessage)
@@ -262,12 +263,22 @@ namespace VllmChatClient.Test
                         res += reasoningMessage.Text;
                     }
                 }
+
+                if (update is UsageChatResponseUpdate usageUpdate)
+                {
+                    usage ??= usageUpdate.Usage;
+                }
             }
 
             Assert.False(string.IsNullOrWhiteSpace(res));
             Assert.True(res.Contains("下雨") || res.Contains("雨"), $"Unexpected reply: '{res}'");  //并行任务
+            Assert.NotNull(usage);
+            Assert.True(usage!.InputTokenCount > 0, $"Unexpected input tokens: {usage.InputTokenCount}");
+            Assert.True(usage.OutputTokenCount > 0, $"Unexpected output tokens: {usage.OutputTokenCount}");
+            Assert.True(usage.TotalTokenCount >= usage.InputTokenCount + usage.OutputTokenCount - 1, $"Unexpected total tokens: {usage.TotalTokenCount}");
             _output.WriteLine($"Reason: {reason}");
             _output.WriteLine($"Response: {res}");
+            _output.WriteLine($"Usage: input={usage.InputTokenCount}, output={usage.OutputTokenCount}, total={usage.TotalTokenCount}");
         }
 
         

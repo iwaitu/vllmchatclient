@@ -170,6 +170,7 @@ namespace VllmChatClient.Test
 
             string res = string.Empty;
             string reason = string.Empty;
+            UsageDetails? usage = null;
             await foreach (var update in client.GetStreamingResponseAsync(messages, options))
             {
                 if (update is ReasoningChatResponseUpdate reasoningUpdate)

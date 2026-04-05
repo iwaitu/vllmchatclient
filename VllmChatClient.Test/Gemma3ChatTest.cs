@@ -272,13 +272,38 @@ namespace VllmChatClient.Test
                 Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
             };
             string res = string.Empty;
+            string reason = string.Empty;
+            UsageDetails? usage = null;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
-                res += update;
+                if (update is ReasoningChatResponseUpdate reasoningUpdate)
+                {
+                    if (reasoningUpdate.Thinking)
+                    {
+                        reason += reasoningUpdate.Text;
+                    }
+                    else
+                    {
+                        res += reasoningUpdate.Text;
+                    }
+                }
+                else
+                {
+                    res += update.Text;
+                }
+
+                if (update is UsageChatResponseUpdate usageUpdate)
+                {
+                    usage ??= usageUpdate.Usage;
+                }
             }
             Assert.True(res != null);
             Assert.False(res.StartsWith("<"));
             Assert.Contains("晴", res);    // 根据 GetWeather 假设结果校验
+            Assert.NotNull(usage);
+            Assert.True(usage!.InputTokenCount > 0, $"Unexpected input tokens: {usage.InputTokenCount}");
+            Assert.True(usage.OutputTokenCount > 0, $"Unexpected output tokens: {usage.OutputTokenCount}");
+            Assert.True(usage.TotalTokenCount >= usage.InputTokenCount + usage.OutputTokenCount - 1, $"Unexpected total tokens: {usage.TotalTokenCount}");
         }
 
         [Fact]

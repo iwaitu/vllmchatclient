@@ -13,4 +13,9 @@ namespace Microsoft.Extensions.AI
         public string Reasoning { get; set; } = "";
         public string Anwser { get; set; } = "";
     }
+
+    public class UsageChatResponseUpdate : ChatResponseUpdate
+    {
+        public UsageDetails? Usage { get; set; }
+    }
 }

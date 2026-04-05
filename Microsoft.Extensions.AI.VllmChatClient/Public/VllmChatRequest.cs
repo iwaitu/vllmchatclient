@@ -10,6 +10,7 @@ internal sealed class VllmOpenAIChatRequest
     public required VllmOpenAIChatRequestMessage[] Messages { get; set; }
     public JsonElement? Format { get; set; }
     public bool Stream { get; set; }
+    public VllmStreamOptions? StreamOptions { get; set; }
     public IEnumerable<VllmTool>? Tools { get; set; }
     public VllmThinkingOptions? Thinking { get; set; }
     public bool? EnableThinking { get; set; }
@@ -24,6 +25,11 @@ internal sealed class VllmOpenAIChatRequest
     public VllmRequestOptions? Options { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("tool_choice")]
     public object? ToolChoice { get; set; }
+}
+
+internal sealed class VllmStreamOptions
+{
+    public bool IncludeUsage { get; set; }
 }
 
 internal sealed class VllmThinkingOptions
@@ -47,6 +53,7 @@ internal sealed class VllmChatRequest
     public required VllmChatRequestMessage[] Messages { get; set; }
     public JsonElement? Format { get; set; }
     public bool Stream { get; set; }
+    public VllmStreamOptions? StreamOptions { get; set; }
     public IEnumerable<VllmTool>? Tools { get; set; }
     public VllmRequestOptions? Options { get; set; }
 }

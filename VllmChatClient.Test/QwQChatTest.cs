@@ -102,11 +102,36 @@ namespace VllmChatClient.Test
                 Tools = [AIFunctionFactory.Create(GetWeather)]
             };
             string res = string.Empty;
+            string reason = string.Empty;
+            UsageDetails? usage = null;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
-                res += update;
+                if (update is ReasoningChatResponseUpdate reasoningUpdate)
+                {
+                    if (reasoningUpdate.Thinking)
+                    {
+                        reason += reasoningUpdate.Text;
+                    }
+                    else
+                    {
+                        res += reasoningUpdate.Text;
+                    }
+                }
+                else
+                {
+                    res += update.Text;
+                }
+
+                if (update is UsageChatResponseUpdate usageUpdate)
+                {
+                    usage ??= usageUpdate.Usage;
+                }
             }
             Assert.True(res != null);
+            Assert.NotNull(usage);
+            Assert.True(usage!.InputTokenCount > 0, $"Unexpected input tokens: {usage.InputTokenCount}");
+            Assert.True(usage.OutputTokenCount > 0, $"Unexpected output tokens: {usage.OutputTokenCount}");
+            Assert.True(usage.TotalTokenCount >= usage.InputTokenCount + usage.OutputTokenCount - 1, $"Unexpected total tokens: {usage.TotalTokenCount}");
         }
     }
 }

@@ -253,6 +253,19 @@ namespace Microsoft.Extensions.AI
 
                 var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmChatStreamResponse);
 
+                if (chunk?.Usage is { } streamUsage)
+                {
+                    yield return new UsageChatResponseUpdate
+                    {
+                        CreatedAt = chunk.Created > 0
+                            ? DateTimeOffset.FromUnixTimeSeconds(chunk.Created)
+                            : DateTimeOffset.Now,
+                        ModelId = chunk.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
+                        ResponseId = responseId,
+                        Usage = ParseVllmUsage(streamUsage),
+                    };
+                }
+
                 if (chunk == null || chunk.Choices == null || chunk.Choices.Count == 0)
                 {
                     continue;
@@ -446,16 +459,21 @@ namespace Microsoft.Extensions.AI
 
         private static UsageDetails? ParseVllmChatResponseUsage(VllmChatResponse response)
         {
-            if (response?.Usage == null)
+            return ParseVllmUsage(response?.Usage);
+        }
+
+        private static UsageDetails? ParseVllmUsage(Usage? usage)
+        {
+            if (usage == null)
             {
                 return null;
             }
 
             return new UsageDetails
             {
-                InputTokenCount = response.Usage.PromptTokens,
-                OutputTokenCount = response.Usage.CompletionTokens,
-                TotalTokenCount = response.Usage.TotalTokens
+                InputTokenCount = usage.PromptTokens,
+                OutputTokenCount = usage.CompletionTokens,
+                TotalTokenCount = usage.TotalTokens
             };
         }
 
@@ -1055,6 +1073,7 @@ namespace Microsoft.Extensions.AI
                 Messages = PrepareMessagesWithSkills(messages, options).SelectMany(ToVllmChatRequestMessages).ToArray(),
                 Model = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty,
                 Stream = stream,
+                StreamOptions = stream ? new VllmStreamOptions { IncludeUsage = true } : null,
                 Tools = GetTools(options),
             };
 

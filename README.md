@@ -33,6 +33,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ### 🆕 Gemma 4 原生 API / vLLM 双支持
 
+- **Gemma 4 思维链格式说明**：Gemma 4 在 `vLLM / OpenAI-compatible` 路径下的 thinking / reasoning 输出格式可能会随着 vLLM 版本变化而变化；当前库已对部分非标准 `thought` 内容做兼容处理，但如遇格式差异仍建议以所部署的 vLLM 版本行为为准，参考：https://github.com/vllm-project/vllm/pull/39027。
 - **新增 `VllmGemma4ChatClient`**：统一支持 `Gemma 4` 的 **Google 原生 API** 与 **vLLM / OpenAI 兼容接口**。
 - **按 endpoint 自动切换协议**：
   - Google 官方 URL（如 `generativelanguage.googleapis.com`）使用原生 `generateContent` / `streamGenerateContent` 请求格式。
@@ -145,6 +146,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ## 🔥 Latest Updates
 
 ### 🆕 Gemma 4 Support
+- **Gemma 4 reasoning format note**: on the `vLLM / OpenAI-compatible` path, Gemma 4 thinking / reasoning output format may change across vLLM versions. This library includes compatibility handling for some non-standard embedded `thought` content, but actual behavior still depends on the deployed vLLM version. See: https://github.com/vllm-project/vllm/pull/39027
 - **`VllmGemma4ChatClient` added**: one client now supports both **Google native Gemma API** and **vLLM / OpenAI-compatible** endpoints.
 - **Endpoint-based protocol switching**:
   - Google native URLs -> `generateContent` / `streamGenerateContent`

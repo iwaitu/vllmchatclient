@@ -235,13 +235,12 @@ namespace VllmChatClient.Test
             };
             string res = string.Empty;
             string reasoning = string.Empty;
-            ReasoningChatResponseUpdate lastUpdate;
+            UsageDetails? usage = null;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
                 if (update is null) continue;
-                if(update is ReasoningChatResponseUpdate reasoningUpdate)
+                if (update is ReasoningChatResponseUpdate reasoningUpdate)
                 {
-                    lastUpdate = reasoningUpdate;
                     if (reasoningUpdate.Thinking)
                     {
                         reasoning += reasoningUpdate.Text;
@@ -255,6 +254,11 @@ namespace VllmChatClient.Test
                 {
                     res += update.Text;
                 }
+
+                if (update is UsageChatResponseUpdate usageUpdate)
+                {
+                    usage ??= usageUpdate.Usage;
+                }
                     
             }
             _output.WriteLine("思考过程：");
@@ -262,6 +266,11 @@ namespace VllmChatClient.Test
             _output.WriteLine("最终回答：");
             _output.WriteLine(res);
             Assert.True(res != null);
+            Assert.NotNull(usage);
+            Assert.True(usage!.InputTokenCount > 0, $"Unexpected input tokens: {usage.InputTokenCount}");
+            Assert.True(usage.OutputTokenCount > 0, $"Unexpected output tokens: {usage.OutputTokenCount}");
+            Assert.True(usage.TotalTokenCount >= usage.InputTokenCount + usage.OutputTokenCount - 1, $"Unexpected total tokens: {usage.TotalTokenCount}");
+            _output.WriteLine($"Usage: input={usage.InputTokenCount}, output={usage.OutputTokenCount}, total={usage.TotalTokenCount}");
         }
 
         [Fact]

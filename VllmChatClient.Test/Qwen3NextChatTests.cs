@@ -1,9 +1,11 @@
 ﻿using Microsoft.Extensions.AI;
 using Microsoft.VisualStudio.TestPlatform.Utilities;
 using System.ComponentModel;
+using System.Net;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Text;
 using Xunit.Abstractions;
 
 namespace VllmChatClient.Test
@@ -164,6 +166,59 @@ namespace VllmChatClient.Test
         }
 
         [Fact]
+        public async Task StreamChatRequestIncludesUsageAndParsesUsage()
+        {
+            const string ssePayload = """
+data: {"id":"chatcmpl-stream-1","object":"chat.completion.chunk","created":1730000000,"model":"qwen3.6-plus","choices":[{"index":0,"delta":{"role":"assistant","content":"你好，"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-stream-1","object":"chat.completion.chunk","created":1730000000,"model":"qwen3.6-plus","choices":[{"index":0,"delta":{"content":"我是菲菲。"},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-stream-1","object":"chat.completion.chunk","created":1730000000,"model":"qwen3.6-plus","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}}
+
+data: [DONE]
+""";
+
+            var handler = new CaptureStreamingHandler(ssePayload);
+            using var httpClient = new HttpClient(handler);
+            var client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", "fake-token", "qwen3.6-plus", httpClient);
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User, "你是谁？")
+            };
+
+            string text = string.Empty;
+            UsageDetails? usage = null;
+
+            await foreach (var update in client.GetStreamingResponseAsync(messages, new VllmChatOptions { ThinkingEnabled = false }))
+            {
+                foreach (var content in update.Contents.OfType<TextContent>())
+                {
+                    text += content.Text;
+                }
+
+                var usageUpdate = update as UsageChatResponseUpdate;
+                if (usageUpdate is not null)
+                {
+                    usage ??= usageUpdate.Usage;
+                }
+            }
+
+            Assert.False(string.IsNullOrWhiteSpace(handler.LastRequestBody));
+            using var requestJson = JsonDocument.Parse(handler.LastRequestBody!);
+            Assert.True(requestJson.RootElement.GetProperty("stream").GetBoolean());
+            Assert.True(requestJson.RootElement.TryGetProperty("stream_options", out var streamOptions));
+            Assert.True(streamOptions.TryGetProperty("include_usage", out var includeUsage));
+            Assert.True(includeUsage.GetBoolean());
+
+            Assert.Contains("菲菲", text);
+            Assert.NotNull(usage);
+            Assert.Equal(12, usage!.InputTokenCount);
+            Assert.Equal(8, usage.OutputTokenCount);
+            Assert.Equal(20, usage.TotalTokenCount);
+        }
+
+        [Fact]
         public async Task StreamChatFunctionCallTest()
         {
             if (_skipTests)
@@ -185,6 +240,7 @@ namespace VllmChatClient.Test
             };
             string res = string.Empty;
             string reason = string.Empty;
+            UsageDetails? usage = null;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
             {
                 if (update is ReasoningChatResponseUpdate reasoningMessage)
@@ -198,12 +254,22 @@ namespace VllmChatClient.Test
                         res += reasoningMessage.Text;
                     }
                 }
+
+                if (update is UsageChatResponseUpdate usageUpdate)
+                {
+                    usage ??= usageUpdate.Usage;
+                }
             }
 
             Assert.False(string.IsNullOrWhiteSpace(res));
             Assert.True(res.Contains("下雨") || res.Contains("雨"), $"Unexpected reply: '{res}'");  //并行任务
+            Assert.NotNull(usage);
+            Assert.True(usage!.InputTokenCount > 0, $"Unexpected input tokens: {usage.InputTokenCount}");
+            Assert.True(usage.OutputTokenCount > 0, $"Unexpected output tokens: {usage.OutputTokenCount}");
+            Assert.True(usage.TotalTokenCount >= usage.InputTokenCount + usage.OutputTokenCount - 1, $"Unexpected total tokens: {usage.TotalTokenCount}");
             _output.WriteLine($"Reason: {reason}");
             _output.WriteLine($"Response: {res}");
+            _output.WriteLine($"Usage: input={usage.InputTokenCount}, output={usage.OutputTokenCount}, total={usage.TotalTokenCount}");
         }
 
         
@@ -683,6 +749,23 @@ namespace VllmChatClient.Test
             catch (System.Text.Json.JsonException ex)
             {
                 Assert.Fail($"输出的文本不是有效的JSON格式。内容: '{jsonText}', 错误: {ex.Message}");
+            }
+        }
+
+        private sealed class CaptureStreamingHandler(string ssePayload) : HttpMessageHandler
+        {
+            public string? LastRequestBody { get; private set; }
+
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                LastRequestBody = request.Content is null
+                    ? null
+                    : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(ssePayload, Encoding.UTF8, "text/event-stream")
+                };
             }
         }
     }

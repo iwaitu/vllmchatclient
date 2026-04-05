@@ -109,7 +109,10 @@ namespace Microsoft.Extensions.AI
         {
             if (!_useGoogleNativeApi)
             {
-                return HideReasoningIfNeeded(await base.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false), options);
+                var response = await base.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+                response = NormalizeEmbeddedThoughtIfNeeded(response);
+                response = NormalizeFencedJsonIfNeeded(response);
+                return HideReasoningIfNeeded(response, options);
             }
 
             _ = Throw.IfNull(messages);
@@ -311,6 +314,334 @@ namespace Microsoft.Extensions.AI
                 ResponseId = reasoningResponse.ResponseId,
                 Usage = reasoningResponse.Usage,
             };
+        }
+
+        private static ChatResponse NormalizeFencedJsonIfNeeded(ChatResponse response)
+        {
+            if (response.Messages.Count == 0 || !TryUnwrapJsonCodeFence(response.Messages[0].Text, out var jsonText))
+            {
+                return response;
+            }
+
+            if (response is not ReasoningChatResponse reasoningResponse)
+            {
+                return response;
+            }
+
+            var message = response.Messages[0];
+            var contents = message.Contents
+                .Where(static content => content is not TextContent)
+                .ToList();
+            contents.Add(new TextContent(jsonText));
+
+            return new ReasoningChatResponse(new ChatMessage(message.Role, contents), reasoningResponse.Reason)
+            {
+                CreatedAt = reasoningResponse.CreatedAt,
+                FinishReason = reasoningResponse.FinishReason,
+                ModelId = reasoningResponse.ModelId,
+                ResponseId = reasoningResponse.ResponseId,
+                Usage = reasoningResponse.Usage,
+            };
+        }
+
+        private static bool TryUnwrapJsonCodeFence(string? text, out string jsonText)
+        {
+            jsonText = string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            var trimmed = text.Trim();
+            if (!trimmed.StartsWith("```", StringComparison.Ordinal) || !trimmed.EndsWith("```", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var firstLineEnd = trimmed.IndexOf('\n');
+            if (firstLineEnd < 0)
+            {
+                return false;
+            }
+
+            var openingLine = trimmed[..firstLineEnd].Trim();
+            if (!openingLine.Equals("```", StringComparison.Ordinal)
+                && !openingLine.Equals("```json", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var closingFenceStart = trimmed.LastIndexOf("\n```", StringComparison.Ordinal);
+            if (closingFenceStart <= firstLineEnd)
+            {
+                return false;
+            }
+
+            var payload = trimmed[(firstLineEnd + 1)..closingFenceStart].Trim();
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var _ = JsonDocument.Parse(payload);
+                jsonText = payload;
+                return true;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private static ChatResponse NormalizeEmbeddedThoughtIfNeeded(ChatResponse response)
+        {
+            if (response is not ReasoningChatResponse reasoningResponse || response.Messages.Count == 0)
+            {
+                return response;
+            }
+
+            var message = response.Messages[0];
+            var text = message.Text;
+            if (string.IsNullOrWhiteSpace(text)
+                || !string.IsNullOrWhiteSpace(reasoningResponse.Reason)
+                || !TryExtractEmbeddedThought(text, out var extractedReasoning, out var extractedAnswer))
+            {
+                return response;
+            }
+
+            var contents = message.Contents
+                .Where(static content => content is not TextContent)
+                .ToList();
+
+            if (!string.IsNullOrWhiteSpace(extractedAnswer))
+            {
+                contents.Add(new TextContent(extractedAnswer));
+            }
+
+            return new ReasoningChatResponse(new ChatMessage(message.Role, contents), extractedReasoning)
+            {
+                CreatedAt = reasoningResponse.CreatedAt,
+                FinishReason = reasoningResponse.FinishReason,
+                ModelId = reasoningResponse.ModelId,
+                ResponseId = reasoningResponse.ResponseId,
+                Usage = reasoningResponse.Usage,
+            };
+        }
+
+        private static bool TryExtractEmbeddedThought(string text, out string reasoning, out string answer)
+        {
+            reasoning = string.Empty;
+            answer = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            var normalized = text.Replace("\r\n", "\n").Trim();
+            if (!normalized.StartsWith("thought", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            normalized = normalized["thought".Length..].TrimStart('\n', '\r', ' ', '\t', ':', '：');
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return false;
+            }
+
+            var markerIndex = FindAnswerMarkerIndex(normalized);
+            if (markerIndex >= 0)
+            {
+                reasoning = normalized[..markerIndex].Trim();
+                answer = normalized[markerIndex..].Trim();
+                return !string.IsNullOrWhiteSpace(reasoning);
+            }
+
+            var paragraphs = normalized
+                .Split(["\n\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (paragraphs.Length >= 2 && LooksLikeFinalAnswerParagraph(paragraphs[^1]))
+            {
+                reasoning = string.Join(Environment.NewLine + Environment.NewLine, paragraphs[..^1]).Trim();
+                answer = paragraphs[^1].Trim();
+                return !string.IsNullOrWhiteSpace(reasoning);
+            }
+
+            if (TryExtractTrailingFencedJsonAnswer(normalized, out reasoning, out answer))
+            {
+                return true;
+            }
+
+            if (TryExtractTrailingInlineAnswer(normalized, out reasoning, out answer))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryExtractTrailingFencedJsonAnswer(string text, out string reasoning, out string answer)
+        {
+            reasoning = string.Empty;
+            answer = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            var openingFenceIndex = text.LastIndexOf("```json", StringComparison.OrdinalIgnoreCase);
+            if (openingFenceIndex < 0)
+            {
+                openingFenceIndex = text.LastIndexOf("```", StringComparison.Ordinal);
+            }
+
+            if (openingFenceIndex <= 0)
+            {
+                return false;
+            }
+
+            var fencedBlock = text[openingFenceIndex..].Trim();
+            if (!TryUnwrapJsonCodeFence(fencedBlock, out _))
+            {
+                return false;
+            }
+
+            var prefix = text[..openingFenceIndex].TrimEnd();
+            if (string.IsNullOrWhiteSpace(prefix) || !LooksLikeReasoningPrefix(prefix))
+            {
+                return false;
+            }
+
+            reasoning = prefix.Trim();
+            answer = fencedBlock;
+            return true;
+        }
+
+        private static bool TryExtractTrailingInlineAnswer(string text, out string reasoning, out string answer)
+        {
+            reasoning = string.Empty;
+            answer = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            var lastLineStart = text.LastIndexOf('\n');
+            lastLineStart = lastLineStart < 0 ? 0 : lastLineStart + 1;
+
+            var lastLine = text[lastLineStart..];
+            var trimmedLastLine = lastLine.TrimStart();
+            if (!(trimmedLastLine.StartsWith("*", StringComparison.Ordinal)
+                || trimmedLastLine.StartsWith("-", StringComparison.Ordinal)
+                || trimmedLastLine.StartsWith("•", StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            foreach (var splitIndexInLine in EnumerateInlineAnswerBoundaryCandidates(lastLine))
+            {
+                if (splitIndexInLine + 1 >= lastLine.Length)
+                {
+                    continue;
+                }
+
+                var trailing = lastLine[(splitIndexInLine + 1)..].Trim();
+                if (!LooksLikeFinalAnswerParagraph(trailing))
+                {
+                    continue;
+                }
+
+                var answerStart = lastLineStart + splitIndexInLine + 1;
+                reasoning = text[..answerStart].Trim();
+                answer = text[answerStart..].Trim();
+                return !string.IsNullOrWhiteSpace(reasoning) && !string.IsNullOrWhiteSpace(answer);
+            }
+
+            return false;
+        }
+
+        private static IEnumerable<int> EnumerateInlineAnswerBoundaryCandidates(string lastLine)
+        {
+            var seen = new HashSet<int>();
+
+            var preferred = new[]
+            {
+                lastLine.LastIndexOf(')'),
+                lastLine.LastIndexOf('"'),
+                lastLine.LastIndexOf('.'),
+                lastLine.LastIndexOf('!'),
+                lastLine.LastIndexOf('?'),
+                lastLine.LastIndexOf('。'),
+                lastLine.LastIndexOf('！'),
+                lastLine.LastIndexOf('？')
+            };
+
+            foreach (var index in preferred)
+            {
+                if (index >= 0 && seen.Add(index))
+                {
+                    yield return index;
+                }
+            }
+        }
+
+        private static int FindAnswerMarkerIndex(string text)
+        {
+            string[] markers = ["\nassistant\n", "\nfinal\n", "\nanswer\n", "\n答案：", "\n答案:", "\n最终回答：", "\n最终回答:"];
+            foreach (var marker in markers)
+            {
+                var index = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+                if (index >= 0)
+                {
+                    return index + marker.Length;
+                }
+            }
+
+            return -1;
+        }
+
+        private static bool LooksLikeFinalAnswerParagraph(string paragraph)
+        {
+            if (string.IsNullOrWhiteSpace(paragraph))
+            {
+                return false;
+            }
+
+            paragraph = paragraph.Trim();
+            return !(paragraph.StartsWith("*", StringComparison.Ordinal)
+                || paragraph.StartsWith("-", StringComparison.Ordinal)
+                || paragraph.StartsWith("•", StringComparison.Ordinal)
+                || paragraph.StartsWith("Option", StringComparison.OrdinalIgnoreCase)
+                || paragraph.StartsWith("User question", StringComparison.OrdinalIgnoreCase)
+                || paragraph.StartsWith("Role:", StringComparison.OrdinalIgnoreCase)
+                || paragraph.StartsWith("System instruction", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool LooksLikeReasoningPrefix(string prefix)
+        {
+            prefix = prefix.TrimEnd();
+            if (string.IsNullOrWhiteSpace(prefix))
+            {
+                return false;
+            }
+
+            return prefix.StartsWith("*", StringComparison.Ordinal)
+                || prefix.StartsWith("-", StringComparison.Ordinal)
+                || prefix.StartsWith("•", StringComparison.Ordinal)
+                || prefix.Contains("\n*", StringComparison.Ordinal)
+                || prefix.Contains("\n-", StringComparison.Ordinal)
+                || prefix.Contains("\n•", StringComparison.Ordinal)
+                || prefix.EndsWith(".", StringComparison.Ordinal)
+                || prefix.EndsWith("!", StringComparison.Ordinal)
+                || prefix.EndsWith("?", StringComparison.Ordinal)
+                || prefix.EndsWith("。", StringComparison.Ordinal)
+                || prefix.EndsWith("！", StringComparison.Ordinal)
+                || prefix.EndsWith("？", StringComparison.Ordinal);
         }
 
         private GeminiRequest ToGoogleNativeRequest(IEnumerable<ChatMessage> messages, ChatOptions? options)

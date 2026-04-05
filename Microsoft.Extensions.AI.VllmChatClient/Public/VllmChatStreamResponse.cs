@@ -39,6 +39,10 @@ internal class VllmChatStreamResponse
 
     [JsonProperty("choices")]
     public List<ChoiceChunk>? Choices { get; set; }
+
+    [JsonProperty("usage")]
+    [JsonPropertyName("usage")]
+    public Usage? Usage { get; set; }
     
     // GPT-OSS Responses API 支持
     [JsonProperty("type")]

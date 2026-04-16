@@ -19,10 +19,10 @@ namespace VllmChatClient.Test
 
         public Gemma4Tests(ITestOutputHelper output)
         {
-            var endpoint = "https://gemmachat.nngeo.net/v1";
-            //var endpoint = "https://generativelanguage.googleapis.com/v1beta";
-            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY");
-            //var cloud_apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY") ?? "";
+            //var endpoint = "https://gemmachat.nngeo.net/v1";
+            var endpoint = "https://generativelanguage.googleapis.com/v1beta";
+            //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_API_KEY");
+            var cloud_apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY") ?? "";
             //var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
@@ -949,6 +949,31 @@ namespace VllmChatClient.Test
                 Assert.Fail($"输出的文本不是有效的JSON格式。内容: '{jsonText}', 错误: {ex.Message}");
             }
             _output.WriteLine(jsonText);
+        }
+
+        [Fact]
+        public async Task JsonSchemaOutputTest()
+        {
+            if (_skipTests)
+            {
+                return;
+            }
+
+            var options = new VllmChatOptions
+            {
+                ThinkingEnabled = true,
+                MaxOutputTokens = 3000,
+                ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                    StructuredJsonSchemaTestHelper.CreateGreetingSchema(),
+                    "greeting_payload",
+                    "Greeting payload")
+            };
+
+            var res = await _client.GetResponseAsync(StructuredJsonSchemaTestHelper.CreateGreetingMessages(), options);
+            Assert.NotNull(res);
+            Assert.Single(res.Messages);
+            StructuredJsonSchemaTestHelper.AssertGreetingJson(res.Text);
+            _output.WriteLine($"Response: {res.Text}");
         }
     }
 }

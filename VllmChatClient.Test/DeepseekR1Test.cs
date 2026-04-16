@@ -157,5 +157,29 @@ namespace VllmChatClient.Test
             _output.WriteLine("Reasoning: " + reason);
             _output.WriteLine("Response: " + res);
         }
+
+        [Fact]
+        public async Task JsonSchemaOutputTest()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY")))
+            {
+                return;
+            }
+
+            var options = new ChatOptions
+            {
+                MaxOutputTokens = 300,
+                ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                    StructuredJsonSchemaTestHelper.CreateGreetingSchema(),
+                    "greeting_payload",
+                    "Greeting payload")
+            };
+
+            var res = await _client.GetResponseAsync(StructuredJsonSchemaTestHelper.CreateGreetingMessages(), options);
+            Assert.NotNull(res);
+            Assert.Single(res.Messages);
+            StructuredJsonSchemaTestHelper.AssertGreetingJson(res.Text);
+            _output.WriteLine($"Response: {res.Text}");
+        }
     }
 }

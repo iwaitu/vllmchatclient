@@ -628,5 +628,29 @@ namespace VllmChatClient.Test
                 Assert.Fail($"输出的文本不是有效的JSON格式。内容: '{jsonText}', 错误: {ex.Message}");
             }
         }
+
+        [Fact]
+        public async Task JsonSchemaOutputTest()
+        {
+            if (_skipTests)
+            {
+                return;
+            }
+
+            var options = new ChatOptions
+            {
+                MaxOutputTokens = 300,
+                ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                    StructuredJsonSchemaTestHelper.CreateGreetingSchema(),
+                    "greeting_payload",
+                    "Greeting payload")
+            };
+
+            var res = await _client.GetResponseAsync(StructuredJsonSchemaTestHelper.CreateGreetingMessages(), options);
+            Assert.NotNull(res);
+            Assert.Single(res.Messages);
+            StructuredJsonSchemaTestHelper.AssertGreetingJson(res.Text);
+            _output.WriteLine($"Response: {res.Text}");
+        }
     }
 }

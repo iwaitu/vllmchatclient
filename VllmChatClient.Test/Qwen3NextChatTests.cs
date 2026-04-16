@@ -752,6 +752,30 @@ data: [DONE]
             }
         }
 
+        [Fact]
+        public async Task JsonSchemaOutputTest()
+        {
+            if (_skipTests)
+            {
+                return;
+            }
+
+            var options = new ChatOptions
+            {
+                MaxOutputTokens = 300,
+                ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                    StructuredJsonSchemaTestHelper.CreateGreetingSchema(),
+                    "greeting_payload",
+                    "Greeting payload")
+            };
+
+            var res = await _client.GetResponseAsync(StructuredJsonSchemaTestHelper.CreateGreetingMessages(), options);
+            Assert.NotNull(res);
+            Assert.Single(res.Messages);
+            StructuredJsonSchemaTestHelper.AssertGreetingJson(res.Text);
+            _output.WriteLine($"Response: {res.Text}");
+        }
+
         private sealed class CaptureStreamingHandler(string ssePayload) : HttpMessageHandler
         {
             public string? LastRequestBody { get; private set; }

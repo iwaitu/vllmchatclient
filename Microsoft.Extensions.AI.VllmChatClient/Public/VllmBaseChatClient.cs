@@ -741,6 +741,63 @@ namespace Microsoft.Extensions.AI
             return null;
         }
 
+        protected static JsonElement? ToVllmOpenAIChatResponseFormat(ChatResponseFormat? format)
+        {
+            if (format is not ChatResponseFormatJson jsonFormat)
+            {
+                return null;
+            }
+
+            if (jsonFormat.Schema is JsonElement schema)
+            {
+                return JsonSerializer.SerializeToElement(
+                    new VllmResponseFormat
+                    {
+                        Type = "json_schema",
+                        JsonSchema = new VllmJsonSchemaResponseFormat
+                        {
+                            Name = string.IsNullOrWhiteSpace(jsonFormat.SchemaName) ? "response" : jsonFormat.SchemaName,
+                            Description = string.IsNullOrWhiteSpace(jsonFormat.SchemaDescription) ? null : jsonFormat.SchemaDescription,
+                            Schema = schema.Clone(),
+                            Strict = true,
+                        }
+                    },
+                    JsonContext.Default.VllmResponseFormat);
+            }
+
+            return JsonSerializer.SerializeToElement(
+                new VllmResponseFormat
+                {
+                    Type = "json_object"
+                },
+                JsonContext.Default.VllmResponseFormat);
+        }
+
+        protected static JsonElement? ToVllmStructuredOutputs(ChatResponseFormat? format)
+        {
+            if (format is not ChatResponseFormatJson jsonFormat)
+            {
+                return null;
+            }
+
+            if (jsonFormat.Schema is JsonElement schema)
+            {
+                return JsonSerializer.SerializeToElement(
+                    new VllmStructuredOutputs
+                    {
+                        Json = schema.Clone(),
+                    },
+                    JsonContext.Default.VllmStructuredOutputs);
+            }
+
+            return JsonSerializer.SerializeToElement(
+                new VllmStructuredOutputs
+                {
+                    JsonObject = true,
+                },
+                JsonContext.Default.VllmStructuredOutputs);
+        }
+
         private protected virtual IEnumerable<ChatMessage> PrepareMessagesWithSkills(IEnumerable<ChatMessage> messages, ChatOptions? options)
         {
             var messageList = messages.ToList();
@@ -1070,12 +1127,19 @@ namespace Microsoft.Extensions.AI
             VllmOpenAIChatRequest request = new()
             {
                 Format = ToVllmChatResponseFormat(options?.ResponseFormat),
+                ResponseFormat = ToVllmOpenAIChatResponseFormat(options?.ResponseFormat),
                 Messages = PrepareMessagesWithSkills(messages, options).SelectMany(ToVllmChatRequestMessages).ToArray(),
                 Model = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty,
                 Stream = stream,
                 StreamOptions = stream ? new VllmStreamOptions { IncludeUsage = true } : null,
                 Tools = GetTools(options),
             };
+
+            if (ToVllmStructuredOutputs(options?.ResponseFormat) is { } structuredOutputs)
+            {
+                request.ExtraBody ??= new Dictionary<string, object?>();
+                request.ExtraBody["structured_outputs"] = structuredOutputs;
+            }
 
             if (options?.ToolMode is AutoChatToolMode)
             {

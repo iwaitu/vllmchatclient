@@ -17,7 +17,7 @@ namespace VllmChatClient.Test
         private readonly bool _skipTests;
         //private const string MODEL = "glm-4.7";
         //private const string MODEL = "glm-5";
-        private const string MODEL = "glm-4.5";
+        private const string MODEL = "glm-5.1";
         //private const string MODEL = "glm-4.6";
         static int functionCallTime = 0;
 
@@ -463,7 +463,7 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"请输出json格式的问候语,json 中必须包含 name 属性,不要输出代码块，例如：{\"name\":\"菲菲\"}")
             };
-            _chatOptions.MaxOutputTokens = 1000;
+            _chatOptions.MaxOutputTokens = 3000;
             var res = await _client.GetResponseAsync(messages, _chatOptions);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
@@ -497,6 +497,62 @@ namespace VllmChatClient.Test
             {
                 Assert.Fail($"输出的文本不是有效的JSON格式。内容: '{jsonText}', 错误: {ex.Message}");
             }
+        }
+
+        [Fact]
+        public async Task TestJsonSchemaOutput()
+        {
+            if (_skipTests)
+            {
+                return;
+            }
+
+            var schema = JsonDocument.Parse("""
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "greeting": { "type": "string" }
+                  },
+                  "required": ["name", "greeting"],
+                  "additionalProperties": false
+                }
+                """).RootElement.Clone();
+
+            var options = new GlmChatOptions
+            {
+                ThinkingEnabled = _chatOptions.ThinkingEnabled,
+                MaxOutputTokens = 3000,
+                ResponseFormat = ChatResponseFormat.ForJsonSchema(schema, "greeting_payload", "Greeting payload")
+            };
+
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
+                new ChatMessage(ChatRole.User,"请严格按指定 schema 返回 JSON 对象。输出必须且只能包含 name 和 greeting 两个字符串字段，其中 name 必须是“菲菲”，greeting 必须是一句问候语。不要输出代码块，也不要输出 JSON 之外的任何文字。")
+            };
+
+            var res = await _client.GetResponseAsync(messages, options);
+            Assert.NotNull(res);
+            Assert.Single(res.Messages);
+
+            if (res is ReasoningChatResponse reasoningResponse)
+            {
+                _output.WriteLine($"Reason: {reasoningResponse.Reason}");
+            }
+
+            _output.WriteLine($"Response: {res.Text}");
+
+            var textContent = res.Text.Trim();
+            Assert.DoesNotContain("```", textContent);
+
+            using var json = JsonDocument.Parse(textContent);
+            Assert.Equal(JsonValueKind.Object, json.RootElement.ValueKind);
+
+            Assert.True(json.RootElement.TryGetProperty("name", out var name));
+            Assert.True(json.RootElement.TryGetProperty("greeting", out var greeting));
+            Assert.False(string.IsNullOrWhiteSpace(name.GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(greeting.GetString()));
         }
     }
 }

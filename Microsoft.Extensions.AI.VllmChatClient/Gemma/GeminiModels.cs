@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 {
     /// <summary>
-    /// Gemini API ÇëÇóÄ£ĞÍ
+    /// Gemini API è¯·æ±‚æ¨¡å‹
     /// </summary>
     internal class GeminiRequest
     {
@@ -18,7 +18,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini ÄÚÈİÄ£ĞÍ
+    /// Gemini å†…å®¹æ¨¡å‹
     /// </summary>
     internal class GeminiContent
     {
@@ -30,7 +30,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini ÄÚÈİ²¿·Ö
+    /// Gemini å†…å®¹éƒ¨åˆ†
     /// </summary>
     internal class GeminiPart
     {
@@ -54,7 +54,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini ÄÚÁªÊı¾İ£¨ÓÃÓÚÍ¼Æ¬µÈ£©
+    /// Gemini å†…è”æ•°æ®ï¼ˆç”¨äºå›¾ç‰‡ç­‰ï¼‰
     /// </summary>
     internal class GeminiInlineData
     {
@@ -66,7 +66,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini º¯Êıµ÷ÓÃ
+    /// Gemini å‡½æ•°è°ƒç”¨
     /// </summary>
     internal class GeminiFunctionCall
     {
@@ -78,7 +78,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini º¯ÊıÏìÓ¦
+    /// Gemini å‡½æ•°å“åº”
     /// </summary>
     internal class GeminiFunctionResponse
     {
@@ -90,7 +90,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini Éú³ÉÅäÖÃ
+    /// Gemini ç”Ÿæˆé…ç½®
     /// </summary>
     internal class GeminiGenerationConfig
     {
@@ -109,12 +109,17 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
         [JsonPropertyName("responseMimeType")]
         public string? ResponseMimeType { get; set; }
 
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("responseSchema")]
         public object? ResponseSchema { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("responseJsonSchema")]
+        public object? ResponseJsonSchema { get; set; }
     }
 
     /// <summary>
-    /// Gemini Ë¼¿¼ÅäÖÃ
+    /// Gemini æ€è€ƒé…ç½®
     /// </summary>
     internal class GeminiThinkingConfig
     {
@@ -123,7 +128,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini ¹¤¾ß¶¨Òå
+    /// Gemini å·¥å…·å®šä¹‰
     /// </summary>
     internal class GeminiTool
     {
@@ -132,7 +137,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini º¯ÊıÉùÃ÷
+    /// Gemini å‡½æ•°å£°æ˜
     /// </summary>
     internal class GeminiFunctionDeclaration
     {
@@ -147,7 +152,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini API ÏìÓ¦Ä£ĞÍ
+    /// Gemini API å“åº”æ¨¡å‹
     /// </summary>
     internal class GeminiResponse
     {
@@ -159,7 +164,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini ºòÑ¡ÏìÓ¦
+    /// Gemini å€™é€‰å“åº”
     /// </summary>
     internal class GeminiCandidate
     {
@@ -174,7 +179,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
     }
 
     /// <summary>
-    /// Gemini Ê¹ÓÃÔªÊı¾İ
+    /// Gemini ä½¿ç”¨å…ƒæ•°æ®
     /// </summary>
     internal class GeminiUsageMetadata
     {

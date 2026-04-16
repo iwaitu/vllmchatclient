@@ -1177,9 +1177,9 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
             if (options?.ResponseFormat is ChatResponseFormatJson jsonFormat)
             {
                 genConfig.ResponseMimeType = "application/json";
-                if (jsonFormat.Schema != null)
+                if (jsonFormat.Schema is JsonElement schema)
                 {
-                    genConfig.ResponseSchema = jsonFormat.Schema;
+                    genConfig.ResponseJsonSchema = schema;
                 }
             }
 

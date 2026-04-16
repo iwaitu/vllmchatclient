@@ -684,7 +684,10 @@ namespace Microsoft.Extensions.AI
             if (options?.ResponseFormat is ChatResponseFormatJson jsonFormat)
             {
                 generationConfig.ResponseMimeType = "application/json";
-                generationConfig.ResponseSchema = jsonFormat.Schema;
+                if (jsonFormat.Schema is JsonElement schema)
+                {
+                    generationConfig.ResponseJsonSchema = schema;
+                }
                 hasGenerationConfig = true;
             }
 

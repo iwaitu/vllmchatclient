@@ -449,6 +449,29 @@ namespace VllmChatClient.Test
                 _ => throw new NotSupportedException($"未知函数: {name}")
             };
 
+        [Fact]
+        public async Task JsonSchemaOutputTest()
+        {
+            if (string.IsNullOrWhiteSpace(ApiToken))
+            {
+                return;
+            }
+
+            var options = new ChatOptions
+            {
+                MaxOutputTokens = 300,
+                ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                    StructuredJsonSchemaTestHelper.CreateGreetingSchema(),
+                    "greeting_payload",
+                    "Greeting payload")
+            };
+
+            var res = await _client.GetResponseAsync(StructuredJsonSchemaTestHelper.CreateGreetingMessages(), options);
+            Assert.NotNull(res);
+            Assert.Single(res.Messages);
+            StructuredJsonSchemaTestHelper.AssertGreetingJson(res.Text);
+        }
+
     }
 
 }

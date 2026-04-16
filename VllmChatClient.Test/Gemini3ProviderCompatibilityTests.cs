@@ -23,6 +23,56 @@ public class Gemini3ProviderCompatibilityTests
     }
 
     [Fact]
+    public async Task GeminiNative_Request_UsesResponseJsonSchema_ForStructuredOutput()
+    {
+        const string responseJson = """
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "{\"name\":\"菲菲\",\"greeting\":\"你好\"}"
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ]
+}
+""";
+
+        var handler = new CaptureHandler(responseJson);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmGemini3ChatClient(
+            "https://generativelanguage.googleapis.com/v1beta",
+            "gemini-key",
+            "gemini-3-pro-preview",
+            httpClient);
+
+        _ = await client.GetResponseAsync(
+            StructuredJsonSchemaTestHelper.CreateGreetingMessages(),
+            new GeminiChatOptions
+            {
+                ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                    StructuredJsonSchemaTestHelper.CreateGreetingSchema(),
+                    "greeting_payload",
+                    "Greeting payload")
+            });
+
+        using var doc = JsonDocument.Parse(handler.LastRequestBody!);
+        var generationConfig = doc.RootElement.GetProperty("generationConfig");
+        Assert.Equal("application/json", generationConfig.GetProperty("responseMimeType").GetString());
+        Assert.True(generationConfig.TryGetProperty("responseJsonSchema", out var responseJsonSchema));
+        Assert.False(generationConfig.TryGetProperty("responseSchema", out _));
+        Assert.Equal(JsonValueKind.Object, responseJsonSchema.ValueKind);
+        Assert.False(responseJsonSchema.GetProperty("additionalProperties").GetBoolean());
+        Assert.Equal("object", responseJsonSchema.GetProperty("type").GetString());
+    }
+
+    [Fact]
     public async Task OpenRouter_Request_UsesBearerAndReasoningEnabled()
     {
         const string responseJson = """

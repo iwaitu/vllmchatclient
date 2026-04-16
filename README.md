@@ -11,6 +11,16 @@
 
 A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Nemotron-3 Super 120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **Qwen 3.6**, **QwQ-32B**, **Gemma3**, **Gemma4**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5**, **MiMo v2 Pro / MiMo v2 Flash** with advanced reasoning capabilities.
 
+## 📢 Latest Update
+
+- Upgraded `Microsoft.Extensions.AI` to `10.5.0`.
+- `VllmBaseChatClient` now supports vLLM structured JSON output via both:
+  - `response_format = { type: "json_schema", json_schema: { name, description, schema, strict } }`
+  - `extra_body = { structured_outputs: { json: schema } }`
+- Google native endpoints now use Google official structured output field `generationConfig.responseJsonSchema`, while non-Google endpoints continue to use the vLLM / OpenAI-compatible `response_format + extra_body.structured_outputs` path.
+- Added live `json_schema` tests for all chat clients based on `VllmBaseChatClient`.
+- Serial verification passed on: Claude, DeepSeek-R1, DeepSeek-V3.2, Gemma3, Gemma4 Google native, GLM-4.5, GPT-OSS, Kimi 2.5, MiMo v2 Flash, MiniMax-M2.7, Nemotron, OpenAI GPT, Qwen3-Next, Qwen3-VL.
+- Note for reasoning models: `json_schema` tests may require a larger `MaxOutputTokens` budget. For `MiniMax-M2.7`, increasing it from `300` to `3000` was necessary because reasoning tokens consumed most of the smaller limit.
 
 ## 🚀 Features
 
@@ -42,6 +52,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
   - Google 原生 API 使用 `x-goog-api-key`
   - vLLM / OpenAI-compatible 接口使用 `Authorization: Bearer ...`
 - **Google 原生 API 支持能力**：文本对话、流式输出、图片输入、thinking 控制、自动/手动工具调用。
+- **Google 原生结构化输出**：当 endpoint 是 Google 官方 URL 时，JSON Schema 输出会走 Google 官方 `generationConfig.responseJsonSchema`；非 Google URL 仍走 `response_format=json_schema` 与 `extra_body.structured_outputs.json`。
 - **vLLM 兼容支持**：支持 `Gemma 4` 的聊天、流式、JSON 输出、图片输入，以及工具调用场景。
 - **思维链处理修复**：Google 原生返回中的 `thought` / thinking 内容不再混入最终答案文本，而是通过 `ReasoningChatResponse` / `ReasoningChatResponseUpdate` 单独暴露。
 - **测试覆盖**：已补充 `Gemma4Tests`、`Gemma4ProviderCompatibilityTests`、`Gemma4NativeToolCallingTests`，分别覆盖 Google 原生与 vLLM 两条链路。
@@ -151,6 +162,9 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - **Endpoint-based protocol switching**:
   - Google native URLs -> `generateContent` / `streamGenerateContent`
   - Other URLs -> `/chat/completions`
+- **Structured JSON output routing**:
+  - Google native URLs -> `generationConfig.responseJsonSchema`
+  - Other URLs -> `response_format=json_schema` + `extra_body.structured_outputs`
 - **Auth header auto-switch**:
   - Google native -> `x-goog-api-key`
   - vLLM/OpenAI-compatible -> `Authorization: Bearer ...`

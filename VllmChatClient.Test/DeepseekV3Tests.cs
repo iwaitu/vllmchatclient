@@ -386,5 +386,30 @@ namespace VllmChatClient.Test
             // 验证最终回答是否包含相关信息
             Assert.True(answerText.Contains("爱民书店") || answerText.Contains("100米") || answerText.Contains("方圆广场"), "Reply should contain location info");
         }
+
+        [Fact]
+        public async Task JsonSchemaOutputTest()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY")))
+            {
+                return;
+            }
+
+            var options = new VllmChatOptions
+            {
+                ThinkingEnabled = true,
+                MaxOutputTokens = 300,
+                ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                    StructuredJsonSchemaTestHelper.CreateGreetingSchema(),
+                    "greeting_payload",
+                    "Greeting payload")
+            };
+
+            var res = await _client.GetResponseAsync(StructuredJsonSchemaTestHelper.CreateGreetingMessages(), options);
+            Assert.NotNull(res);
+            Assert.Single(res.Messages);
+            StructuredJsonSchemaTestHelper.AssertGreetingJson(res.Text);
+            _output.WriteLine($"Response: {res.Text}");
+        }
     }
 }

@@ -191,5 +191,27 @@ namespace VllmChatClient.Test
             _output.WriteLine($"Reason: {reason}");
             _output.WriteLine($"Response: {res}");
         }
+
+        [Fact]
+        public async Task JsonSchemaOutputTest()
+        {
+            if (_skipTests) return;
+
+            var options = new VllmChatOptions
+            {
+                ThinkingEnabled = true,
+                MaxOutputTokens = 300,
+                ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                    StructuredJsonSchemaTestHelper.CreateGreetingSchema(),
+                    "greeting_payload",
+                    "Greeting payload")
+            };
+
+            var res = await _client.GetResponseAsync(StructuredJsonSchemaTestHelper.CreateGreetingMessages(), options);
+            Assert.NotNull(res);
+            Assert.Single(res.Messages);
+            StructuredJsonSchemaTestHelper.AssertGreetingJson(res.Text);
+            _output.WriteLine($"Response: {res.Text}");
+        }
     }
 }

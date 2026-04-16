@@ -554,5 +554,130 @@ namespace VllmChatClient.Test
             Assert.False(string.IsNullOrWhiteSpace(name.GetString()));
             Assert.False(string.IsNullOrWhiteSpace(greeting.GetString()));
         }
+
+        [Fact]
+        public async Task StreamFunctionCallThenJsonSchemaOutputTest()
+        {
+            if (_skipTests)
+            {
+                return;
+            }
+
+            functionCallTime = 0;
+
+            var schema = JsonDocument.Parse("""
+                {
+                  "type": "object",
+                  "properties": {
+                    "address": { "type": "string" },
+                    "summary": { "type": "string" }
+                  },
+                  "required": ["address", "summary"],
+                  "additionalProperties": false
+                }
+                """).RootElement.Clone();
+
+            var options = new GlmChatOptions
+            {
+                ThinkingEnabled = _chatOptions.ThinkingEnabled,
+                MaxOutputTokens = 3000,
+                Temperature = 0.2f,
+                Tools = [AIFunctionFactory.Create(Search)],
+                ResponseFormat = ChatResponseFormat.ForJsonSchema(schema, "address_payload", "Address payload")
+            };
+
+            IChatClient client = new ChatClientBuilder(_client)
+                .UseFunctionInvocation()
+                .Build();
+
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲。涉及地址查询时必须先调用 Search 工具获取结果，然后严格按指定 schema 返回 JSON。不要输出代码块，也不要输出 JSON 之外的任何文字。"),
+                new ChatMessage(ChatRole.User, "请查询南宁火车站在哪里，并严格按 schema 返回。summary 里请简要说明这是通过工具查询到的结果。")
+            };
+
+            string reason = string.Empty;
+            string res = string.Empty;
+            UsageDetails? usage = null;
+
+            const int maxAttempts = 3;
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                reason = string.Empty;
+                res = string.Empty;
+                usage = null;
+                functionCallTime = 0;
+
+                try
+                {
+                    await foreach (var update in client.GetStreamingResponseAsync(messages, options))
+                    {
+                        if (update is ReasoningChatResponseUpdate reasoningMessage)
+                        {
+                            if (reasoningMessage.Thinking)
+                            {
+                                reason += reasoningMessage.Text;
+                            }
+                            else
+                            {
+                                res += reasoningMessage.Text;
+                            }
+                        }
+                        else
+                        {
+                            res += update.Text;
+                        }
+
+                        if (update is UsageChatResponseUpdate usageUpdate)
+                        {
+                            usage ??= usageUpdate.Usage;
+                        }
+                    }
+
+                    break;
+                }
+                catch (InvalidOperationException ex) when (attempt < maxAttempts && ex.Message.Contains("1302", StringComparison.Ordinal))
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5));
+                    continue;
+                }
+                catch (InvalidOperationException ex) when (attempt < maxAttempts && ex.Message.Contains("速率限制", StringComparison.Ordinal))
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5));
+                    continue;
+                }
+                catch
+                {
+                    throw;
+                }
+            }
+
+            Assert.True(functionCallTime > 0, "Expected Search tool to be invoked at least once.");
+            Assert.False(string.IsNullOrWhiteSpace(res));
+            Assert.False(string.IsNullOrWhiteSpace(reason));
+            Assert.DoesNotContain("```", res);
+
+            using var json = JsonDocument.Parse(res.Trim());
+            Assert.Equal(JsonValueKind.Object, json.RootElement.ValueKind);
+
+            var propertyNames = json.RootElement.EnumerateObject()
+                .Select(p => p.Name)
+                .OrderBy(n => n, StringComparer.Ordinal)
+                .ToArray();
+
+            Assert.Equal(["address", "summary"], propertyNames);
+
+            var address = json.RootElement.GetProperty("address").GetString();
+            var summary = json.RootElement.GetProperty("summary").GetString();
+
+            Assert.False(string.IsNullOrWhiteSpace(address));
+            Assert.False(string.IsNullOrWhiteSpace(summary));
+            Assert.Contains("南宁市青秀区方圆广场北面站前路1号", address);
+            Assert.NotNull(usage);
+
+            _output.WriteLine($"Reason: {reason}");
+            _output.WriteLine($"Response: {res}");
+            _output.WriteLine($"Usage: input={usage!.InputTokenCount}, output={usage.OutputTokenCount}, total={usage.TotalTokenCount}");
+        }
     }
 }

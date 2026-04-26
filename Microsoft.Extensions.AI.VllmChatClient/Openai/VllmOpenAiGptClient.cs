@@ -7,8 +7,8 @@ namespace Microsoft.Extensions.AI
 {
     public class VllmOpenAiGptClient : VllmBaseChatClient
     {
-        public VllmOpenAiGptClient(string endpoint, string? token = null, string? modelId = "openai/gpt-5.2-codex", HttpClient? httpClient = null)
-            : base(ProcessEndpoint(endpoint), token, modelId, httpClient)
+        public VllmOpenAiGptClient(string endpoint, string? token = null, string? modelId = "openai/gpt-5.2-codex", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(ProcessEndpoint(endpoint), token, modelId, httpClient, apiMode)
         {
         }
 
@@ -108,6 +108,11 @@ namespace Microsoft.Extensions.AI
 
         public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
+            if (ApiMode == VllmApiMode.Responses)
+            {
+                return await base.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+            }
+
             _ = Throw.IfNull(messages);
 
             string apiEndpoint = GetChatEndpoint();

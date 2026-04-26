@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -19,8 +19,8 @@ namespace Microsoft.Extensions.AI
         /// <param name="token">API 认证令牌</param>
         /// <param name="modelId">要使用的模型的 ID</param>
         /// <param name="httpClient">用于 HTTP 操作的 HttpClient 实例</param>
-        public VllmDeepseekR1ChatClient(string endpoint, string? token = null, string? modelId = "deepseekr1", HttpClient? httpClient = null)
-            : base(endpoint, token, modelId, httpClient)
+        public VllmDeepseekR1ChatClient(string endpoint, string? token = null, string? modelId = "deepseekr1", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(endpoint, token, modelId, httpClient, apiMode)
         {
         }
 

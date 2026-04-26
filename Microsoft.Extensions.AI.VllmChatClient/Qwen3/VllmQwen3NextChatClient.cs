@@ -49,8 +49,8 @@ namespace Microsoft.Extensions.AI
             return request;
         }
 
-        public VllmQwen3NextChatClient(string endpoint, string? token = null, string? modelId = "qwen3", HttpClient? httpClient = null)
-            : base(endpoint, token, modelId, httpClient)
+        public VllmQwen3NextChatClient(string endpoint, string? token = null, string? modelId = "qwen3", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(endpoint, token, modelId, httpClient, apiMode)
         {
         }
 

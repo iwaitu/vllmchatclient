@@ -1,4 +1,4 @@
-﻿using Microsoft.Shared.Diagnostics;
+using Microsoft.Shared.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text;
@@ -14,8 +14,8 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
 
         private static readonly string DefaultPromptMarker = "你必须遵循以下工具调用规则：";
         
-        public VllmGptOssChatClient(string endpoint, string? token = null, string? modelId = "gpt-oss-120b", HttpClient? httpClient = null)
-            : base(ProcessEndpoint(endpoint), token, modelId, httpClient)
+        public VllmGptOssChatClient(string endpoint, string? token = null, string? modelId = "gpt-oss-120b", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(ProcessEndpoint(endpoint), token, modelId, httpClient, apiMode)
         {
         }
 

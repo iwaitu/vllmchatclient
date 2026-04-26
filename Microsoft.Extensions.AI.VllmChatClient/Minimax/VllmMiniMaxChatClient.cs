@@ -1,10 +1,10 @@
-﻿namespace Microsoft.Extensions.AI
+namespace Microsoft.Extensions.AI
 {
 
     public class VllmMiniMaxChatClient : VllmBaseChatClient
     {
-        public VllmMiniMaxChatClient(string endpoint, string? token = null, string? modelId = "MiniMax-M2.1", HttpClient? httpClient = null)
-            : base(endpoint, token, modelId, httpClient)
+        public VllmMiniMaxChatClient(string endpoint, string? token = null, string? modelId = "MiniMax-M2.1", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(endpoint, token, modelId, httpClient, apiMode)
         {
         }
 

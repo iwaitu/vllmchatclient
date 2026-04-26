@@ -7,8 +7,8 @@ namespace Microsoft.Extensions.AI
 {
     public class VllmClaudeChatClient : VllmBaseChatClient
     {
-        public VllmClaudeChatClient(string endpoint, string? token = null, string? modelId = "anthropic/claude-opus-4.6", HttpClient? httpClient = null)
-            : base(endpoint, token, modelId, httpClient)
+        public VllmClaudeChatClient(string endpoint, string? token = null, string? modelId = "anthropic/claude-opus-4.6", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(endpoint, token, modelId, httpClient, apiMode)
         {
         }
 
@@ -36,6 +36,11 @@ namespace Microsoft.Extensions.AI
 
         public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
+            if (ApiMode != VllmApiMode.ChatCompletions)
+            {
+                return await base.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+            }
+
             _ = Throw.IfNull(messages);
 
             string apiEndpoint = GetChatEndpoint();

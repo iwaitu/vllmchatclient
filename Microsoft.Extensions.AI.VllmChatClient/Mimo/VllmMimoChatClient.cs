@@ -1,11 +1,11 @@
-﻿using Microsoft.Shared.Diagnostics;
+using Microsoft.Shared.Diagnostics;
 
 namespace Microsoft.Extensions.AI.VllmChatClient.Mimo
 {
     public class VllmMimoChatClient : VllmBaseChatClient
     {
-        public VllmMimoChatClient(string endpoint, string? token = null, string? modelId = "mimo-v2-pro", HttpClient? httpClient = null)
-            : base(ProcessEndpoint(endpoint), null, modelId, httpClient)
+        public VllmMimoChatClient(string endpoint, string? token = null, string? modelId = "mimo-v2-pro", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(ProcessEndpoint(endpoint), null, modelId, httpClient, apiMode)
         {
             if (!string.IsNullOrWhiteSpace(token))
             {

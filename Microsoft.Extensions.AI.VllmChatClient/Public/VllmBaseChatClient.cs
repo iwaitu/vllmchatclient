@@ -16,6 +16,7 @@ namespace Microsoft.Extensions.AI
         private static readonly ConcurrentDictionary<string, (SkillCatalog? catalog, DateTime timestamp)> _skillCatalogCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ChatClientMetadata _metadata;
         private readonly string _apiChatEndpoint;
+        private readonly VllmApiMode _apiMode;
         private readonly HttpClient _httpClient;
         private JsonSerializerOptions _toolCallJsonSerializerOptions = AIJsonUtilities.DefaultOptions;
 
@@ -23,7 +24,7 @@ namespace Microsoft.Extensions.AI
 
         private sealed record SkillManifest(string Name, string Description, string FileName, string RelativePath, string FullPath);
 
-        protected VllmBaseChatClient(string endpoint, string? token, string? modelId, HttpClient? httpClient)
+        protected VllmBaseChatClient(string endpoint, string? token, string? modelId, HttpClient? httpClient, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
         {
             _ = Throw.IfNull(endpoint);
             if (modelId is not null)
@@ -32,8 +33,17 @@ namespace Microsoft.Extensions.AI
             }
 
             _apiChatEndpoint = endpoint ?? "http://localhost:8000/{0}/{1}";
+            _apiMode = apiMode;
             _httpClient = httpClient ?? VllmUtilities.SharedClient;
-            if (!string.IsNullOrWhiteSpace(token))
+            if (!string.IsNullOrWhiteSpace(token) && apiMode == VllmApiMode.AnthropicMessages)
+            {
+                _httpClient.DefaultRequestHeaders.Authorization = null;
+                _httpClient.DefaultRequestHeaders.Remove("x-api-key");
+                _httpClient.DefaultRequestHeaders.Add("x-api-key", token);
+                _httpClient.DefaultRequestHeaders.Remove("anthropic-version");
+                _httpClient.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
+            }
+            else if (!string.IsNullOrWhiteSpace(token))
             {
                 _httpClient.DefaultRequestHeaders.Authorization =
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
@@ -51,6 +61,8 @@ namespace Microsoft.Extensions.AI
         protected string ApiChatEndpoint => _apiChatEndpoint;
 
         protected HttpClient HttpClient => _httpClient;
+
+        protected VllmApiMode ApiMode => _apiMode;
 
         protected virtual string ProviderName => "vllm";
 
@@ -99,6 +111,15 @@ namespace Microsoft.Extensions.AI
         public virtual async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
             _ = Throw.IfNull(messages);
+            if (_apiMode == VllmApiMode.Responses)
+            {
+                return await GetResponsesApiResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+            }
+            else if (_apiMode == VllmApiMode.AnthropicMessages)
+            {
+                return await GetAnthropicMessagesResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+            }
+
             string apiEndpoint = GetChatEndpoint();
             const int maxAttempts = 2; // retry at most once for malformed tool-call protocol payloads
 
@@ -190,6 +211,25 @@ namespace Microsoft.Extensions.AI
         public virtual async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             _ = Throw.IfNull(messages);
+            if (_apiMode == VllmApiMode.Responses)
+            {
+                await foreach (var update in GetResponsesApiStreamingResponseAsync(messages, options, cancellationToken).ConfigureAwait(false))
+                {
+                    yield return update;
+                }
+
+                yield break;
+            }
+            else if (_apiMode == VllmApiMode.AnthropicMessages)
+            {
+                await foreach (var update in GetAnthropicMessagesStreamingResponseAsync(messages, options, cancellationToken).ConfigureAwait(false))
+                {
+                    yield return update;
+                }
+
+                yield break;
+            }
+
             string apiEndpoint = GetChatEndpoint();
             using HttpRequestMessage request = new(HttpMethod.Post, apiEndpoint)
             {
@@ -429,7 +469,441 @@ namespace Microsoft.Extensions.AI
             }
         }
 
+        private async Task<ChatResponse> GetResponsesApiResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options, CancellationToken cancellationToken)
+        {
+            using var httpResponse = await _httpClient.PostAsJsonAsync(
+                GetResponsesEndpoint(),
+                ToVllmResponsesRequest(messages, options, stream: false),
+                JsonContext.Default.VllmResponsesRequest,
+                cancellationToken).ConfigureAwait(false);
+
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
+            }
+
+            var response = (await httpResponse.Content.ReadFromJsonAsync(
+                JsonContext.Default.VllmResponsesResponse,
+                cancellationToken).ConfigureAwait(false))!;
+
+            var (message, reasoning) = FromVllmResponsesResponse(response);
+            bool hasToolCall = message.Contents.Any(c => c is FunctionCallContent);
+
+            return new ReasoningChatResponse(message, reasoning)
+            {
+                CreatedAt = response.CreatedAt > 0
+                    ? DateTimeOffset.FromUnixTimeSeconds(response.CreatedAt).UtcDateTime
+                    : DateTimeOffset.UtcNow,
+                FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToResponsesFinishReason(response.Status),
+                ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
+                ResponseId = response.Id,
+                Usage = ParseVllmResponsesUsage(response.Usage),
+            };
+        }
+
+        private async IAsyncEnumerable<ChatResponseUpdate> GetResponsesApiStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            using HttpRequestMessage request = new(HttpMethod.Post, GetResponsesEndpoint())
+            {
+                Content = JsonContent.Create(ToVllmResponsesRequest(messages, options, stream: true), JsonContext.Default.VllmResponsesRequest)
+            };
+
+            using var httpResponse = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
+            }
+
+            string responseId = Guid.NewGuid().ToString("N");
+            string modelId = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty;
+            bool emittedText = false;
+            var toolCallBuffers = new Dictionary<string, (string? Name, string? CallId, string Arguments)>(StringComparer.Ordinal);
+
+            yield return new ChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                FinishReason = null,
+                ModelId = modelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                Contents = new List<AIContent>(),
+            };
+
+            using var httpResponseStream = await httpResponse.Content
+#if NET
+                .ReadAsStreamAsync(cancellationToken)
+#else
+                .ReadAsStreamAsync()
+#endif
+                .ConfigureAwait(false);
+
+            using var streamReader = new StreamReader(httpResponseStream);
+#if NET
+            while ((await streamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is { } line)
+#else
+            while ((await streamReader.ReadLineAsync().ConfigureAwait(false)) is { } line)
+#endif
+            {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith(':') || line.StartsWith("event:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string jsonPart = Regex.Replace(line, @"^data:\s*", "");
+                if (string.IsNullOrEmpty(jsonPart))
+                {
+                    continue;
+                }
+                else if (jsonPart == "[DONE]")
+                {
+                    break;
+                }
+
+                var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmChatStreamResponse);
+                if (chunk is null)
+                {
+                    continue;
+                }
+
+                if (chunk.Response?.Id is { Length: > 0 } streamedResponseId)
+                {
+                    responseId = streamedResponseId;
+                }
+
+                if (chunk.Response?.Model is { Length: > 0 } streamedModelId)
+                {
+                    modelId = streamedModelId;
+                }
+
+                switch (chunk.Type)
+                {
+                    case "response.output_text.delta":
+                        if (!string.IsNullOrEmpty(chunk.Delta))
+                        {
+                            emittedText = true;
+                            yield return BuildResponsesTextUpdate(responseId, modelId, chunk.Delta, thinking: false);
+                        }
+                        break;
+
+                    case "response.reasoning_summary_text.delta":
+                        if (!string.IsNullOrEmpty(chunk.Delta))
+                        {
+                            yield return BuildResponsesTextUpdate(responseId, modelId, chunk.Delta, thinking: true);
+                        }
+                        break;
+
+                    case "response.output_item.added":
+                        if (chunk.Item?.Type == "function_call")
+                        {
+                            string key = GetResponsesToolCallKey(chunk.ItemId, chunk.OutputIndex);
+                            toolCallBuffers[key] = (chunk.Item.Name, chunk.Item.CallId, chunk.Item.Arguments ?? string.Empty);
+                        }
+                        break;
+
+                    case "response.function_call_arguments.delta":
+                        {
+                            string key = GetResponsesToolCallKey(chunk.ItemId, chunk.OutputIndex);
+                            toolCallBuffers.TryGetValue(key, out var buffer);
+                            buffer.Arguments += chunk.Delta ?? string.Empty;
+                            toolCallBuffers[key] = buffer;
+                            break;
+                        }
+
+                    case "response.function_call_arguments.done":
+                        {
+                            string key = GetResponsesToolCallKey(chunk.ItemId, chunk.OutputIndex);
+                            toolCallBuffers.TryGetValue(key, out var buffer);
+                            toolCallBuffers[key] = (
+                                chunk.Name ?? buffer.Name,
+                                chunk.CallId ?? buffer.CallId,
+                                chunk.Arguments ?? buffer.Arguments);
+                            break;
+                        }
+
+                    case "response.output_item.done":
+                        if (chunk.Item?.Type == "function_call")
+                        {
+                            string key = GetResponsesToolCallKey(chunk.ItemId ?? chunk.Item.Id, chunk.OutputIndex);
+                            toolCallBuffers.TryGetValue(key, out var buffer);
+                            var name = chunk.Item.Name ?? buffer.Name;
+                            if (!string.IsNullOrWhiteSpace(name))
+                            {
+                                yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
+                                {
+                                    Name = name,
+                                    Arguments = chunk.Item.Arguments ?? buffer.Arguments
+                                }, chunk.Item.CallId ?? buffer.CallId);
+                            }
+                            toolCallBuffers.Remove(key);
+                        }
+                        break;
+
+                    case "response.completed":
+                        if (chunk.Response is { } completed)
+                        {
+                            if (!emittedText && !string.IsNullOrEmpty(completed.OutputText))
+                            {
+                                yield return BuildResponsesTextUpdate(responseId, modelId, completed.OutputText, thinking: false);
+                            }
+
+                            if (completed.Usage is { } usage)
+                            {
+                                yield return new UsageChatResponseUpdate
+                                {
+                                    CreatedAt = completed.CreatedAt > 0
+                                        ? DateTimeOffset.FromUnixTimeSeconds(completed.CreatedAt)
+                                        : DateTimeOffset.Now,
+                                    ModelId = completed.Model ?? modelId,
+                                    ResponseId = responseId,
+                                    Usage = ParseVllmResponsesUsage(usage),
+                                };
+                            }
+                        }
+                        break;
+
+                    case "error":
+                        throw new InvalidOperationException(chunk.Text ?? chunk.Delta ?? "Responses API streaming returned an error event.");
+                }
+            }
+
+            foreach (var buffered in toolCallBuffers.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(buffered.Name))
+                {
+                    yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
+                    {
+                        Name = buffered.Name,
+                        Arguments = buffered.Arguments
+                    }, buffered.CallId);
+                }
+            }
+        }
+
+        private async Task<ChatResponse> GetAnthropicMessagesResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options, CancellationToken cancellationToken)
+        {
+            using var httpResponse = await _httpClient.PostAsJsonAsync(
+                GetAnthropicMessagesEndpoint(),
+                ToVllmAnthropicMessagesRequest(messages, options, stream: false),
+                JsonContext.Default.VllmAnthropicMessagesRequest,
+                cancellationToken).ConfigureAwait(false);
+
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
+            }
+
+            var response = (await httpResponse.Content.ReadFromJsonAsync(
+                JsonContext.Default.VllmAnthropicMessagesResponse,
+                cancellationToken).ConfigureAwait(false))!;
+
+            var (message, reasoning) = FromVllmAnthropicMessagesResponse(response);
+            bool hasToolCall = message.Contents.Any(c => c is FunctionCallContent);
+
+            return new ReasoningChatResponse(message, reasoning)
+            {
+                CreatedAt = DateTimeOffset.UtcNow,
+                FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToAnthropicFinishReason(response.StopReason),
+                ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
+                ResponseId = response.Id,
+                Usage = ParseVllmAnthropicUsage(response.Usage),
+            };
+        }
+
+        private async IAsyncEnumerable<ChatResponseUpdate> GetAnthropicMessagesStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            using HttpRequestMessage request = new(HttpMethod.Post, GetAnthropicMessagesEndpoint())
+            {
+                Content = JsonContent.Create(ToVllmAnthropicMessagesRequest(messages, options, stream: true), JsonContext.Default.VllmAnthropicMessagesRequest)
+            };
+
+            using var httpResponse = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
+            }
+
+            string responseId = Guid.NewGuid().ToString("N");
+            string modelId = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty;
+            var toolCallBuffers = new Dictionary<int, (string? Id, string? Name, string Arguments)>();
+
+            yield return new ChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                FinishReason = null,
+                ModelId = modelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                Contents = new List<AIContent>(),
+            };
+
+            using var httpResponseStream = await httpResponse.Content
+#if NET
+                .ReadAsStreamAsync(cancellationToken)
+#else
+                .ReadAsStreamAsync()
+#endif
+                .ConfigureAwait(false);
+
+            using var streamReader = new StreamReader(httpResponseStream);
+#if NET
+            while ((await streamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is { } line)
+#else
+            while ((await streamReader.ReadLineAsync().ConfigureAwait(false)) is { } line)
+#endif
+            {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith(':') || line.StartsWith("event:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string jsonPart = Regex.Replace(line, @"^data:\s*", "");
+                if (string.IsNullOrEmpty(jsonPart) || jsonPart == "[DONE]")
+                {
+                    continue;
+                }
+
+                var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmAnthropicStreamEvent);
+                if (chunk is null)
+                {
+                    continue;
+                }
+
+                if (chunk.Message?.Id is { Length: > 0 } messageId)
+                {
+                    responseId = messageId;
+                }
+
+                if (chunk.Message?.Model is { Length: > 0 } messageModel)
+                {
+                    modelId = messageModel;
+                }
+
+                switch (chunk.Type)
+                {
+                    case "content_block_start":
+                        if (chunk.ContentBlock?.Type == "tool_use")
+                        {
+                            toolCallBuffers[chunk.Index ?? 0] = (
+                                chunk.ContentBlock.Id,
+                                chunk.ContentBlock.Name,
+                                GetAnthropicToolInputBuffer(chunk.ContentBlock.Input));
+                        }
+                        else if (chunk.ContentBlock?.Type == "text" && !string.IsNullOrEmpty(chunk.ContentBlock.Text))
+                        {
+                            yield return BuildResponsesTextUpdate(responseId, modelId, chunk.ContentBlock.Text, thinking: false);
+                        }
+                        else if (chunk.ContentBlock?.Type == "thinking" && !string.IsNullOrEmpty(chunk.ContentBlock.Thinking))
+                        {
+                            yield return BuildResponsesTextUpdate(responseId, modelId, chunk.ContentBlock.Thinking, thinking: true);
+                        }
+                        break;
+
+                    case "content_block_delta":
+                        if (chunk.Delta?.Type == "text_delta" && !string.IsNullOrEmpty(chunk.Delta.Text))
+                        {
+                            yield return BuildResponsesTextUpdate(responseId, modelId, chunk.Delta.Text, thinking: false);
+                        }
+                        else if (chunk.Delta?.Type == "thinking_delta" && !string.IsNullOrEmpty(chunk.Delta.Thinking))
+                        {
+                            yield return BuildResponsesTextUpdate(responseId, modelId, chunk.Delta.Thinking, thinking: true);
+                        }
+                        else if (chunk.Delta?.Type == "input_json_delta")
+                        {
+                            int index = chunk.Index ?? 0;
+                            toolCallBuffers.TryGetValue(index, out var buffer);
+                            buffer.Arguments += chunk.Delta.PartialJson ?? string.Empty;
+                            toolCallBuffers[index] = buffer;
+                        }
+                        break;
+
+                    case "content_block_stop":
+                        {
+                            int index = chunk.Index ?? 0;
+                            if (toolCallBuffers.TryGetValue(index, out var buffer) && !string.IsNullOrWhiteSpace(buffer.Name))
+                            {
+                                yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
+                                {
+                                    Name = buffer.Name,
+                                    Arguments = string.IsNullOrWhiteSpace(buffer.Arguments) ? "{}" : buffer.Arguments
+                                }, buffer.Id);
+                                toolCallBuffers.Remove(index);
+                            }
+                            break;
+                        }
+
+                    case "message_delta":
+                        if (chunk.Usage is { } usage)
+                        {
+                            yield return new UsageChatResponseUpdate
+                            {
+                                CreatedAt = DateTimeOffset.Now,
+                                ModelId = modelId,
+                                ResponseId = responseId,
+                                Usage = ParseVllmAnthropicUsage(usage),
+                            };
+                        }
+                        break;
+                }
+            }
+        }
+
         protected virtual string GetChatEndpoint() => string.Format(_apiChatEndpoint, "v1", "chat/completions");
+
+        protected virtual string GetResponsesEndpoint()
+        {
+            if (_apiChatEndpoint.Contains("{0}", StringComparison.Ordinal) || _apiChatEndpoint.Contains("{1}", StringComparison.Ordinal))
+            {
+                return string.Format(_apiChatEndpoint, "v1", "responses");
+            }
+
+            if (_apiChatEndpoint.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+            {
+                return _apiChatEndpoint[..^"/chat/completions".Length] + "/responses";
+            }
+
+            if (_apiChatEndpoint.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+            {
+                return _apiChatEndpoint + "/responses";
+            }
+
+            return _apiChatEndpoint;
+        }
+
+        protected virtual string GetAnthropicMessagesEndpoint()
+        {
+            if (_apiChatEndpoint.Contains("{0}", StringComparison.Ordinal) || _apiChatEndpoint.Contains("{1}", StringComparison.Ordinal))
+            {
+                return string.Format(_apiChatEndpoint, "v1", "messages");
+            }
+
+            if (_apiChatEndpoint.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+            {
+                return _apiChatEndpoint[..^"/chat/completions".Length] + "/messages";
+            }
+
+            if (_apiChatEndpoint.EndsWith("/responses", StringComparison.OrdinalIgnoreCase))
+            {
+                return _apiChatEndpoint[..^"/responses".Length] + "/messages";
+            }
+
+            if (_apiChatEndpoint.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+            {
+                return _apiChatEndpoint + "/messages";
+            }
+
+            if (!_apiChatEndpoint.EndsWith("/messages", StringComparison.OrdinalIgnoreCase))
+            {
+                return _apiChatEndpoint.TrimEnd('/') + "/v1/messages";
+            }
+
+            return _apiChatEndpoint;
+        }
 
         protected virtual ChatResponseUpdate BuildTextUpdate(string responseId, string text, bool thinking)
         {
@@ -457,6 +931,19 @@ namespace Microsoft.Extensions.AI
             };
         }
 
+        private ChatResponseUpdate BuildResponsesTextUpdate(string responseId, string modelId, string text, bool thinking)
+        {
+            return new ReasoningChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                ModelId = string.IsNullOrWhiteSpace(modelId) ? _metadata.DefaultModelId : modelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                Thinking = thinking,
+                Contents = new List<AIContent> { new TextContent(text) }
+            };
+        }
+
         private static UsageDetails? ParseVllmChatResponseUsage(VllmChatResponse response)
         {
             return ParseVllmUsage(response?.Usage);
@@ -477,6 +964,58 @@ namespace Microsoft.Extensions.AI
             };
         }
 
+        private static UsageDetails? ParseVllmResponsesUsage(VllmResponsesUsage? usage)
+        {
+            if (usage == null)
+            {
+                return null;
+            }
+
+            return new UsageDetails
+            {
+                InputTokenCount = usage.InputTokens,
+                OutputTokenCount = usage.OutputTokens,
+                TotalTokenCount = usage.TotalTokens
+            };
+        }
+
+        private static UsageDetails? ParseVllmAnthropicUsage(VllmAnthropicUsage? usage)
+        {
+            if (usage == null)
+            {
+                return null;
+            }
+
+            return new UsageDetails
+            {
+                InputTokenCount = usage.InputTokens,
+                OutputTokenCount = usage.OutputTokens,
+                TotalTokenCount = usage.InputTokens + usage.OutputTokens
+            };
+        }
+
+        private static string GetAnthropicToolInputBuffer(JsonElement? input)
+        {
+            if (input is not JsonElement element || element.ValueKind == JsonValueKind.Null || element.ValueKind == JsonValueKind.Undefined)
+            {
+                return string.Empty;
+            }
+
+            if (element.ValueKind == JsonValueKind.Object && !element.EnumerateObject().Any())
+            {
+                return string.Empty;
+            }
+
+            return element.GetRawText();
+        }
+
+        private static string GetResponsesToolCallKey(string? itemId, int? outputIndex)
+        {
+            return !string.IsNullOrWhiteSpace(itemId)
+                ? itemId
+                : (outputIndex ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         protected static ChatFinishReason? ToFinishReason(string? reason) =>
             reason switch
             {
@@ -485,6 +1024,110 @@ namespace Microsoft.Extensions.AI
                 "stop" => ChatFinishReason.Stop,
                 _ => new ChatFinishReason(reason),
             };
+
+        private static ChatFinishReason? ToResponsesFinishReason(string? status) =>
+            status switch
+            {
+                null => null,
+                "completed" => ChatFinishReason.Stop,
+                "incomplete" => ChatFinishReason.Length,
+                _ => new ChatFinishReason(status),
+            };
+
+        private static ChatFinishReason? ToAnthropicFinishReason(string? reason) =>
+            reason switch
+            {
+                null => null,
+                "end_turn" => ChatFinishReason.Stop,
+                "max_tokens" => ChatFinishReason.Length,
+                "tool_use" => ChatFinishReason.ToolCalls,
+                "stop_sequence" => ChatFinishReason.Stop,
+                _ => new ChatFinishReason(reason),
+            };
+
+        private protected virtual (ChatMessage Message, string Reasoning) FromVllmResponsesResponse(VllmResponsesResponse response)
+        {
+            var contents = new List<AIContent>();
+            var reasoning = new System.Text.StringBuilder();
+
+            foreach (var item in response.Output ?? [])
+            {
+                if (string.Equals(item.Type, "function_call", StringComparison.OrdinalIgnoreCase))
+                {
+                    contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
+                    {
+                        Name = item.Name ?? string.Empty,
+                        Arguments = item.Arguments ?? "{}"
+                    }, item.CallId ?? item.Id));
+                    continue;
+                }
+
+                if (string.Equals(item.Type, "reasoning", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var summary in item.Summary ?? [])
+                    {
+                        if (!string.IsNullOrEmpty(summary.Text))
+                        {
+                            reasoning.Append(summary.Text);
+                        }
+                    }
+                    continue;
+                }
+
+                foreach (var part in item.Content ?? [])
+                {
+                    if (string.Equals(part.Type, "output_text", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(part.Type, "text", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.IsNullOrEmpty(part.Text))
+                        {
+                            contents.Add(new TextContent(part.Text));
+                        }
+                    }
+                }
+            }
+
+            if (contents.Count == 0 && !string.IsNullOrEmpty(response.OutputText))
+            {
+                contents.Add(new TextContent(response.OutputText));
+            }
+
+            return (new ChatMessage(ChatRole.Assistant, contents), reasoning.ToString());
+        }
+
+        private protected virtual (ChatMessage Message, string Reasoning) FromVllmAnthropicMessagesResponse(VllmAnthropicMessagesResponse response)
+        {
+            var contents = new List<AIContent>();
+            var reasoning = new System.Text.StringBuilder();
+
+            foreach (var block in response.Content ?? [])
+            {
+                if (string.Equals(block.Type, "text", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.IsNullOrEmpty(block.Text))
+                    {
+                        contents.Add(new TextContent(block.Text));
+                    }
+                }
+                else if (string.Equals(block.Type, "thinking", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.IsNullOrEmpty(block.Thinking))
+                    {
+                        reasoning.Append(block.Thinking);
+                    }
+                }
+                else if (string.Equals(block.Type, "tool_use", StringComparison.OrdinalIgnoreCase))
+                {
+                    contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
+                    {
+                        Name = block.Name ?? string.Empty,
+                        Arguments = block.Input?.GetRawText() ?? "{}"
+                    }, block.Id));
+                }
+            }
+
+            return (new ChatMessage(ChatRole.Assistant, contents), reasoning.ToString());
+        }
 
         private protected virtual ChatMessage FromVllmMessage(VllmChatResponseMessage message, ChatOptions? options)
         {
@@ -1163,6 +1806,272 @@ namespace Microsoft.Extensions.AI
 
             ApplyRequestOptions(request, options);
             return request;
+        }
+
+        private protected virtual VllmResponsesRequest ToVllmResponsesRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
+        {
+            var chatRequest = ToVllmChatRequest(messages, options, stream);
+            var responseRequest = new VllmResponsesRequest
+            {
+                Model = chatRequest.Model,
+                Input = chatRequest.Messages.SelectMany(ToVllmResponsesInputItems).ToArray(),
+                Stream = stream,
+                Tools = chatRequest.Tools,
+                ToolChoice = chatRequest.ToolChoice,
+                ResponseFormat = chatRequest.ResponseFormat,
+                Reasoning = chatRequest.Reasoning,
+                Temperature = chatRequest.Temperature ?? chatRequest.Options?.temperature,
+                TopP = chatRequest.TopP ?? chatRequest.Options?.top_p,
+                MaxOutputTokens = chatRequest.MaxCompletionTokens ?? chatRequest.MaxTokens,
+            };
+
+            if (chatRequest.ExtraBody is { Count: > 0 })
+            {
+                responseRequest.ExtraBody ??= new Dictionary<string, object?>();
+                foreach (var pair in chatRequest.ExtraBody)
+                {
+                    responseRequest.ExtraBody[pair.Key] = pair.Value;
+                }
+            }
+
+            if (chatRequest.Options?.extra_body is { Count: > 0 })
+            {
+                responseRequest.ExtraBody ??= new Dictionary<string, object?>();
+                foreach (var pair in chatRequest.Options.extra_body)
+                {
+                    responseRequest.ExtraBody[pair.Key] = pair.Value;
+                }
+            }
+
+            return responseRequest;
+        }
+
+        private protected virtual VllmAnthropicMessagesRequest ToVllmAnthropicMessagesRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
+        {
+            var chatRequest = ToVllmChatRequest(messages, options, stream);
+            var anthropicMessages = new List<VllmAnthropicMessage>();
+            var system = new System.Text.StringBuilder();
+
+            foreach (var message in chatRequest.Messages)
+            {
+                if (message.Role == "system")
+                {
+                    if (!string.IsNullOrEmpty(message.Content))
+                    {
+                        if (system.Length > 0)
+                        {
+                            system.AppendLine();
+                        }
+                        system.Append(message.Content);
+                    }
+                    continue;
+                }
+
+                foreach (var anthropicMessage in ToVllmAnthropicMessages(message))
+                {
+                    anthropicMessages.Add(anthropicMessage);
+                }
+            }
+
+            var request = new VllmAnthropicMessagesRequest
+            {
+                Model = chatRequest.Model,
+                MaxTokens = chatRequest.MaxTokens ?? chatRequest.MaxCompletionTokens ?? options?.MaxOutputTokens ?? 8192,
+                Messages = anthropicMessages.ToArray(),
+                System = system.Length > 0 ? system.ToString() : null,
+                Stream = stream,
+                Tools = chatRequest.Tools?.Select(ToVllmAnthropicTool),
+                ToolChoice = ToVllmAnthropicToolChoice(chatRequest.ToolChoice),
+                Temperature = chatRequest.Temperature ?? chatRequest.Options?.temperature,
+                TopP = chatRequest.TopP ?? chatRequest.Options?.top_p,
+            };
+
+            if (chatRequest.Reasoning?.Enabled == true ||
+                !string.IsNullOrEmpty(chatRequest.Reasoning?.Effort) ||
+                string.Equals(chatRequest.Thinking?.Type, "enabled", StringComparison.OrdinalIgnoreCase))
+            {
+                request.Thinking = new VllmAnthropicThinkingOptions
+                {
+                    Type = "enabled",
+                    BudgetTokens = options?.MaxOutputTokens is int maxTokens ? Math.Min(Math.Max(maxTokens / 4, 1024), maxTokens) : null,
+                };
+            }
+
+            return request;
+        }
+
+        private static IEnumerable<VllmAnthropicMessage> ToVllmAnthropicMessages(VllmOpenAIChatRequestMessage message)
+        {
+            if (message.Role == "tool")
+            {
+                yield return new VllmAnthropicMessage
+                {
+                    Role = "user",
+                    Content = new object[]
+                    {
+                        new VllmAnthropicToolResultBlock
+                        {
+                            ToolUseId = message.ToolCallId ?? string.Empty,
+                            Content = message.Content ?? string.Empty
+                        }
+                    }
+                };
+                yield break;
+            }
+
+            var blocks = new List<object>();
+            if (!string.IsNullOrEmpty(message.Content))
+            {
+                blocks.Add(new VllmAnthropicTextBlock { Text = message.Content });
+            }
+
+            foreach (var image in message.Images ?? [])
+            {
+                blocks.Add(new VllmAnthropicImageBlock
+                {
+                    Source = new VllmAnthropicImageSource { Data = image }
+                });
+            }
+
+            foreach (var toolCall in message.ToolCalls ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(toolCall.Function?.Name))
+                {
+                    continue;
+                }
+
+                blocks.Add(new VllmAnthropicToolUseBlock
+                {
+                    Id = string.IsNullOrWhiteSpace(toolCall.Id) ? Guid.NewGuid().ToString("N") : toolCall.Id,
+                    Name = toolCall.Function.Name,
+                    Input = ToJsonObjectElement(toolCall.Function.Arguments)
+                });
+            }
+
+            yield return new VllmAnthropicMessage
+            {
+                Role = message.Role == "assistant" ? "assistant" : "user",
+                Content = blocks.Count == 1 && blocks[0] is VllmAnthropicTextBlock textBlock
+                    ? textBlock.Text
+                    : blocks.ToArray()
+            };
+        }
+
+        private static JsonElement ToJsonObjectElement(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return JsonDocument.Parse("{}").RootElement.Clone();
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                return doc.RootElement.ValueKind == JsonValueKind.Object
+                    ? doc.RootElement.Clone()
+                    : JsonDocument.Parse("{}").RootElement.Clone();
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return JsonDocument.Parse("{}").RootElement.Clone();
+            }
+        }
+
+        private static VllmAnthropicTool ToVllmAnthropicTool(VllmTool tool)
+        {
+            return new VllmAnthropicTool
+            {
+                Name = tool.Function.Name,
+                Description = tool.Function.Description,
+                InputSchema = tool.Function.Parameters,
+            };
+        }
+
+        private static object? ToVllmAnthropicToolChoice(object? toolChoice)
+        {
+            return toolChoice switch
+            {
+                null => null,
+                string value when value == "auto" => new { type = "auto" },
+                string value when value == "required" => new { type = "any" },
+                string value when value == "none" => null,
+                _ => TryGetRequiredToolName(toolChoice) is { } name ? new { type = "tool", name } : null,
+            };
+        }
+
+        private static string? TryGetRequiredToolName(object toolChoice)
+        {
+            try
+            {
+                var json = JsonSerializer.SerializeToElement(toolChoice);
+                if (json.TryGetProperty("function", out var function) &&
+                    function.TryGetProperty("name", out var name) &&
+                    name.ValueKind == JsonValueKind.String)
+                {
+                    return name.GetString();
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            return null;
+        }
+
+        private static IEnumerable<object> ToVllmResponsesInputItems(VllmOpenAIChatRequestMessage message)
+        {
+            if (message.Role == "tool")
+            {
+                yield return new VllmResponsesFunctionCallOutputInput
+                {
+                    CallId = message.ToolCallId ?? string.Empty,
+                    Output = message.Content ?? string.Empty,
+                };
+                yield break;
+            }
+
+            if (!string.IsNullOrEmpty(message.Content) || message.Images is { Count: > 0 } || message.ToolCalls is not { Length: > 0 })
+            {
+                yield return new VllmResponsesMessageInput
+                {
+                    Role = message.Role,
+                    Content = ToVllmResponsesMessageContent(message),
+                };
+            }
+
+            foreach (var toolCall in message.ToolCalls ?? [])
+            {
+                if (!string.IsNullOrWhiteSpace(toolCall.Function?.Name))
+                {
+                    yield return new VllmResponsesFunctionCallInput
+                    {
+                        Name = toolCall.Function.Name,
+                        Arguments = toolCall.Function.Arguments ?? "{}",
+                        CallId = string.IsNullOrWhiteSpace(toolCall.Id) ? Guid.NewGuid().ToString("N") : toolCall.Id,
+                    };
+                }
+            }
+        }
+
+        private static object? ToVllmResponsesMessageContent(VllmOpenAIChatRequestMessage message)
+        {
+            if (message.Images is not { Count: > 0 })
+            {
+                return message.Content;
+            }
+
+            var parts = new List<object>();
+            if (!string.IsNullOrEmpty(message.Content))
+            {
+                parts.Add(new VllmResponsesTextContentPart { Text = message.Content });
+            }
+
+            foreach (var image in message.Images)
+            {
+                parts.Add(new VllmResponsesImageContentPart { ImageUrl = $"data:image/png;base64,{image}" });
+            }
+
+            return parts;
         }
 
         private protected virtual IEnumerable<VllmOpenAIChatRequestMessage> ToVllmChatRequestMessages(ChatMessage content)

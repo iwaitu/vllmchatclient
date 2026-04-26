@@ -2,8 +2,8 @@ namespace Microsoft.Extensions.AI
 {
     public class VllmKimiK2ChatClient : VllmBaseChatClient
     {
-        public VllmKimiK2ChatClient(string endpoint, string? token = null, string? modelId = "kimi-k2-thinking", HttpClient? httpClient = null)
-            : base(endpoint, token, modelId, httpClient)
+        public VllmKimiK2ChatClient(string endpoint, string? token = null, string? modelId = "kimi-k2-thinking", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(endpoint, token, modelId, httpClient, apiMode)
         {
         }
 
@@ -44,7 +44,7 @@ namespace Microsoft.Extensions.AI
         {
             var request = base.ToVllmChatRequest(messages, options, stream);
 
-            // Ö§³Ö VllmChatOptions ¼°ÆäÅÉÉúÀà£¨°üÀ¨ KimiChatOptions£©µÄË¼Î¬Á´¿ª¹Ø
+            // Ö§ï¿½ï¿½ VllmChatOptions ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½à£¨ï¿½ï¿½ï¿½ï¿½ KimiChatOptionsï¿½ï¿½ï¿½ï¿½Ë¼Î¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             if (options is VllmChatOptions vllmOptions)
             {
                 request.Thinking = new VllmThinkingOptions 

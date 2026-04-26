@@ -1,11 +1,11 @@
-﻿using Microsoft.Shared.Diagnostics;
+using Microsoft.Shared.Diagnostics;
 
 namespace Microsoft.Extensions.AI
 {
     public class VllmNemotronChatClient : VllmBaseChatClient
     {
-        public VllmNemotronChatClient(string endpoint, string? token = null, string? modelId = "nvidia/nemotron-3-super-120b-a12b:free", HttpClient? httpClient = null)
-           : base(ProcessEndpoint(endpoint), token, modelId, httpClient)
+        public VllmNemotronChatClient(string endpoint, string? token = null, string? modelId = "nvidia/nemotron-3-super-120b-a12b:free", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+           : base(ProcessEndpoint(endpoint), token, modelId, httpClient, apiMode)
         {
         }
 

@@ -65,6 +65,26 @@ internal class VllmChatStreamResponse
     
     [JsonProperty("text")]
     public string? Text { get; set; }
+
+    [JsonProperty("response")]
+    [JsonPropertyName("response")]
+    public VllmResponsesResponse? Response { get; set; }
+
+    [JsonProperty("item")]
+    [JsonPropertyName("item")]
+    public VllmResponsesOutputItem? Item { get; set; }
+
+    [JsonProperty("arguments")]
+    [JsonPropertyName("arguments")]
+    public string? Arguments { get; set; }
+
+    [JsonProperty("name")]
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonProperty("call_id")]
+    [JsonPropertyName("call_id")]
+    public string? CallId { get; set; }
 }
 
 internal class ChoiceChunk

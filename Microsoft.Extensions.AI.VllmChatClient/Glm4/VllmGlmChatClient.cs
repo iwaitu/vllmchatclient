@@ -1,9 +1,9 @@
-﻿namespace Microsoft.Extensions.AI
+namespace Microsoft.Extensions.AI
 {
     public class VllmGlmChatClient : VllmBaseChatClient
     {
-        public VllmGlmChatClient(string endpoint, string? token = null, string? modelId = "glm-4", HttpClient? httpClient = null)
-            : base(endpoint, token, modelId, httpClient)
+        public VllmGlmChatClient(string endpoint, string? token = null, string? modelId = "glm-4", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(endpoint, token, modelId, httpClient, apiMode)
         {
         }
 

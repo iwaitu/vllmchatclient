@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.AI.VllmChatClient.Gemma;
+using Microsoft.Extensions.AI.VllmChatClient.Gemma;
 using Microsoft.Shared.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -14,8 +14,8 @@ namespace Microsoft.Extensions.AI
 
         private readonly bool _useGoogleNativeApi;
 
-        public VllmGemma4ChatClient(string endpoint, string? token = null, string? modelId = "gemma-4-31b-it", HttpClient? httpClient = null)
-            : base(ProcessEndpoint(endpoint, modelId), token, modelId, httpClient)
+        public VllmGemma4ChatClient(string endpoint, string? token = null, string? modelId = "gemma-4-31b-it", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(ProcessEndpoint(endpoint, modelId), token, modelId, httpClient, apiMode)
         {
             _useGoogleNativeApi = IsGoogleNativeEndpoint(endpoint);
 

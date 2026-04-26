@@ -13,6 +13,9 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 
 ## 📢 Latest Update
 
+- Added `VllmApiMode` to `VllmBaseChatClient`, allowing callers to choose between OpenAI-compatible `/chat/completions`, vLLM / OpenAI `/responses`, and Anthropic Messages API formats.
+- Added full request / response / streaming conversion for vLLM Responses API and Anthropic Messages API, including reasoning output, tool calls, usage parsing, and streaming tool-call argument deltas.
+- Added Anthropic-format integration tests for GLM-5.1 and Qwen 3.6 Plus via DashScope Anthropic endpoints.
 - Upgraded `Microsoft.Extensions.AI` to `10.5.0`.
 - `VllmBaseChatClient` now supports vLLM structured JSON output via both:
   - `response_format = { type: "json_schema", json_schema: { name, description, schema, strict } }`
@@ -40,6 +43,65 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 ---
 
 ## 本次更新
+
+### 🆕 vLLM Responses API 与 Anthropic Messages API 支持
+
+- **新增 `VllmApiMode`**：`VllmBaseChatClient` 构造函数新增 `apiMode` 参数，可选择：
+  - `VllmApiMode.ChatCompletions`：默认 OpenAI 兼容 `/chat/completions` 接口。
+  - `VllmApiMode.Responses`：vLLM / OpenAI Responses API 格式。
+  - `VllmApiMode.AnthropicMessages`：Anthropic Messages API 格式。
+- **Responses API 兼容**：支持普通响应、流式响应、reasoning 输出、函数调用、usage 解析。
+- **Anthropic API 兼容**：支持 `x-api-key` / `anthropic-version` 认证头、`/v1/messages` 请求格式、system 分离、`tool_use` / `tool_result`、thinking block、流式 `input_json_delta` 工具参数拼接。
+- **客户端适配**：继承 `VllmBaseChatClient` 的主要客户端构造函数均可传入 `VllmApiMode`，包括 GLM、Qwen3Next、Claude、DeepSeek、Gemma4、GPT-OSS、Kimi、MiMo、MiniMax、Nemotron、OpenAI GPT 等。
+- **测试覆盖**：新增 `ResponsesApiModeTests`、`AnthropicApiModeTests`、`Glm5AnthropicTests`、`Qwen36PlusAnthropicTests`，覆盖 Responses / Anthropic 两种新协议，以及 DashScope Anthropic endpoint 下的 GLM-5.1 与 Qwen 3.6 Plus。
+
+#### Demo：使用 Responses API
+
+```csharp
+using Microsoft.Extensions.AI;
+
+IChatClient client = new VllmOpenAiGptClient(
+    endpoint: "http://localhost:8000/v1",
+    token: "EMPTY",
+    modelId: "openai/gpt-oss-20b",
+    apiMode: VllmApiMode.Responses);
+
+var response = await client.GetResponseAsync(
+[
+    new ChatMessage(ChatRole.User, "用一句话介绍 vLLM Responses API")
+]);
+
+Console.WriteLine(response.Text);
+```
+
+#### Demo：使用 Anthropic Messages API
+
+```csharp
+using Microsoft.Extensions.AI;
+
+var apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+
+IChatClient client = new VllmQwen3NextChatClient(
+    endpoint: "https://dashscope.aliyuncs.com/apps/anthropic",
+    token: apiKey,
+    modelId: "qwen3.6-plus",
+    apiMode: VllmApiMode.AnthropicMessages);
+
+var options = new VllmChatOptions
+{
+    ThinkingEnabled = true,
+    MaxOutputTokens = 3000,
+};
+
+var response = await client.GetResponseAsync(
+[
+    new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲"),
+    new ChatMessage(ChatRole.User, "你是谁？")
+],
+options);
+
+Console.WriteLine(response.Text);
+```
 
 ### 🆕 Gemma 4 原生 API / vLLM 双支持
 

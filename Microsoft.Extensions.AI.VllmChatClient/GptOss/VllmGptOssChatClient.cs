@@ -355,7 +355,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
                 messagesList.Insert(0, newSystemMessage);
             }
 
-            if (options is GptOssChatOptions && options.Tools?.Count > 0)
+            if (options is GptOssChatOptions && options.Tools?.Count > 0 && options.ToolMode is null)
             {
                 options.ToolMode = ChatToolMode.Auto;
             }

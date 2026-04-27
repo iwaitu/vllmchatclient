@@ -2,6 +2,7 @@
 using Microsoft.Extensions.AI.VllmChatClient.GptOss;
 using System.ComponentModel;
 using System.ComponentModel.Design;
+using System.Net;
 using System.Reflection.Emit;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -23,6 +24,58 @@ namespace VllmChatClient.Test
             // Use the actual GPT-OSS client for testing with OpenRouter
             _client = new VllmGptOssChatClient("https://openrouter.ai/api/v1", ApiToken, "openai/gpt-oss-120b");
             //_client = new VllmGptOssChatClient("http://localhost:8000/v1", ApiToken, "gpt-oss-120b");
+        }
+
+        [Fact]
+        public async Task GptOss_ShouldPreserveRequiredToolChoice()
+        {
+            string? requestJson = null;
+            var handler = new CaptureHttpMessageHandler(async request =>
+            {
+                requestJson = request.Content is null ? null : await request.Content.ReadAsStringAsync();
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""
+                        {
+                          "id": "chatcmpl-gptoss-tool-choice",
+                          "object": "chat.completion",
+                          "created": 1730000000,
+                          "model": "gpt-oss-120b",
+                          "choices": [
+                            {
+                              "index": 0,
+                              "message": { "role": "assistant", "content": "ok" },
+                              "finish_reason": "stop"
+                            }
+                          ],
+                          "usage": { "prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4 }
+                        }
+                        """, System.Text.Encoding.UTF8, "application/json")
+                };
+            });
+
+            using var httpClient = new HttpClient(handler);
+            using var client = new VllmGptOssChatClient("http://localhost:8000/v1", null, "gpt-oss-120b", httpClient);
+            var tool = AIFunctionFactory.Create(
+                (string path) => $"read:{path}",
+                new AIFunctionFactoryOptions { Name = "read_file", Description = "Read file." });
+
+            await client.GetResponseAsync(
+                [new ChatMessage(ChatRole.User, "read")],
+                new GptOssChatOptions
+                {
+                    Tools = [tool],
+                    ToolMode = ChatToolMode.RequireSpecific("read_file")
+                });
+
+            Assert.NotNull(requestJson);
+            using var doc = JsonDocument.Parse(requestJson!);
+            var root = doc.RootElement;
+            var toolChoice = root.GetProperty("tool_choice");
+            Assert.Equal("function", toolChoice.GetProperty("type").GetString());
+            Assert.Equal("read_file", toolChoice.GetProperty("function").GetProperty("name").GetString());
+            Assert.Equal("read_file", root.GetProperty("tools")[0].GetProperty("function").GetProperty("name").GetString());
         }
 
         [Fact]
@@ -781,6 +834,12 @@ namespace VllmChatClient.Test
             Assert.Single(res.Messages);
             StructuredJsonSchemaTestHelper.AssertGreetingJson(res.Text);
             _output.WriteLine($"Response: {res.Text}");
+        }
+
+        private sealed class CaptureHttpMessageHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> responder) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+                => responder(request);
         }
     }
 }

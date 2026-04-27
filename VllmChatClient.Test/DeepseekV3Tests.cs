@@ -1,4 +1,6 @@
 using Microsoft.Extensions.AI;
+using System.Net;
+using System.Text;
 using System.ComponentModel;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -14,8 +16,8 @@ namespace VllmChatClient.Test
         public DeepseekV3Tests(ITestOutputHelper output)
         {
             _output = output;
-            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
-            _client = new VllmDeepseekV3ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "deepseek-v3.2");
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_DEEPSEEK_API_KEY");
+            _client = new VllmDeepseekV3ChatClient("https://api.deepseek.com/v1/{1}", cloud_apiKey, "deepseek-v4-flash");
         }
 
         [Description("获取天气情况")]
@@ -410,6 +412,54 @@ namespace VllmChatClient.Test
             Assert.Single(res.Messages);
             StructuredJsonSchemaTestHelper.AssertGreetingJson(res.Text);
             _output.WriteLine($"Response: {res.Text}");
+        }
+
+        [Fact]
+        public async Task JsonSchemaOutputRequest_OmitsUnsupportedResponseFormat()
+        {
+            string? requestJson = null;
+            var handler = new CaptureHttpMessageHandler(async request =>
+            {
+                requestJson = request.Content is null
+                    ? null
+                    : await request.Content.ReadAsStringAsync();
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "{\"id\":\"resp-1\",\"created\":1,\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"content\":\"{\\\"name\\\":\\\"菲菲\\\",\\\"greeting\\\":\\\"你好\\\"}\"}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            });
+
+            using var httpClient = new HttpClient(handler);
+            using var client = new VllmDeepseekV3ChatClient("https://api.deepseek.com/v1/{1}", "test-key", "deepseek-v4-flash", httpClient);
+
+            _ = await client.GetResponseAsync(
+                StructuredJsonSchemaTestHelper.CreateGreetingMessages(),
+                new VllmChatOptions
+                {
+                    ThinkingEnabled = true,
+                    ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                        StructuredJsonSchemaTestHelper.CreateGreetingSchema(),
+                        "greeting_payload",
+                        "Greeting payload")
+                });
+
+            Assert.NotNull(requestJson);
+            using var doc = JsonDocument.Parse(requestJson!);
+            var root = doc.RootElement;
+
+            Assert.False(root.TryGetProperty("response_format", out _));
+            var structuredOutputs = root.GetProperty("extra_body").GetProperty("structured_outputs");
+            Assert.Equal("object", structuredOutputs.GetProperty("json").GetProperty("type").GetString());
+        }
+
+        private sealed class CaptureHttpMessageHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> responder) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+                => responder(request);
         }
     }
 }

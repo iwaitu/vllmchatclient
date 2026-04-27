@@ -255,6 +255,7 @@ namespace Microsoft.Extensions.AI
             using var streamReader = new StreamReader(httpResponseStream);
             bool enableLegacyToolCallTextFallback = EnableLegacyToolCallTextFallback(options);
             string bufferMsg = string.Empty;
+            var reasoningContentBuffer = new System.Text.StringBuilder();
             // 按 tool_calls[].index 缓冲多个并行工具调用
             var toolCallBuffers = new Dictionary<int, (string? Id, string Name, string Arguments)>();
             bool thinking = true;
@@ -362,6 +363,19 @@ namespace Microsoft.Extensions.AI
                     var reasoningUpdate = HandleStreamingReasoningContent(message, responseId, chunk.Model ?? Metadata.DefaultModelId ?? string.Empty);
                     if (reasoningUpdate != null)
                     {
+                        if (!string.IsNullOrEmpty(message.ReasoningContent))
+                        {
+                            reasoningContentBuffer.Append(message.ReasoningContent);
+                        }
+                        else if (!string.IsNullOrEmpty(message.Reasoning))
+                        {
+                            reasoningContentBuffer.Append(message.Reasoning);
+                        }
+                        else if (message.ReasoningDetails?.FirstOrDefault(x => x.Type == "reasoning.text") is { } detail && !string.IsNullOrEmpty(detail.Text))
+                        {
+                            reasoningContentBuffer.Append(detail.Text);
+                        }
+
                         // reasoning 可能与 tool_calls/content 同帧共存，不能直接 continue
                         yield return reasoningUpdate;
                     }
@@ -411,7 +425,7 @@ namespace Microsoft.Extensions.AI
                     {
                         foreach (var call in funcList)
                         {
-                            yield return BuildToolCallUpdate(responseId, call.Call, call.CallId);
+                            yield return BuildToolCallUpdate(responseId, call.Call, call.CallId, reasoningContentBuffer.Length > 0 ? reasoningContentBuffer.ToString() : null);
                         }
 
                         bufferCopy = string.Empty;
@@ -447,11 +461,11 @@ namespace Microsoft.Extensions.AI
                 {
                     if (!string.IsNullOrEmpty(kvp.Value.Name))
                     {
-                        yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
+                            yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
                         {
                             Name = kvp.Value.Name,
                             Arguments = kvp.Value.Arguments
-                        }, kvp.Value.Id);
+                            }, kvp.Value.Id, reasoningContentBuffer.Length > 0 ? reasoningContentBuffer.ToString() : null);
                     }
                 }
 
@@ -731,6 +745,7 @@ namespace Microsoft.Extensions.AI
             string responseId = Guid.NewGuid().ToString("N");
             string modelId = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty;
             var toolCallBuffers = new Dictionary<int, (string? Id, string? Name, string Arguments)>();
+            var thinkingBuffer = new System.Text.StringBuilder();
 
             yield return new ChatResponseUpdate
             {
@@ -800,6 +815,7 @@ namespace Microsoft.Extensions.AI
                         }
                         else if (chunk.ContentBlock?.Type == "thinking" && !string.IsNullOrEmpty(chunk.ContentBlock.Thinking))
                         {
+                            thinkingBuffer.Append(chunk.ContentBlock.Thinking);
                             yield return BuildResponsesTextUpdate(responseId, modelId, chunk.ContentBlock.Thinking, thinking: true);
                         }
                         break;
@@ -811,6 +827,7 @@ namespace Microsoft.Extensions.AI
                         }
                         else if (chunk.Delta?.Type == "thinking_delta" && !string.IsNullOrEmpty(chunk.Delta.Thinking))
                         {
+                            thinkingBuffer.Append(chunk.Delta.Thinking);
                             yield return BuildResponsesTextUpdate(responseId, modelId, chunk.Delta.Thinking, thinking: true);
                         }
                         else if (chunk.Delta?.Type == "input_json_delta")
@@ -831,7 +848,7 @@ namespace Microsoft.Extensions.AI
                                 {
                                     Name = buffer.Name,
                                     Arguments = string.IsNullOrWhiteSpace(buffer.Arguments) ? "{}" : buffer.Arguments
-                                }, buffer.Id);
+                                }, buffer.Id, thinkingBuffer.Length > 0 ? thinkingBuffer.ToString() : null);
                                 toolCallBuffers.Remove(index);
                             }
                             break;
@@ -918,8 +935,29 @@ namespace Microsoft.Extensions.AI
             };
         }
 
-        private protected virtual ChatResponseUpdate BuildToolCallUpdate(string responseId, VllmFunctionToolCall call, string? callId = null)
+        private protected virtual ChatResponseUpdate BuildToolCallUpdate(string responseId, VllmFunctionToolCall call, string? callId = null, string? reasoningContent = null)
         {
+            var functionCallContent = ToFunctionCallContent(call, callId);
+            if (!string.IsNullOrEmpty(reasoningContent))
+            {
+                functionCallContent.AdditionalProperties ??= [];
+                functionCallContent.AdditionalProperties["reasoning_content"] = reasoningContent;
+                functionCallContent.AdditionalProperties["anthropic_thinking"] = reasoningContent;
+                functionCallContent.RawRepresentation = new Delta
+                {
+                    ReasoningContent = reasoningContent,
+                    ToolCalls =
+                    [
+                        new VllmToolCall
+                        {
+                            Id = functionCallContent.CallId,
+                            Type = "function",
+                            Function = call
+                        }
+                    ]
+                };
+            }
+
             return new ChatResponseUpdate
             {
                 CreatedAt = DateTimeOffset.Now,
@@ -927,7 +965,7 @@ namespace Microsoft.Extensions.AI
                 ModelId = _metadata.DefaultModelId,
                 ResponseId = responseId,
                 Role = ChatRole.Assistant,
-                Contents = new List<AIContent> { ToFunctionCallContent(call, callId) }
+                Contents = new List<AIContent> { functionCallContent }
             };
         }
 
@@ -1099,11 +1137,17 @@ namespace Microsoft.Extensions.AI
         {
             var contents = new List<AIContent>();
             var reasoning = new System.Text.StringBuilder();
+            var replayBlocks = new List<JsonElement>();
 
             foreach (var block in response.Content ?? [])
             {
                 if (string.Equals(block.Type, "text", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (!string.IsNullOrEmpty(block.Text))
+                    {
+                        replayBlocks.Add(CreateAnthropicTextBlock(block.Text));
+                    }
+
                     if (!string.IsNullOrEmpty(block.Text))
                     {
                         contents.Add(new TextContent(block.Text));
@@ -1113,20 +1157,38 @@ namespace Microsoft.Extensions.AI
                 {
                     if (!string.IsNullOrEmpty(block.Thinking))
                     {
+                        replayBlocks.Add(CreateAnthropicThinkingBlock(block.Thinking));
                         reasoning.Append(block.Thinking);
                     }
                 }
                 else if (string.Equals(block.Type, "tool_use", StringComparison.OrdinalIgnoreCase))
                 {
-                    contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
+                    var functionCall = ToFunctionCallContent(new VllmFunctionToolCall
                     {
                         Name = block.Name ?? string.Empty,
                         Arguments = block.Input?.GetRawText() ?? "{}"
-                    }, block.Id));
+                    }, block.Id);
+
+                    if (reasoning.Length > 0)
+                    {
+                        functionCall.AdditionalProperties ??= [];
+                        functionCall.AdditionalProperties["anthropic_thinking"] = reasoning.ToString();
+                    }
+
+                    replayBlocks.Add(CreateAnthropicToolUseBlock(
+                        string.IsNullOrWhiteSpace(block.Id) ? Guid.NewGuid().ToString("N") : block.Id,
+                        block.Name ?? string.Empty,
+                        block.Input ?? JsonDocument.Parse("{}").RootElement.Clone()));
+
+                    contents.Add(functionCall);
                 }
             }
 
-            return (new ChatMessage(ChatRole.Assistant, contents), reasoning.ToString());
+            return (new ChatMessage(ChatRole.Assistant, contents)
+            {
+                RawRepresentation = response,
+                AdditionalProperties = replayBlocks.Count > 0 ? new AdditionalPropertiesDictionary { ["anthropic_content_blocks"] = replayBlocks.ToArray() } : null
+            }, reasoning.ToString());
         }
 
         private protected virtual ChatMessage FromVllmMessage(VllmChatResponseMessage message, ChatOptions? options)
@@ -1214,7 +1276,10 @@ namespace Microsoft.Extensions.AI
                     contents.Add(new TextContent(cleanedText));
                 }
             }
-            return new ChatMessage(new ChatRole(message.Role ?? "assistant"), contents);
+            return new ChatMessage(new ChatRole(message.Role ?? "assistant"), contents)
+            {
+                RawRepresentation = message,
+            };
         }
 
         private protected static FunctionCallContent ToFunctionCallContent(VllmFunctionToolCall function, string? callId = null)
@@ -1856,8 +1921,9 @@ namespace Microsoft.Extensions.AI
             var anthropicMessages = new List<VllmAnthropicMessage>();
             var system = new System.Text.StringBuilder();
 
-            foreach (var message in chatRequest.Messages)
+            for (int i = 0; i < chatRequest.Messages.Length; i++)
             {
+                var message = chatRequest.Messages[i];
                 if (message.Role == "system")
                 {
                     if (!string.IsNullOrEmpty(message.Content))
@@ -1868,6 +1934,21 @@ namespace Microsoft.Extensions.AI
                         }
                         system.Append(message.Content);
                     }
+                    continue;
+                }
+
+                if (message.Role == "tool")
+                {
+                    var toolMessages = new List<VllmOpenAIChatRequestMessage>();
+                    do
+                    {
+                        toolMessages.Add(chatRequest.Messages[i]);
+                        i++;
+                    }
+                    while (i < chatRequest.Messages.Length && chatRequest.Messages[i].Role == "tool");
+
+                    i--;
+                    anthropicMessages.Add(ToVllmAnthropicToolResultMessage(toolMessages));
                     continue;
                 }
 
@@ -1882,7 +1963,14 @@ namespace Microsoft.Extensions.AI
                 Model = chatRequest.Model,
                 MaxTokens = chatRequest.MaxTokens ?? chatRequest.MaxCompletionTokens ?? options?.MaxOutputTokens ?? 8192,
                 Messages = anthropicMessages.ToArray(),
-                System = system.Length > 0 ? system.ToString() : null,
+                System = system.Length > 0 ? JsonSerializer.SerializeToElement(new object[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["type"] = "text",
+                        ["text"] = system.ToString()
+                    }
+                }) : null,
                 Stream = stream,
                 Tools = chatRequest.Tools?.Select(ToVllmAnthropicTool),
                 ToolChoice = ToVllmAnthropicToolChoice(chatRequest.ToolChoice),
@@ -1912,37 +2000,41 @@ namespace Microsoft.Extensions.AI
             return request;
         }
 
+        private static VllmAnthropicMessage ToVllmAnthropicToolResultMessage(IEnumerable<VllmOpenAIChatRequestMessage> messages)
+            => new()
+            {
+                Role = "user",
+                Content = BuildAnthropicContentArray(messages.Select(message =>
+                    CreateAnthropicToolResultBlock(message.ToolCallId ?? string.Empty, message.Content ?? string.Empty)).ToArray())
+            };
+
         private static IEnumerable<VllmAnthropicMessage> ToVllmAnthropicMessages(VllmOpenAIChatRequestMessage message)
         {
             if (message.Role == "tool")
             {
+                yield return ToVllmAnthropicToolResultMessage([message]);
+                yield break;
+            }
+
+            if (message.AnthropicContentBlocks is { Length: > 0 } replayBlocks)
+            {
                 yield return new VllmAnthropicMessage
                 {
-                    Role = "user",
-                    Content = new object[]
-                    {
-                        new VllmAnthropicToolResultBlock
-                        {
-                            ToolUseId = message.ToolCallId ?? string.Empty,
-                            Content = message.Content ?? string.Empty
-                        }
-                    }
+                    Role = message.Role == "assistant" ? "assistant" : "user",
+                    Content = BuildAnthropicContentArray(replayBlocks)
                 };
                 yield break;
             }
 
-            var blocks = new List<object>();
+            var blocks = new List<JsonElement>();
             if (!string.IsNullOrEmpty(message.Content))
             {
-                blocks.Add(new VllmAnthropicTextBlock { Text = message.Content });
+                blocks.Add(CreateAnthropicTextBlock(message.Content));
             }
 
             foreach (var image in message.Images ?? [])
             {
-                blocks.Add(new VllmAnthropicImageBlock
-                {
-                    Source = new VllmAnthropicImageSource { Data = image }
-                });
+                blocks.Add(CreateAnthropicImageBlock(image));
             }
 
             foreach (var toolCall in message.ToolCalls ?? [])
@@ -1952,20 +2044,16 @@ namespace Microsoft.Extensions.AI
                     continue;
                 }
 
-                blocks.Add(new VllmAnthropicToolUseBlock
-                {
-                    Id = string.IsNullOrWhiteSpace(toolCall.Id) ? Guid.NewGuid().ToString("N") : toolCall.Id,
-                    Name = toolCall.Function.Name,
-                    Input = ToJsonObjectElement(toolCall.Function.Arguments)
-                });
+                blocks.Add(CreateAnthropicToolUseBlock(
+                    string.IsNullOrWhiteSpace(toolCall.Id) ? Guid.NewGuid().ToString("N") : toolCall.Id,
+                    toolCall.Function.Name,
+                    ToJsonObjectElement(toolCall.Function.Arguments)));
             }
 
             yield return new VllmAnthropicMessage
             {
                 Role = message.Role == "assistant" ? "assistant" : "user",
-                Content = blocks.Count == 1 && blocks[0] is VllmAnthropicTextBlock textBlock
-                    ? textBlock.Text
-                    : blocks.ToArray()
+                Content = BuildAnthropicContentElement(blocks.ToArray())
             };
         }
 
@@ -2158,10 +2246,214 @@ namespace Microsoft.Extensions.AI
             {
                 Role = content.Role.Value,
                 Content = sb.Length > 0 ? sb.ToString() : (toolCalls.Count > 0 ? string.Empty : null),
+                ReasoningContent = GetAssistantReasoningContent(content),
+                AnthropicContentBlocks = GetAnthropicAssistantContentBlocks(content),
                 Images = images.Count > 0 ? images : null,
                 ToolCalls = toolCalls.Count > 0 ? toolCalls.ToArray() : null
             };
         }
+
+        private static object? GetAssistantReasoningContent(ChatMessage message)
+        {
+            if (!string.Equals(message.Role.Value, ChatRole.Assistant.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (message.RawRepresentation is VllmChatResponseMessage rawMessage && rawMessage.ReasoningContent is not null)
+            {
+                return rawMessage.ReasoningContent;
+            }
+
+            if (message.AdditionalProperties is { } properties &&
+                properties.TryGetValue("reasoning_content", out var reasoningContent) &&
+                reasoningContent is not null)
+            {
+                return reasoningContent;
+            }
+
+            foreach (var content in message.Contents)
+            {
+                if (content.RawRepresentation is Delta delta)
+                {
+                    if (!string.IsNullOrEmpty(delta.ReasoningContent))
+                    {
+                        return delta.ReasoningContent;
+                    }
+
+                    if (!string.IsNullOrEmpty(delta.Reasoning))
+                    {
+                        return delta.Reasoning;
+                    }
+                }
+
+                if (content.AdditionalProperties is { } contentProperties &&
+                    contentProperties.TryGetValue("reasoning_content", out var contentReasoning) &&
+                    contentReasoning is not null)
+                {
+                    return contentReasoning;
+                }
+            }
+
+            return null;
+        }
+
+        private static JsonElement[]? GetAnthropicAssistantContentBlocks(ChatMessage message)
+        {
+            if (!string.Equals(message.Role.Value, ChatRole.Assistant.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (message.RawRepresentation is VllmAnthropicMessagesResponse rawResponse && rawResponse.Content is { Length: > 0 } rawBlocks)
+            {
+                return ToAnthropicReplayBlocks(rawBlocks).ToArray();
+            }
+
+            if (message.AdditionalProperties is { } properties &&
+                properties.TryGetValue("anthropic_content_blocks", out var contentBlocks) &&
+                contentBlocks is JsonElement[] replayBlocks && replayBlocks.Length > 0)
+            {
+                return replayBlocks;
+            }
+
+            string? thinking = null;
+            var blocks = new List<JsonElement>();
+
+            foreach (var item in message.Contents)
+            {
+                if (thinking is null && item.AdditionalProperties is { } itemProperties &&
+                    itemProperties.TryGetValue("anthropic_thinking", out var storedThinking) &&
+                    storedThinking is string storedThinkingText &&
+                    !string.IsNullOrWhiteSpace(storedThinkingText))
+                {
+                    thinking = storedThinkingText;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(thinking))
+            {
+                blocks.Add(CreateAnthropicThinkingBlock(thinking));
+            }
+
+            bool hasFunctionCalls = message.Contents.OfType<FunctionCallContent>().Any();
+            foreach (var item in message.Contents.OfType<TextContent>())
+            {
+                if (!string.IsNullOrWhiteSpace(item.Text))
+                {
+                    if (hasFunctionCalls &&
+                        !string.IsNullOrWhiteSpace(thinking) &&
+                        string.Equals(item.Text, thinking, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    blocks.Add(CreateAnthropicTextBlock(item.Text));
+                }
+            }
+
+            foreach (var item in message.Contents.OfType<FunctionCallContent>())
+            {
+                blocks.Add(CreateAnthropicToolUseBlock(
+                    string.IsNullOrWhiteSpace(item.CallId) ? Guid.NewGuid().ToString("N") : item.CallId,
+                    item.Name,
+                    JsonSerializer.SerializeToElement(item.Arguments, AIJsonUtilities.DefaultOptions.GetTypeInfo(typeof(IDictionary<string, object?>)))));
+            }
+
+            return blocks.Count > 0 && (!string.IsNullOrWhiteSpace(thinking) || blocks.Any(IsAnthropicToolUseBlock))
+                ? blocks.ToArray()
+                : null;
+        }
+
+        private static IEnumerable<JsonElement> ToAnthropicReplayBlocks(IEnumerable<VllmAnthropicContentBlock> blocks)
+        {
+            foreach (var block in blocks)
+            {
+                if (string.Equals(block.Type, "thinking", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(block.Thinking))
+                {
+                    yield return CreateAnthropicThinkingBlock(block.Thinking);
+                }
+                else if (string.Equals(block.Type, "text", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(block.Text))
+                {
+                    yield return CreateAnthropicTextBlock(block.Text);
+                }
+                else if (string.Equals(block.Type, "tool_use", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(block.Name))
+                {
+                    yield return CreateAnthropicToolUseBlock(
+                        string.IsNullOrWhiteSpace(block.Id) ? Guid.NewGuid().ToString("N") : block.Id,
+                        block.Name,
+                        block.Input ?? JsonDocument.Parse("{}").RootElement.Clone());
+                }
+            }
+        }
+
+        private static JsonElement CreateAnthropicThinkingBlock(string thinking)
+            => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = "thinking",
+                ["thinking"] = thinking
+            });
+
+        private static JsonElement CreateAnthropicTextBlock(string text)
+            => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = "text",
+                ["text"] = text
+            });
+
+        private static JsonElement CreateAnthropicImageBlock(string data)
+            => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = "image",
+                ["source"] = new Dictionary<string, object?>
+                {
+                    ["type"] = "base64",
+                    ["media_type"] = "image/png",
+                    ["data"] = data
+                }
+            });
+
+        private static bool IsAnthropicToolUseBlock(JsonElement block)
+            => block.ValueKind == JsonValueKind.Object
+               && block.TryGetProperty("type", out var type)
+               && string.Equals(type.GetString(), "tool_use", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsAnthropicTextBlock(JsonElement block)
+            => block.ValueKind == JsonValueKind.Object
+               && block.TryGetProperty("type", out var type)
+               && string.Equals(type.GetString(), "text", StringComparison.OrdinalIgnoreCase)
+               && block.TryGetProperty("text", out var text)
+               && text.ValueKind == JsonValueKind.String;
+
+        private static JsonElement BuildAnthropicContentElement(JsonElement[] blocks)
+        {
+            if (blocks.Length == 1 && IsAnthropicTextBlock(blocks[0]))
+            {
+                return JsonSerializer.SerializeToElement(blocks[0].GetProperty("text").GetString());
+            }
+
+            return BuildAnthropicContentArray(blocks);
+        }
+
+        private static JsonElement BuildAnthropicContentArray(JsonElement[] blocks)
+            => JsonSerializer.SerializeToElement(blocks);
+
+        private static JsonElement CreateAnthropicToolUseBlock(string id, string name, JsonElement input)
+            => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = "tool_use",
+                ["id"] = id,
+                ["name"] = name,
+                ["input"] = input
+            });
+
+        private static JsonElement CreateAnthropicToolResultBlock(string toolUseId, string content)
+            => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = "tool_result",
+                ["tool_use_id"] = toolUseId,
+                ["content"] = content
+            });
 
         private protected virtual IEnumerable<VllmTool>? GetTools(ChatOptions? options)
         {

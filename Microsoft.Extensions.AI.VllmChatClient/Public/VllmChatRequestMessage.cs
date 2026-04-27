@@ -49,6 +49,8 @@ internal class VllmOpenAIChatRequestMessage
     public string Role { get; set; } = default!;
     [JsonConverter(typeof(RawJsonStringConverter))]
     public string? Content { get; set; } = default!;
+    [JsonPropertyName("reasoning_content")]
+    public object? ReasoningContent { get; set; }
     public string? Name { get; set; }
     [JsonPropertyName("tool_call_id")]
     public string? ToolCallId { get; set; }
@@ -57,6 +59,8 @@ internal class VllmOpenAIChatRequestMessage
     [JsonPropertyName("tool_responses")]
     public VllmToolResponse[]? ToolResponses { get; set; }
     public IList<string>? Images { get; set; }
+    [JsonIgnore]
+    public JsonElement[]? AnthropicContentBlocks { get; set; }
 }
 
 

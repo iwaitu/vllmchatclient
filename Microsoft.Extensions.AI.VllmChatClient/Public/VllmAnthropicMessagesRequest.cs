@@ -9,7 +9,7 @@ internal sealed class VllmAnthropicMessagesRequest
     [JsonPropertyName("max_tokens")]
     public required int MaxTokens { get; set; }
     public required VllmAnthropicMessage[] Messages { get; set; }
-    public string? System { get; set; }
+    public JsonElement? System { get; set; }
     public bool Stream { get; set; }
     public IEnumerable<VllmAnthropicTool>? Tools { get; set; }
     [JsonPropertyName("tool_choice")]
@@ -23,13 +23,20 @@ internal sealed class VllmAnthropicMessagesRequest
 internal sealed class VllmAnthropicMessage
 {
     public required string Role { get; set; }
-    public required object Content { get; set; }
+    public required JsonElement Content { get; set; }
 }
 
 internal sealed class VllmAnthropicTextBlock
 {
     public string Type { get; set; } = "text";
     public required string Text { get; set; }
+}
+
+internal sealed class VllmAnthropicThinkingBlock
+{
+    public string Type { get; set; } = "thinking";
+    [JsonPropertyName("thinking")]
+    public required string Thinking { get; set; }
 }
 
 internal sealed class VllmAnthropicImageBlock

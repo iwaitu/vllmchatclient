@@ -23,7 +23,6 @@ namespace Microsoft.Extensions.AI
         private protected override VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
             var request = base.ToVllmChatRequest(messages, options, stream);
-            request.ToolChoice = null;
 
             if (options is VllmChatOptions vllmOptions)
             {

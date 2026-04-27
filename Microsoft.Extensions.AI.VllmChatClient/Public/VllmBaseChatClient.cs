@@ -1796,7 +1796,11 @@ namespace Microsoft.Extensions.AI
                 }
                 else
                 {
-                    request.ToolChoice = new { type = "function", function = new { name = required.RequiredFunctionName } };
+                    request.ToolChoice = new VllmOpenAIToolChoice
+                    {
+                        Type = "function",
+                        Function = new VllmOpenAIToolChoiceFunction { Name = required.RequiredFunctionName }
+                    };
                 }
             }
             else if (options?.ToolMode is NoneChatToolMode)
@@ -1896,6 +1900,14 @@ namespace Microsoft.Extensions.AI
                     BudgetTokens = options?.MaxOutputTokens is int maxTokens ? Math.Min(Math.Max(maxTokens / 4, 1024), maxTokens) : null,
                 };
             }
+            else if (chatRequest.Reasoning?.Enabled == false ||
+                     string.Equals(chatRequest.Thinking?.Type, "disabled", StringComparison.OrdinalIgnoreCase))
+            {
+                request.Thinking = new VllmAnthropicThinkingOptions
+                {
+                    Type = "disabled",
+                };
+            }
 
             return request;
         }
@@ -1987,20 +1999,28 @@ namespace Microsoft.Extensions.AI
             };
         }
 
-        private static object? ToVllmAnthropicToolChoice(object? toolChoice)
+        private static VllmAnthropicToolChoice? ToVllmAnthropicToolChoice(object? toolChoice)
         {
             return toolChoice switch
             {
                 null => null,
-                string value when value == "auto" => new { type = "auto" },
-                string value when value == "required" => new { type = "any" },
+                string value when value == "auto" => new VllmAnthropicToolChoice { Type = "auto" },
+                string value when value == "required" => new VllmAnthropicToolChoice { Type = "any" },
                 string value when value == "none" => null,
-                _ => TryGetRequiredToolName(toolChoice) is { } name ? new { type = "tool", name } : null,
+                _ => TryGetRequiredToolName(toolChoice) is { } name
+                    ? new VllmAnthropicToolChoice { Type = "tool", Name = name }
+                    : null,
             };
         }
 
         private static string? TryGetRequiredToolName(object toolChoice)
         {
+            if (toolChoice is VllmOpenAIToolChoice openAiChoice &&
+                !string.IsNullOrWhiteSpace(openAiChoice.Function?.Name))
+            {
+                return openAiChoice.Function.Name;
+            }
+
             try
             {
                 var json = JsonSerializer.SerializeToElement(toolChoice);

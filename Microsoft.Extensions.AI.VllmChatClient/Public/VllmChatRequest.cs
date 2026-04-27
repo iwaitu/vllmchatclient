@@ -30,6 +30,17 @@ internal sealed class VllmOpenAIChatRequest
     public object? ToolChoice { get; set; }
 }
 
+internal sealed class VllmOpenAIToolChoice
+{
+    public required string Type { get; set; }
+    public VllmOpenAIToolChoiceFunction? Function { get; set; }
+}
+
+internal sealed class VllmOpenAIToolChoiceFunction
+{
+    public required string Name { get; set; }
+}
+
 internal sealed class VllmStreamOptions
 {
     public bool IncludeUsage { get; set; }

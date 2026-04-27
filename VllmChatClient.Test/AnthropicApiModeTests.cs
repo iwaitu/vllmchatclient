@@ -93,6 +93,127 @@ public class AnthropicApiModeTests
     }
 
     [Fact]
+    public async Task BaseClient_AnthropicMode_ShouldSerializeRequiredToolChoice()
+    {
+        string? requestJson = null;
+        var handler = new CaptureHttpMessageHandler(async request =>
+        {
+            requestJson = request.Content is null ? null : await request.Content.ReadAsStringAsync();
+
+            return JsonResponse("""
+                {
+                  "id": "msg-3",
+                  "type": "message",
+                  "role": "assistant",
+                  "model": "claude-test",
+                  "content": [{ "type": "text", "text": "ok" }],
+                  "stop_reason": "end_turn",
+                  "usage": { "input_tokens": 3, "output_tokens": 1 }
+                }
+                """);
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new TestVllmChatClient("http://localhost:8000/v1", null, httpClient, VllmApiMode.AnthropicMessages);
+        var tool = AIFunctionFactory.Create(
+            (string city) => $"weather:{city}",
+            new AIFunctionFactoryOptions { Name = "GetWeather", Description = "Get weather." });
+
+        await client.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "weather")],
+            new ChatOptions
+            {
+                Tools = [tool],
+                ToolMode = ChatToolMode.RequireSpecific("GetWeather")
+            });
+
+        Assert.NotNull(requestJson);
+        using var doc = JsonDocument.Parse(requestJson!);
+        var root = doc.RootElement;
+        var toolChoice = root.GetProperty("tool_choice");
+        Assert.Equal("tool", toolChoice.GetProperty("type").GetString());
+        Assert.Equal("GetWeather", toolChoice.GetProperty("name").GetString());
+        Assert.Equal("GetWeather", root.GetProperty("tools")[0].GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task Qwen3Next_AnthropicMode_ShouldSerializeRequiredToolChoice()
+    {
+        string? requestJson = null;
+        var handler = new CaptureHttpMessageHandler(async request =>
+        {
+            requestJson = request.Content is null ? null : await request.Content.ReadAsStringAsync();
+
+            return JsonResponse("""
+                {
+                  "id": "msg-qwen-tool-choice",
+                  "type": "message",
+                  "role": "assistant",
+                  "model": "qwen3.6-plus",
+                  "content": [{ "type": "text", "text": "ok" }],
+                  "stop_reason": "end_turn",
+                  "usage": { "input_tokens": 3, "output_tokens": 1 }
+                }
+                """);
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new VllmQwen3NextChatClient("http://localhost:8000/v1", null, "qwen3.6-plus", httpClient, VllmApiMode.AnthropicMessages);
+        var tool = AIFunctionFactory.Create(
+            (string path) => $"read:{path}",
+            new AIFunctionFactoryOptions { Name = "read_file", Description = "Read file." });
+
+        await client.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "read")],
+            new ChatOptions
+            {
+                Tools = [tool],
+                ToolMode = ChatToolMode.RequireSpecific("read_file")
+            });
+
+        Assert.NotNull(requestJson);
+        using var doc = JsonDocument.Parse(requestJson!);
+        var root = doc.RootElement;
+        var toolChoice = root.GetProperty("tool_choice");
+        Assert.Equal("tool", toolChoice.GetProperty("type").GetString());
+        Assert.Equal("read_file", toolChoice.GetProperty("name").GetString());
+        Assert.Equal("read_file", root.GetProperty("tools")[0].GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task GlmClient_AnthropicMode_ShouldSerializeDisabledThinking()
+    {
+        string? requestJson = null;
+        var handler = new CaptureHttpMessageHandler(async request =>
+        {
+            requestJson = request.Content is null ? null : await request.Content.ReadAsStringAsync();
+
+            return JsonResponse("""
+                {
+                  "id": "msg-4",
+                  "type": "message",
+                  "role": "assistant",
+                  "model": "glm-test",
+                  "content": [{ "type": "text", "text": "ok" }],
+                  "stop_reason": "end_turn",
+                  "usage": { "input_tokens": 3, "output_tokens": 1 }
+                }
+                """);
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new VllmGlmChatClient("http://localhost:8000/v1", null, "glm-test", httpClient, VllmApiMode.AnthropicMessages);
+
+        await client.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "hi")],
+            new VllmChatOptions { ThinkingEnabled = false });
+
+        Assert.NotNull(requestJson);
+        using var doc = JsonDocument.Parse(requestJson!);
+        Assert.Equal("disabled", doc.RootElement.GetProperty("thinking").GetProperty("type").GetString());
+    }
+
+    [Fact]
     public async Task BaseClient_AnthropicModeStreaming_ShouldReadAnthropicEvents()
     {
         var handler = new CaptureHttpMessageHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

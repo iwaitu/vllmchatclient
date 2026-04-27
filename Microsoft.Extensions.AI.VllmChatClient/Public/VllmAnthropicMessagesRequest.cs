@@ -13,7 +13,7 @@ internal sealed class VllmAnthropicMessagesRequest
     public bool Stream { get; set; }
     public IEnumerable<VllmAnthropicTool>? Tools { get; set; }
     [JsonPropertyName("tool_choice")]
-    public object? ToolChoice { get; set; }
+    public VllmAnthropicToolChoice? ToolChoice { get; set; }
     public VllmAnthropicThinkingOptions? Thinking { get; set; }
     public float? Temperature { get; set; }
     [JsonPropertyName("top_p")]
@@ -68,6 +68,12 @@ internal sealed class VllmAnthropicTool
     public string? Description { get; set; }
     [JsonPropertyName("input_schema")]
     public required VllmFunctionToolParameters InputSchema { get; set; }
+}
+
+internal sealed class VllmAnthropicToolChoice
+{
+    public required string Type { get; set; }
+    public string? Name { get; set; }
 }
 
 internal sealed class VllmAnthropicThinkingOptions

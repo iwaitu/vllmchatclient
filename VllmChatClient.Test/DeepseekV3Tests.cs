@@ -17,7 +17,7 @@ namespace VllmChatClient.Test
         {
             _output = output;
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_DEEPSEEK_API_KEY");
-            _client = new VllmDeepseekV3ChatClient("https://api.deepseek.com/v1/{1}", cloud_apiKey, "deepseek-v4-flash");
+            _client = new VllmDeepseekV3ChatClient("https://api.deepseek.com/v1/{1}", cloud_apiKey, "deepseek-v4-pro");
         }
 
         [Description("获取天气情况")]

@@ -383,7 +383,7 @@ Console.WriteLine(response.Text);
 | `VllmGemma4ChatClient` | Google native API / Local vLLM / OpenAI-compatible | gemma-4-31b-it | ✅ Toggle | ✅ Stream |
 | `VllmGemini3ChatClient` | Cloud API (Google Gemini / OpenRouter) | gemini-3-pro-preview / google/gemini-3.1-* | Signature (hidden, provider-dependent) | ✅ Stream |
 | `VllmDeepseekR1ChatClient` | Cloud API | DeepSeek-R1 | ✅ Full | ❌ |
-| `VllmDeepseekV3ChatClient` | Cloud API (DashScope) | DeepSeek-V3.2 | ✅ (via `VllmChatOptions`) | ✅ Stream |
+| `VllmDeepseekV3ChatClient` | Cloud API (DashScope / DeepSeek official / DeepSeek Anthropic) | DeepSeek-V3.2 / deepseek-v4 / deepseek-v4-flash | ✅ (via `VllmChatOptions`) | ✅ Stream |
 | `VllmGlmChatClient` | Cloud API (Zhipu official) / OpenAI compatible | glm-5 / glm-4.6 / glm-4.7 / glm-4.7-flash / glm-4.5 | ✅ Full (via `GlmChatOptions`) | ✅ Stream |
 | `VllmKimiK2ChatClient` | Cloud API (DashScope) | kimi-k2-(thinking/instruct) / kimi-k2.5 | ✅ (thinking model) | ✅ Stream |
 | `VllmMimoChatClient` | Cloud API (Xiaomi MiMo) | mimo-v2-pro / mimo-v2-flash | ✅ Toggle (via `extra_body.thinking.type`) | ✅ Stream |
@@ -979,16 +979,20 @@ await foreach (ReasoningChatResponseUpdate update in client3.GetStreamingRespons
 }
 ```
 
-### 🆕 DeepSeek-V3.2 with Thinking Chain
+### 🆕 DeepSeek-V3.2 / DeepSeek-V4 with Thinking Chain
 
 ```csharp
 using Microsoft.Extensions.AI;
 
-// Initialize DeepSeek V3.2 client (DashScope API)
+// Initialize DeepSeek client (DashScope API / DeepSeek official API)
 IChatClient dsV3 = new VllmDeepseekV3ChatClient(
     "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}",
     "your-api-key",
     "deepseek-v3.2");
+
+// VllmDeepseekV3ChatClient now also supports DeepSeek-V4 series models:
+// - deepseek-v4
+// - deepseek-v4-flash
 
 var messages = new List<ChatMessage>
 {

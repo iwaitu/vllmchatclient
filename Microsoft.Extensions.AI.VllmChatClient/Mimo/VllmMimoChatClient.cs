@@ -5,7 +5,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Mimo
     public class VllmMimoChatClient : VllmBaseChatClient
     {
         public VllmMimoChatClient(string endpoint, string? token = null, string? modelId = "mimo-v2-pro", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
-            : base(ProcessEndpoint(endpoint), null, modelId, httpClient, apiMode)
+            : base(NormalizeOpenAICompatibleEndpoint(endpoint, apiMode), null, modelId, httpClient, apiMode)
         {
             if (!string.IsNullOrWhiteSpace(token))
             {
@@ -13,34 +13,6 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Mimo
                 HttpClient.DefaultRequestHeaders.Remove("api-key");
                 HttpClient.DefaultRequestHeaders.Add("api-key", token);
             }
-        }
-
-        private static string ProcessEndpoint(string endpoint)
-        {
-            _ = Throw.IfNull(endpoint);
-
-            endpoint = endpoint.Trim();
-            if (endpoint.EndsWith("/", StringComparison.Ordinal))
-            {
-                endpoint = endpoint.TrimEnd('/');
-            }
-
-            if (endpoint.Contains("/chat/completions", StringComparison.OrdinalIgnoreCase))
-            {
-                return endpoint;
-            }
-
-            endpoint = endpoint
-                .Replace("{0}", "v1", StringComparison.Ordinal)
-                .Replace("{1}", string.Empty, StringComparison.Ordinal)
-                .TrimEnd('/');
-
-            if (endpoint.Contains("/v1", StringComparison.OrdinalIgnoreCase))
-            {
-                return endpoint + "/chat/completions";
-            }
-
-            return endpoint + "/v1/chat/completions";
         }
 
         private protected override void ApplyRequestOptions(VllmOpenAIChatRequest request, ChatOptions? options)

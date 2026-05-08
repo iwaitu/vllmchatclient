@@ -15,30 +15,8 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
         private static readonly string DefaultPromptMarker = "你必须遵循以下工具调用规则：";
         
         public VllmGptOssChatClient(string endpoint, string? token = null, string? modelId = "gpt-oss-120b", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
-            : base(ProcessEndpoint(endpoint), token, modelId, httpClient, apiMode)
+            : base(NormalizeOpenAICompatibleEndpoint(endpoint, apiMode), token, modelId, httpClient, apiMode)
         {
-        }
-
-        private static string ProcessEndpoint(string endpoint)
-        {
-            _ = Throw.IfNull(endpoint);
-            if (endpoint.EndsWith("/"))
-            {
-                endpoint = endpoint.TrimEnd('/');
-            }
-            
-            if (endpoint.Contains("/chat/completions"))
-            {
-                return endpoint;
-            }
-            else if (endpoint.Contains("/v1"))
-            {
-                return endpoint + "/chat/completions";
-            }
-            else
-            {
-                return endpoint + "/{0}/{1}";
-            }
         }
 
         private protected override IEnumerable<ChatMessage> PrepareMessagesWithSkills(IEnumerable<ChatMessage> messages, ChatOptions? options)

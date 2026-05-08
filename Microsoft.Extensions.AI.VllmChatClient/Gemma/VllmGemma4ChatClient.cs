@@ -15,7 +15,7 @@ namespace Microsoft.Extensions.AI
         private readonly bool _useGoogleNativeApi;
 
         public VllmGemma4ChatClient(string endpoint, string? token = null, string? modelId = "gemma-4-31b-it", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
-            : base(ProcessEndpoint(endpoint, modelId), token, modelId, httpClient, apiMode)
+            : base(ProcessEndpoint(endpoint, modelId, apiMode), token, modelId, httpClient, apiMode)
         {
             _useGoogleNativeApi = IsGoogleNativeEndpoint(endpoint);
 
@@ -39,7 +39,7 @@ namespace Microsoft.Extensions.AI
             => options?.ToolMode is not NoneChatToolMode
                && options?.Tools is { Count: > 0 };
 
-        private static string ProcessEndpoint(string endpoint, string? modelId)
+        private static string ProcessEndpoint(string endpoint, string? modelId, VllmApiMode apiMode)
         {
             _ = Throw.IfNull(endpoint);
 
@@ -67,22 +67,7 @@ namespace Microsoft.Extensions.AI
                 return endpoint;
             }
 
-            if (endpoint.Contains("/chat/completions", StringComparison.OrdinalIgnoreCase))
-            {
-                return endpoint;
-            }
-
-            endpoint = endpoint
-                .Replace("{0}", "v1", StringComparison.Ordinal)
-                .Replace("{1}", string.Empty, StringComparison.Ordinal)
-                .TrimEnd('/');
-
-            if (endpoint.Contains("/v1", StringComparison.OrdinalIgnoreCase))
-            {
-                return endpoint + "/chat/completions";
-            }
-
-            return endpoint + "/{0}/{1}";
+            return NormalizeOpenAICompatibleEndpoint(endpoint, apiMode);
         }
 
         private static bool IsGoogleNativeEndpoint(string endpoint)

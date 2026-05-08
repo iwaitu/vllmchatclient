@@ -8,30 +8,8 @@ namespace Microsoft.Extensions.AI
     public class VllmOpenAiGptClient : VllmBaseChatClient
     {
         public VllmOpenAiGptClient(string endpoint, string? token = null, string? modelId = "openai/gpt-5.2-codex", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
-            : base(ProcessEndpoint(endpoint), token, modelId, httpClient, apiMode)
+            : base(NormalizeOpenAICompatibleEndpoint(endpoint, apiMode), token, modelId, httpClient, apiMode)
         {
-        }
-
-        private static string ProcessEndpoint(string endpoint)
-        {
-            _ = Throw.IfNull(endpoint);
-            if (endpoint.EndsWith("/"))
-            {
-                endpoint = endpoint.TrimEnd('/');
-            }
-
-            if (endpoint.Contains("/chat/completions"))
-            {
-                return endpoint;
-            }
-            else if (endpoint.Contains("/v1"))
-            {
-                return endpoint + "/chat/completions";
-            }
-            else
-            {
-                return endpoint + "/{0}/{1}";
-            }
         }
 
         public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(

@@ -870,57 +870,75 @@ namespace Microsoft.Extensions.AI
             }
         }
 
-        protected virtual string GetChatEndpoint() => string.Format(_apiChatEndpoint, "v1", "chat/completions");
+        protected virtual string GetChatEndpoint() => NormalizeOpenAICompatibleEndpoint(_apiChatEndpoint, VllmApiMode.ChatCompletions);
+
+        protected static string NormalizeOpenAICompatibleEndpoint(string endpoint, VllmApiMode apiMode)
+        {
+            _ = Throw.IfNull(endpoint);
+
+            endpoint = endpoint.Trim().TrimEnd('/');
+
+            if (endpoint.Contains("{0}", StringComparison.Ordinal) || endpoint.Contains("{1}", StringComparison.Ordinal))
+            {
+                endpoint = endpoint
+                    .Replace("{0}", "v1", StringComparison.Ordinal)
+                    .Replace("{1}", string.Empty, StringComparison.Ordinal)
+                    .TrimEnd('/');
+            }
+
+            if (endpoint.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+            {
+                return apiMode switch
+                {
+                    VllmApiMode.AnthropicMessages => endpoint[..^"/chat/completions".Length] + "/messages",
+                    VllmApiMode.Responses => endpoint[..^"/chat/completions".Length] + "/responses",
+                    _ => endpoint,
+                };
+            }
+
+            if (endpoint.EndsWith("/responses", StringComparison.OrdinalIgnoreCase))
+            {
+                return apiMode switch
+                {
+                    VllmApiMode.AnthropicMessages => endpoint[..^"/responses".Length] + "/messages",
+                    VllmApiMode.ChatCompletions => endpoint[..^"/responses".Length] + "/chat/completions",
+                    _ => endpoint,
+                };
+            }
+
+            if (endpoint.EndsWith("/messages", StringComparison.OrdinalIgnoreCase))
+            {
+                return apiMode switch
+                {
+                    VllmApiMode.ChatCompletions => endpoint[..^"/messages".Length] + "/chat/completions",
+                    VllmApiMode.Responses => endpoint[..^"/messages".Length] + "/responses",
+                    _ => endpoint,
+                };
+            }
+
+            if (endpoint.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+            {
+                return endpoint + apiMode switch
+                {
+                    VllmApiMode.AnthropicMessages => "/messages",
+                    VllmApiMode.Responses => "/responses",
+                    _ => "/chat/completions",
+                };
+            }
+
+            return endpoint + apiMode switch
+            {
+                VllmApiMode.AnthropicMessages => "/v1/messages",
+                VllmApiMode.Responses => "/v1/responses",
+                _ => "/v1/chat/completions",
+            };
+        }
 
         protected virtual string GetResponsesEndpoint()
-        {
-            if (_apiChatEndpoint.Contains("{0}", StringComparison.Ordinal) || _apiChatEndpoint.Contains("{1}", StringComparison.Ordinal))
-            {
-                return string.Format(_apiChatEndpoint, "v1", "responses");
-            }
-
-            if (_apiChatEndpoint.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
-            {
-                return _apiChatEndpoint[..^"/chat/completions".Length] + "/responses";
-            }
-
-            if (_apiChatEndpoint.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
-            {
-                return _apiChatEndpoint + "/responses";
-            }
-
-            return _apiChatEndpoint;
-        }
+            => NormalizeOpenAICompatibleEndpoint(_apiChatEndpoint, VllmApiMode.Responses);
 
         protected virtual string GetAnthropicMessagesEndpoint()
-        {
-            if (_apiChatEndpoint.Contains("{0}", StringComparison.Ordinal) || _apiChatEndpoint.Contains("{1}", StringComparison.Ordinal))
-            {
-                return string.Format(_apiChatEndpoint, "v1", "messages");
-            }
-
-            if (_apiChatEndpoint.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
-            {
-                return _apiChatEndpoint[..^"/chat/completions".Length] + "/messages";
-            }
-
-            if (_apiChatEndpoint.EndsWith("/responses", StringComparison.OrdinalIgnoreCase))
-            {
-                return _apiChatEndpoint[..^"/responses".Length] + "/messages";
-            }
-
-            if (_apiChatEndpoint.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
-            {
-                return _apiChatEndpoint + "/messages";
-            }
-
-            if (!_apiChatEndpoint.EndsWith("/messages", StringComparison.OrdinalIgnoreCase))
-            {
-                return _apiChatEndpoint.TrimEnd('/') + "/v1/messages";
-            }
-
-            return _apiChatEndpoint;
-        }
+            => NormalizeOpenAICompatibleEndpoint(_apiChatEndpoint, VllmApiMode.AnthropicMessages);
 
         protected virtual ChatResponseUpdate BuildTextUpdate(string responseId, string text, bool thinking)
         {

@@ -49,7 +49,7 @@ namespace Microsoft.Extensions.AI
         }
 
         public VllmQwen3NextChatClient(string endpoint, string? token = null, string? modelId = "qwen3", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
-            : base(endpoint, token, modelId, httpClient, apiMode)
+            : base(NormalizeOpenAICompatibleEndpoint(endpoint, apiMode), token, modelId, httpClient, apiMode)
         {
         }
 

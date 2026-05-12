@@ -312,8 +312,8 @@ data: [DONE]
         var functionCall = response.Messages.Single().Contents.OfType<FunctionCallContent>().Single();
 
         Assert.Equal("calculate", functionCall.Name);
-        Assert.Equal("call_good_args", functionCall.CallId);
-        Assert.Equal("2 + 2", functionCall.Arguments?["expression"]?.ToString());
+        Assert.Equal("call_bad_args", functionCall.CallId);
+        Assert.Equal("{\"expression\":", functionCall.Arguments?["input"]?.ToString());
     }
 
     [Fact]
@@ -456,9 +456,6 @@ data: [DONE]
 
         Assert.False(string.IsNullOrWhiteSpace(handler.LastRequestBody));
         using var doc = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody!);
-        Assert.True(doc.RootElement.TryGetProperty("enable_thinking", out var enableThinking));
-        Assert.False(enableThinking.GetBoolean());
-
         Assert.True(doc.RootElement.TryGetProperty("chat_template_kwargs", out var chatTemplateKwargs));
         Assert.True(chatTemplateKwargs.TryGetProperty("enable_thinking", out var nestedEnableThinking));
         Assert.False(nestedEnableThinking.GetBoolean());

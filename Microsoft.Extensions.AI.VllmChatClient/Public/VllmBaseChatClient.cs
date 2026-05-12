@@ -417,8 +417,11 @@ namespace Microsoft.Extensions.AI
 
                     if (enableLegacyToolCallTextFallback)
                     {
-                        ToolcallParser.TryFlushClosedToolCallBlocks(ref bufferCopy, out var tcalls);
-                        funcList.AddRange(tcalls.Select(call => (call, (string?)null)));
+                        if (ToolcallParser.TryFlushClosedToolCallBlocks(ref bufferCopy, out var tcalls))
+                        {
+                            funcList.AddRange(tcalls.Select(call => (call, (string?)null)));
+                            bufferMsg = bufferCopy;
+                        }
                     }
 
                     if (funcList.Count > 0)

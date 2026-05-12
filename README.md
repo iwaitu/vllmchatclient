@@ -5,18 +5,18 @@
 [![GitHub issues](https://img.shields.io/github/issues/iwaitu/vllmchatclient)](https://github.com/iwaitu/vllmchatclient/issues)
 [![GitHub license](https://img.shields.io/github/license/iwaitu/vllmchatclient)](https://github.com/iwaitu/vllmchatclient/blob/master/LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/iwaitu/vllmchatclient)](https://github.com/iwaitu/vllmchatclient/commits/main)
-[![.NET](https://img.shields.io/badge/platform-.NET%208-blueviolet)](https://dotnet.microsoft.com/)
+[![.NET](https://img.shields.io/badge/platform-.NET%2010-blueviolet)](https://dotnet.microsoft.com/)
 
 # C# vLLM Chat Client
 
-A comprehensive .NET 8 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Nemotron-3 Super 120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **Qwen 3.6**, **QwQ-32B**, **Gemma3**, **Gemma4**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5**, **MiMo v2 Pro / MiMo v2 Flash** with advanced reasoning capabilities.
+A comprehensive .NET 10 chat client library that supports various LLM models including **OpenAI GPT 系列**, **Claude 4.6 / 4.5**, **GPT-OSS-120B**, **Nemotron-3 Super 120B**, **Qwen3**, **Qwen3-Next**, **Qwen 3.5**, **Qwen 3.6**, **QwQ-32B**, **Gemma3**, **Gemma4**, **DeepSeek-R1**, **DeepSeek-V3.2**, **Kimi K2 / Kimi 2.5**, **GLM-5 / GLM 4.6 / 4.7 / 4.7 Flash / 4.5**, **Gemini 3**, **MiniMax-M2.5**, **MiMo v2 Pro / MiMo v2 Flash** with advanced reasoning capabilities.
 
 ## 📢 Latest Update
 
 - Added `VllmApiMode` to `VllmBaseChatClient`, allowing callers to choose between OpenAI-compatible `/chat/completions`, vLLM / OpenAI `/responses`, and Anthropic Messages API formats.
 - Added full request / response / streaming conversion for vLLM Responses API and Anthropic Messages API, including reasoning output, tool calls, usage parsing, and streaming tool-call argument deltas.
 - Added Anthropic-format integration tests for GLM-5.1 and Qwen 3.6 Plus via DashScope Anthropic endpoints.
-- Upgraded `Microsoft.Extensions.AI` to `10.5.0`.
+- Upgraded `Microsoft.Extensions.AI` to `10.5.2`.
 - `VllmBaseChatClient` now supports vLLM structured JSON output via both:
   - `response_format = { type: "json_schema", json_schema: { name, description, schema, strict } }`
   - `extra_body = { structured_outputs: { json: schema } }`
@@ -32,7 +32,7 @@ A comprehensive .NET 8 chat client library that supports various LLM models incl
 - ✅ **Stream Function Calls**: Real-time function calling with streaming responses
 - ✅ **Multiple Deployment Options**: Local vLLM deployment and cloud API support
 - ✅ **Performance Optimized**: Efficient streaming and memory management
-- ✅ **.NET 8 Ready**: Full compatibility with the latest .NET platform
+- ✅ **.NET 10 Ready**: Full compatibility with the latest .NET platform
 
 ## 📦 Project Repository
 
@@ -1101,7 +1101,7 @@ await foreach (var update in client.GetStreamingResponseAsync(messages, options2
 
 ## 📋 Requirements
 
-- **.NET 8.0** or higher
+- **.NET 10.0** or higher
 - **Microsoft.Extensions.AI** framework
 - **Newtonsoft.Json** for JSON processing
 - **System.Text.Json** for high-performance scenarios

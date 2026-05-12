@@ -259,7 +259,9 @@ public class SimpleSkillSmokeTests
         _testOutput.WriteLine("Response: {0}", response.Text);
 
         Assert.False(string.IsNullOrWhiteSpace(response.Text));
-        Assert.Contains("Answer:", response.Text);
+        Assert.True(
+            ContainsFinalAnswer(response.Text, "188"),
+            $"Response should include the final answer 188 with an answer label. Response: {response.Text}");
     }
 
     /// <summary>
@@ -314,6 +316,13 @@ public class SimpleSkillSmokeTests
 
     [System.ComponentModel.Description("Gets the current weather")]
     private static string GetWeather() => "It's sunny, 25°C";
+
+    private static bool ContainsFinalAnswer(string responseText, string expectedAnswer)
+    {
+        return responseText.Contains(expectedAnswer, StringComparison.Ordinal)
+            && (responseText.Contains("Answer:", StringComparison.OrdinalIgnoreCase)
+                || responseText.Contains("答案", StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// 验证 skill-creator 子目录中的 SKILL.md 能被正确加载。

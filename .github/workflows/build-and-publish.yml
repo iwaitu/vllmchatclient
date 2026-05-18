@@ -8,10 +8,11 @@ on:
     branches: [ main, master ]
 
 env:
-  DOTNET_VERSION: '8.0.x'
+  DOTNET_VERSION: '10.0.x'
   SOLUTION_PATH: 'Microsoft.Extensions.AI.VllmChatClient.sln'
   PROJECT_PATH: 'Microsoft.Extensions.AI.VllmChatClient/Microsoft.Extensions.AI.VllmChatClient.csproj'
   TEST_PROJECT_PATH: 'VllmChatClient.Test/VllmChatClient.Test.csproj'
+  NATIVE_AOT_SMOKE_PATH: 'samples/NativeAotSmoke/NativeAotSmoke.csproj'
 
 jobs:
   build:
@@ -41,6 +42,9 @@ jobs:
 
     - name: Build solution
       run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
+
+    - name: NativeAOT smoke publish
+      run: dotnet publish ${{ env.NATIVE_AOT_SMOKE_PATH }} --configuration Release --no-restore -p:PublishAot=true
 
     # 完全跳过所有测试运行
     - name: Skip all tests in CI/CD

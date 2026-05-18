@@ -93,11 +93,15 @@ namespace Microsoft.Extensions.AI
 
                         case FunctionCallContent fcc:
                             {
-                                var toolCallJson = System.Text.Json.JsonSerializer.Serialize(new
-                                {
-                                    name = fcc.Name,
-                                    arguments = fcc.Arguments
-                                }, _toolCallJsonSerializerOptions);
+                                var toolCallJson = System.Text.Json.JsonSerializer.Serialize(
+                                    new VllmFunctionCallContent
+                                    {
+                                        Name = fcc.Name,
+                                        Arguments = System.Text.Json.JsonSerializer.SerializeToElement(
+                                            fcc.Arguments,
+                                            _toolCallJsonSerializerOptions.GetTypeInfo(typeof(IDictionary<string, object?>)))
+                                    },
+                                    JsonContext.Default.VllmFunctionCallContent);
 
                                 yield return new VllmOpenAIChatRequestMessage
                                 {

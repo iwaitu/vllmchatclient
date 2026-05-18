@@ -1,54 +1,54 @@
-﻿using Newtonsoft.Json;
+﻿using System.Text.Json.Serialization;
 
 namespace Microsoft.Extensions.AI;
 
 internal sealed class VllmChatResponse
 {
-    [JsonProperty("id")]
+    [JsonPropertyName("id")]
     public string? Id { get; set; }
 
-    [JsonProperty("object")]
+    [JsonPropertyName("object")]
     public string? Object { get; set; }
 
-    [JsonProperty("created")]
+    [JsonPropertyName("created")]
     public long Created { get; set; }
 
-    [JsonProperty("model")]
+    [JsonPropertyName("model")]
     public string? Model { get; set; }
 
-    [JsonProperty("choices")]
+    [JsonPropertyName("choices")]
     public Choice[]? Choices { get; set; }
 
-    [JsonProperty("usage")]
+    [JsonPropertyName("usage")]
     public Usage? Usage { get; set; }
 }
 
 internal sealed class Choice
 {
-    [JsonProperty("index")]
+    [JsonPropertyName("index")]
     public int Index { get; set; }
 
-    [JsonProperty("message")]
+    [JsonPropertyName("message")]
     public VllmChatResponseMessage? Message { get; set; }
 
-    [JsonProperty("logprobs")]
+    [JsonPropertyName("logprobs")]
     public object? Logprobs { get; set; }
 
-    [JsonProperty("finish_reason")]
+    [JsonPropertyName("finish_reason")]
     public string? FinishReason { get; set; }
 
-    [JsonProperty("stop_reason")]
+    [JsonPropertyName("stop_reason")]
     public int? StopReason { get; set; }
 }
 
 internal sealed class Usage
 {
-    [JsonProperty("prompt_tokens")]
+    [JsonPropertyName("prompt_tokens")]
     public int PromptTokens { get; set; }
 
-    [JsonProperty("total_tokens")]
+    [JsonPropertyName("total_tokens")]
     public int TotalTokens { get; set; }
 
-    [JsonProperty("completion_tokens")]
+    [JsonPropertyName("completion_tokens")]
     public int CompletionTokens { get; set; }
 }

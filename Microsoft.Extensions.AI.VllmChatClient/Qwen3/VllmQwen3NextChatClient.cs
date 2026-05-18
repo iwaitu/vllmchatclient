@@ -78,7 +78,7 @@ namespace Microsoft.Extensions.AI
         private protected override IEnumerable<VllmOpenAIChatRequestMessage> ToVllmChatRequestMessages(ChatMessage content)
         {
             var text = string.Empty;
-            var imageParts = new List<object>();
+            var imageParts = new List<JsonElement>();
 
             foreach (var item in content.Contents)
             {
@@ -93,14 +93,16 @@ namespace Microsoft.Extensions.AI
                                 .ToArray());
 #endif
                             var mime = string.IsNullOrWhiteSpace(dataContent.MediaType) ? "image/jpeg" : dataContent.MediaType;
-                            imageParts.Add(new
-                            {
-                                type = "image_url",
-                                image_url = new
+                            imageParts.Add(JsonSerializer.SerializeToElement(
+                                new VllmOpenAIImageContentPart
                                 {
-                                    url = $"data:{mime};base64,{base64}",
-                                }
-                            });
+                                    ImageUrl = new VllmOpenAIImageUrl
+                                    {
+                                        Url = $"data:{mime};base64,{base64}",
+                                    }
+                                },
+                                typeof(VllmOpenAIImageContentPart),
+                                JsonContext.Default));
                             break;
                         }
 
@@ -110,11 +112,15 @@ namespace Microsoft.Extensions.AI
 
                     case FunctionCallContent fcc:
                         {
-                            var toolCallJson = JsonSerializer.Serialize(new
-                            {
-                                name = fcc.Name,
-                                arguments = fcc.Arguments
-                            }, ToolCallJsonSerializerOptions);
+                            var toolCallJson = JsonSerializer.Serialize(
+                                new VllmFunctionCallContent
+                                {
+                                    Name = fcc.Name,
+                                    Arguments = JsonSerializer.SerializeToElement(
+                                        fcc.Arguments,
+                                        ToolCallJsonSerializerOptions.GetTypeInfo(typeof(IDictionary<string, object?>)))
+                                },
+                                JsonContext.Default.VllmFunctionCallContent);
 
                             yield return new VllmOpenAIChatRequestMessage
                             {
@@ -140,17 +146,23 @@ namespace Microsoft.Extensions.AI
 
             if (imageParts.Count > 0)
             {
-                var parts = new List<object>(capacity: imageParts.Count + 1);
+                var parts = new List<JsonElement>(capacity: imageParts.Count + 1);
                 parts.AddRange(imageParts);
                 if (!string.IsNullOrWhiteSpace(text))
                 {
-                    parts.Add(new { type = "text", text });
+                    parts.Add(JsonSerializer.SerializeToElement(
+                        new VllmOpenAITextContentPart
+                        {
+                            Text = text
+                        },
+                        typeof(VllmOpenAITextContentPart),
+                        JsonContext.Default));
                 }
 
                 yield return new VllmOpenAIChatRequestMessage
                 {
                     Role = content.Role.Value,
-                    Content = JsonSerializer.Serialize(parts, ToolCallJsonSerializerOptions),
+                    Content = JsonSerializer.Serialize(parts.ToArray(), typeof(JsonElement[]), JsonContext.Default),
                 };
                 yield break;
             }

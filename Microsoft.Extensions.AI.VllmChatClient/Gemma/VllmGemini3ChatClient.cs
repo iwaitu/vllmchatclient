@@ -166,6 +166,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                 httpResponse = await _httpClient.PostAsJsonAsync(
                     apiEndpoint,
                     geminiRequest,
+                    JsonContext.Default.GeminiRequest,
                     cancellationToken).ConfigureAwait(false);
 
                 if (!httpResponse.IsSuccessStatusCode)
@@ -173,7 +174,9 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
                 }
 
-                var geminiResponse = await httpResponse.Content.ReadFromJsonAsync<GeminiResponse>(cancellationToken).ConfigureAwait(false);
+                var geminiResponse = await httpResponse.Content.ReadFromJsonAsync(
+                    JsonContext.Default.GeminiResponse,
+                    cancellationToken).ConfigureAwait(false);
                 
                 if (geminiResponse == null)
                 {
@@ -256,7 +259,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 
                 using HttpRequestMessage request = new(HttpMethod.Post, apiEndpoint)
                 {
-                    Content = JsonContent.Create(geminiRequest)
+                    Content = JsonContent.Create(geminiRequest, JsonContext.Default.GeminiRequest)
                 };
 
                 // 添加 alt=sse 参数以获取 SSE 流
@@ -310,7 +313,9 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     GeminiResponse? geminiStreamChunk = null;
                     try
                     {
-                        geminiStreamChunk = System.Text.Json.JsonSerializer.Deserialize<GeminiResponse>(jsonData);
+                        geminiStreamChunk = System.Text.Json.JsonSerializer.Deserialize(
+                            jsonData,
+                            JsonContext.Default.GeminiResponse);
                     }
                     catch (System.Text.Json.JsonException)
                     {
@@ -751,7 +756,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 #endif
                 : callId;
 
-            var argumentsIndex = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(function.Arguments ?? "{}", AIJsonUtilities.DefaultOptions);
+            _ = VllmUtilities.TryParseObjectDictionary(function.Arguments ?? "{}", out var argumentsIndex);
             var fcc = new FunctionCallContent(id, function.Name ?? "", argumentsIndex);
             if (!string.IsNullOrEmpty(thoughtSignature))
             {
@@ -992,7 +997,9 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                                                 },
                                             Function = new VllmFunctionToolCall {
                                                 Name = fcc.Name,
-                                                Arguments = System.Text.Json.JsonSerializer.Serialize(fcc.Arguments, this.ToolCallJsonSerializerOptions)
+                                                Arguments = System.Text.Json.JsonSerializer.Serialize(
+                                                    fcc.Arguments,
+                                                    ToolCallJsonSerializerOptions.GetTypeInfo(typeof(IDictionary<string, object?>)))
                                             }
                                         }
                                     }
@@ -1556,7 +1563,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                 // 尝试将对象序列化为JSON字符串然后解析
                 else if (reasoningContent != null)
                 {
-                    var jsonString = System.Text.Json.JsonSerializer.Serialize(reasoningContent);
+                    var jsonString = reasoningContent.ToString();
 
                     if (!string.IsNullOrEmpty(jsonString) && jsonString != "null" && jsonString != "{}")
                     {

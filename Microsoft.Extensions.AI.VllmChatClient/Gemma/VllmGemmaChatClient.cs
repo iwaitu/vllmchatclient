@@ -358,7 +358,7 @@ namespace Microsoft.Extensions.AI
 #else
             var id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
-            var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(function.Arguments ?? "{}");
+            _ = VllmUtilities.TryParseObjectDictionary(function.Arguments ?? "{}", out var arguments);
             return new FunctionCallContent(id, function.Name ?? "", arguments);
 
 
@@ -385,7 +385,6 @@ namespace Microsoft.Extensions.AI
         private VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
             var msgs = messages.SelectMany(ToVllmChatRequestMessages).ToArray();
-            var msgContent = JsonSerializer.Serialize(msgs);
             VllmOpenAIChatRequest request = new()
             {
                 Format = ToVllmChatResponseFormat(options?.ResponseFormat),
@@ -420,18 +419,20 @@ namespace Microsoft.Extensions.AI
             // 然而，各种图像模型期望同一个请求消息中同时包含文本和图像。
             // 为此，如果存在文本消息，则将图像附加到之前的文本消息上。
 
-            var parts = new List<Dictionary<string, object>>();
+            var parts = new List<JsonElement>();
 
             foreach (var item in content.Contents)
             {
                 switch (item)
                 {
                     case TextContent textContent:
-                        parts.Add(new Dictionary<string, object>
-                {
-                    { "type", "text" },
-                    { "text", textContent.Text }
-                });
+                        parts.Add(JsonSerializer.SerializeToElement(
+                            new VllmOpenAITextContentPart
+                            {
+                                Text = textContent.Text
+                            },
+                            typeof(VllmOpenAITextContentPart),
+                            JsonContext.Default));
                         break;
 
                     case DataContent dataContent when dataContent.HasTopLevelMediaType("image"):
@@ -442,11 +443,16 @@ namespace Microsoft.Extensions.AI
                        .ToArray());
 #endif
                         var imgUrl = $"data:{dataContent.MediaType};base64,{base64}";
-                        parts.Add(new Dictionary<string, object>
-                {
-                    { "type", "image_url" },
-                    { "image_url", new { url = imgUrl } }
-                });
+                        parts.Add(JsonSerializer.SerializeToElement(
+                            new VllmOpenAIImageContentPart
+                            {
+                                ImageUrl = new VllmOpenAIImageUrl
+                                {
+                                    Url = imgUrl
+                                }
+                            },
+                            typeof(VllmOpenAIImageContentPart),
+                            JsonContext.Default));
                         break;
 
                     case FunctionCallContent fcc:
@@ -493,7 +499,7 @@ namespace Microsoft.Extensions.AI
                 yield return new VllmOpenAIChatRequestMessage
                 {
                     Role = content.Role.Value,
-                    Content = JsonSerializer.Serialize(parts)
+                    Content = JsonSerializer.Serialize(parts.ToArray(), typeof(JsonElement[]), JsonContext.Default)
                 };
             }
         }

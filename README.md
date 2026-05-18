@@ -1107,8 +1107,21 @@ await foreach (var update in client.GetStreamingResponseAsync(messages, options2
 
 - **.NET 10.0** or higher
 - **Microsoft.Extensions.AI** framework
-- **Newtonsoft.Json** for JSON processing
-- **System.Text.Json** for high-performance scenarios
+- **System.Text.Json** with source generation for JSON processing
+
+---
+
+## NativeAOT Support
+
+`Ivilson.AI.VllmChatClient` is built with AOT compatibility analyzers enabled. The core package does not depend on Newtonsoft.Json and uses `System.Text.Json` source-generation metadata for internal request and response DTOs.
+
+| API mode | Non-streaming | Streaming | Tool calls | Notes |
+| --- | --- | --- | --- | --- |
+| Chat Completions | Supported | Supported | Supported | Tool arguments are surfaced as `JsonElement`-backed dictionary values. |
+| Responses | Supported | Supported | Supported | Covered by the NativeAOT smoke publish project. |
+| Anthropic Messages | Supported | Supported | Supported | Content blocks and tool input use explicit DTOs/`JsonElement`. |
+
+Dynamic user payloads are intentionally kept at the boundary. For custom tool argument/result models, prefer passing `JsonSerializerOptions` backed by a source-generated `JsonSerializerContext`; otherwise values may be returned as `JsonElement` instead of arbitrary runtime objects.
 
 ---
 

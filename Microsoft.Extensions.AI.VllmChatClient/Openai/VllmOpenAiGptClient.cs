@@ -246,7 +246,7 @@ namespace Microsoft.Extensions.AI
                 }
                 else if (reasoningContent != null)
                 {
-                    var jsonString = System.Text.Json.JsonSerializer.Serialize(reasoningContent);
+                    var jsonString = reasoningContent.ToString();
                     if (!string.IsNullOrEmpty(jsonString) && jsonString != "null" && jsonString != "{}")
                     {
                         hasReasoning = true;

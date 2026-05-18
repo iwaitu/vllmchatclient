@@ -1,4 +1,6 @@
-﻿using System.Text.Json.Serialization;
+﻿using Microsoft.Extensions.AI.VllmChatClient.Gemma;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Microsoft.Extensions.AI;
 
@@ -7,6 +9,9 @@ namespace Microsoft.Extensions.AI;
 [JsonSerializable(typeof(VllmChatRequestMessage))]
 [JsonSerializable(typeof(VllmOpenAIChatRequest))]
 [JsonSerializable(typeof(VllmOpenAIChatRequestMessage))]
+[JsonSerializable(typeof(VllmOpenAITextContentPart))]
+[JsonSerializable(typeof(VllmOpenAIImageContentPart))]
+[JsonSerializable(typeof(VllmOpenAIImageUrl))]
 [JsonSerializable(typeof(VllmChatResponse))]
 [JsonSerializable(typeof(VllmChatResponseMessage))]
 [JsonSerializable(typeof(VllmFunctionCallContent))]
@@ -42,6 +47,8 @@ namespace Microsoft.Extensions.AI;
 [JsonSerializable(typeof(VllmAnthropicMessagesRequest))]
 [JsonSerializable(typeof(VllmAnthropicMessage))]
 [JsonSerializable(typeof(VllmAnthropicTextBlock))]
+[JsonSerializable(typeof(VllmAnthropicTextBlock[]))]
+[JsonSerializable(typeof(VllmAnthropicThinkingBlock))]
 [JsonSerializable(typeof(VllmAnthropicImageBlock))]
 [JsonSerializable(typeof(VllmAnthropicImageSource))]
 [JsonSerializable(typeof(VllmAnthropicToolUseBlock))]
@@ -54,4 +61,24 @@ namespace Microsoft.Extensions.AI;
 [JsonSerializable(typeof(VllmAnthropicUsage))]
 [JsonSerializable(typeof(VllmAnthropicStreamEvent))]
 [JsonSerializable(typeof(VllmAnthropicStreamDelta))]
+[JsonSerializable(typeof(Dictionary<string, object?>))]
+[JsonSerializable(typeof(Dictionary<string, JsonElement>))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(object))]
+[JsonSerializable(typeof(object[]))]
+[JsonSerializable(typeof(string[]))]
+[JsonSerializable(typeof(JsonElement[]))]
+[JsonSerializable(typeof(GeminiRequest))]
+[JsonSerializable(typeof(GeminiResponse))]
+[JsonSerializable(typeof(GeminiContent))]
+[JsonSerializable(typeof(GeminiPart))]
+[JsonSerializable(typeof(GeminiInlineData))]
+[JsonSerializable(typeof(GeminiFunctionCall))]
+[JsonSerializable(typeof(GeminiFunctionResponse))]
+[JsonSerializable(typeof(GeminiGenerationConfig))]
+[JsonSerializable(typeof(GeminiThinkingConfig))]
+[JsonSerializable(typeof(GeminiTool))]
+[JsonSerializable(typeof(GeminiFunctionDeclaration))]
+[JsonSerializable(typeof(GeminiCandidate))]
+[JsonSerializable(typeof(GeminiUsageMetadata))]
 internal sealed partial class JsonContext : JsonSerializerContext;

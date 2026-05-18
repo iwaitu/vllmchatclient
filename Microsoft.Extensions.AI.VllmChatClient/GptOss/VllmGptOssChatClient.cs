@@ -443,7 +443,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
                 }
                 else if (reasoningContent != null)
                 {
-                    var jsonString = System.Text.Json.JsonSerializer.Serialize(reasoningContent);
+                    var jsonString = reasoningContent.ToString();
                     if (!string.IsNullOrEmpty(jsonString) && jsonString != "null" && jsonString != "{}")
                     {
                         hasReasoning = true;

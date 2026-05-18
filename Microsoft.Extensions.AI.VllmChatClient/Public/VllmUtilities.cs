@@ -18,6 +18,58 @@ namespace Microsoft.Extensions.AI
             Timeout = Timeout.InfiniteTimeSpan,
         };
 
+        public static bool IsValidJson(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var _ = JsonDocument.Parse(json);
+                return true;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        public static bool TryParseObjectDictionary(string? json, out IDictionary<string, object?> value)
+        {
+            value = new Dictionary<string, object?>();
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    return false;
+                }
+
+                value = (Dictionary<string, object?>?)JsonSerializer.Deserialize(
+                    json,
+                    typeof(Dictionary<string, object?>),
+                    JsonContext.Default) ?? new Dictionary<string, object?>();
+                return true;
+            }
+            catch (JsonException ex)
+            {
+                Trace.TraceWarning("[vllm] Tool call arguments JSON parse failed: {0}", ex.Message);
+                return false;
+            }
+            catch (NotSupportedException ex)
+            {
+                Trace.TraceWarning("[vllm] Tool call arguments JSON parse failed: {0}", ex.Message);
+                return false;
+            }
+        }
+
         public static void TransferNanosecondsTime<TResponse>(TResponse response, Func<TResponse, long?> getNanoseconds, string key, ref AdditionalPropertiesDictionary<long>? metadata)
         {
             if (getNanoseconds(response) is long duration)

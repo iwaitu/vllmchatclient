@@ -72,3 +72,20 @@ internal class VllmChatRequestMessage
     public IList<string>? Images { get; set; }
 }
 
+internal sealed class VllmOpenAITextContentPart
+{
+    public string Type { get; set; } = "text";
+    public required string Text { get; set; }
+}
+
+internal sealed class VllmOpenAIImageContentPart
+{
+    public string Type { get; set; } = "image_url";
+    [JsonPropertyName("image_url")]
+    public required VllmOpenAIImageUrl ImageUrl { get; set; }
+}
+
+internal sealed class VllmOpenAIImageUrl
+{
+    public required string Url { get; set; }
+}

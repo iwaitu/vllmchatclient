@@ -2,7 +2,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Shared.Diagnostics;
-using Newtonsoft.Json;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 using System.Runtime.CompilerServices;
 
@@ -338,7 +337,7 @@ namespace Microsoft.Extensions.AI
 #else
             var id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
-            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments ?? "{}");
+            _ = VllmUtilities.TryParseObjectDictionary(function.Arguments ?? "{}", out var arguments);
             return new FunctionCallContent(id, function.Name ?? string.Empty, arguments);
         }
 

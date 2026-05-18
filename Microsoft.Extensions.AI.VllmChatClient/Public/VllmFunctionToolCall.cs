@@ -1,5 +1,4 @@
-﻿using Newtonsoft.Json;
-using System.Text.Json;
+﻿using System.Text.Json.Serialization;
 
 namespace Microsoft.Extensions.AI;
 
@@ -7,9 +6,9 @@ namespace Microsoft.Extensions.AI;
 
 internal sealed class VllmFunctionToolCall
 {
-    [JsonProperty("name")]
+    [JsonPropertyName("name")]
     public string? Name { get; set; }
 
-    [JsonProperty("arguments")]
+    [JsonPropertyName("arguments")]
     public string? Arguments { get; set; }
 }

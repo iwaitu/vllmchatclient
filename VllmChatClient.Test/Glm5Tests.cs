@@ -15,10 +15,6 @@ namespace VllmChatClient.Test
         private readonly ITestOutputHelper _output;
         private readonly GlmChatOptions _chatOptions;
         private readonly bool _skipTests;
-        //private const string MODEL = "glm-4.7";
-        //private const string MODEL = "glm-5";
-        private const string MODEL = "glm-5.1";
-        //private const string MODEL = "glm-4.6";
         static int functionCallTime = 0;
 
         [Description("获取南宁的天气情况")]
@@ -42,14 +38,89 @@ namespace VllmChatClient.Test
         public Glm5Tests(ITestOutputHelper output)
         {
             _output = output; // 修复 CS8618: 正确初始化 _output 字段
-            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ZHIPU_API_KEY");
+            var config = TryLoadCodexFlowVllmAgentConfig();
+            var apiUrl = Environment.GetEnvironmentVariable("IVILSON_VLLM_API_URL") ?? config?.ApiUrl;
+            var apiKey = Environment.GetEnvironmentVariable("IVILSON_VLLM_API_KEY") ?? config?.ApiKey;
+            var model = Environment.GetEnvironmentVariable("IVILSON_VLLM_MODEL") ?? config?.Model;
             var runExternal = "1";
-            _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
-            _client = new VllmGlmChatClient("https://open.bigmodel.cn/api/paas/v4/{1}", cloud_apiKey, MODEL); // 智普官方平台支持思维链
-            //_client = new VllmGlmChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, MODEL); // 阿里云百炼平台思维链命令格式与智普官方平台不同，暂不支持思维链
+            _skipTests = runExternal != "1" ||
+                         string.IsNullOrWhiteSpace(apiUrl) ||
+                         string.IsNullOrWhiteSpace(apiKey) ||
+                         string.IsNullOrWhiteSpace(model);
+            _client = new VllmGlmChatClient(apiUrl ?? string.Empty, apiKey, model ?? string.Empty);
             _chatOptions = new GlmChatOptions { ThinkingEnabled = true };
-            //_chatOptions = new GlmChatOptions { Temperature = 0.5f };    //测试glm-4.7-flash 模型，该模型不支持思维链功能，直接将选项置空以避免不必要的参数传递
+            if (config?.Temperature is { } temperature)
+            {
+                _chatOptions.Temperature = temperature;
+            }
+
+            if (config?.TopP is { } topP)
+            {
+                _chatOptions.TopP = topP;
+            }
+
+            _output.WriteLine($"Glm5Tests config: apiUrl={apiUrl}, model={model}, loadedFromCodexFlow={config != null}");
         }
+
+        private static CodexFlowVllmAgentConfig? TryLoadCodexFlowVllmAgentConfig()
+        {
+            var path = FindCodexFlowAppsettingsPath();
+            if (path == null || !File.Exists(path))
+            {
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(
+                File.ReadAllText(path),
+                new JsonDocumentOptions
+                {
+                    CommentHandling = JsonCommentHandling.Skip,
+                    AllowTrailingCommas = true
+                });
+
+            if (!doc.RootElement.TryGetProperty("VllmAgent", out var agent))
+            {
+                return null;
+            }
+
+            return new CodexFlowVllmAgentConfig(
+                agent.TryGetProperty("ApiUrl", out var apiUrl) ? apiUrl.GetString() : null,
+                agent.TryGetProperty("ApiKey", out var apiKey) ? apiKey.GetString() : null,
+                agent.TryGetProperty("Model", out var model) ? model.GetString() : null,
+                agent.TryGetProperty("Temperature", out var temperature) && temperature.TryGetDouble(out var temp) ? (float?)temp : null,
+                agent.TryGetProperty("TopP", out var topP) && topP.TryGetDouble(out var topPValue) ? (float?)topPValue : null);
+        }
+
+        private static string? FindCodexFlowAppsettingsPath()
+        {
+            var explicitPath = Environment.GetEnvironmentVariable("CODEXFLOW_APPSETTINGS_PATH");
+            if (!string.IsNullOrWhiteSpace(explicitPath) && File.Exists(explicitPath))
+            {
+                return explicitPath;
+            }
+
+            var current = new DirectoryInfo(AppContext.BaseDirectory);
+            while (current != null)
+            {
+                var candidate = Path.GetFullPath(
+                    Path.Combine(current.FullName, "..", "..", "..", "..", "codexflow", "CodexFlow", "appsettings.json"));
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+
+                current = current.Parent;
+            }
+
+            return null;
+        }
+
+        private sealed record CodexFlowVllmAgentConfig(
+            string? ApiUrl,
+            string? ApiKey,
+            string? Model,
+            float? Temperature,
+            float? TopP);
 
         [Fact]
         public async Task ChatTest()

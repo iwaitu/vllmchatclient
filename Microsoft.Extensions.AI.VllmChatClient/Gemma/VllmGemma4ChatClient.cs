@@ -104,13 +104,19 @@ namespace Microsoft.Extensions.AI
             var apiEndpoint = ApiChatEndpoint.Replace(":streamGenerateContent", ":generateContent", StringComparison.OrdinalIgnoreCase);
             var request = ToGoogleNativeRequest(messages, options);
 
-            using var httpResponse = await HttpClient.PostAsJsonAsync(apiEndpoint, request, cancellationToken).ConfigureAwait(false);
+            using var httpResponse = await HttpClient.PostAsJsonAsync(
+                apiEndpoint,
+                request,
+                JsonContext.Default.GeminiRequest,
+                cancellationToken).ConfigureAwait(false);
             if (!httpResponse.IsSuccessStatusCode)
             {
                 await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
             }
 
-            var geminiResponse = await httpResponse.Content.ReadFromJsonAsync<GeminiResponse>(cancellationToken).ConfigureAwait(false);
+            var geminiResponse = await httpResponse.Content.ReadFromJsonAsync(
+                JsonContext.Default.GeminiResponse,
+                cancellationToken).ConfigureAwait(false);
             if (geminiResponse == null)
             {
                 throw new InvalidOperationException("Google native API returned an empty response.");
@@ -145,7 +151,7 @@ namespace Microsoft.Extensions.AI
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, AppendAltSse(apiEndpoint))
             {
-                Content = JsonContent.Create(requestPayload)
+                Content = JsonContent.Create(requestPayload, JsonContext.Default.GeminiRequest)
             };
 
             using var httpResponse = await HttpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
@@ -185,7 +191,7 @@ namespace Microsoft.Extensions.AI
                 GeminiResponse? chunk;
                 try
                 {
-                    chunk = JsonSerializer.Deserialize<GeminiResponse>(jsonData);
+                    chunk = JsonSerializer.Deserialize(jsonData, JsonContext.Default.GeminiResponse);
                 }
                 catch (JsonException)
                 {
@@ -797,14 +803,17 @@ namespace Microsoft.Extensions.AI
                 return new Dictionary<string, object?> { ["result"] = null };
             }
 
-            var json = JsonSerializer.SerializeToElement(result);
+            var json = JsonSerializer.SerializeToElement(
+                result,
+                AIJsonUtilities.DefaultOptions.GetTypeInfo(typeof(object)));
             if (json.ValueKind == JsonValueKind.Object)
             {
-                return JsonSerializer.Deserialize<Dictionary<string, object?>>(json.GetRawText(), AIJsonUtilities.DefaultOptions)
-                    ?? new Dictionary<string, object?>();
+                return VllmUtilities.TryParseObjectDictionary(json.GetRawText(), out var dictionary)
+                    ? new Dictionary<string, object?>(dictionary)
+                    : new Dictionary<string, object?>();
             }
 
-            return new Dictionary<string, object?> { ["result"] = JsonSerializer.Deserialize<object?>(json.GetRawText(), AIJsonUtilities.DefaultOptions) };
+            return new Dictionary<string, object?> { ["result"] = json.Clone() };
         }
 
         private ChatResponse FromGoogleNativeResponse(GeminiResponse response, ChatOptions? options)

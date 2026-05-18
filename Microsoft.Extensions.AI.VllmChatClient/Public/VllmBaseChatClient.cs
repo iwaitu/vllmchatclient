@@ -1,5 +1,4 @@
 using Microsoft.Shared.Diagnostics;
-using Newtonsoft.Json;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -395,8 +394,8 @@ namespace Microsoft.Extensions.AI
                             {
                                 if (!string.IsNullOrEmpty(buf.Name) && !string.IsNullOrEmpty(buf.Arguments))
                                 {
-                                    _ = JsonConvert.DeserializeObject(buf.Arguments);
-                                    isJsonComplete = ToolcallParser.GetBraceDepth(buf.Arguments) == 0;
+                                    isJsonComplete = VllmUtilities.IsValidJson(buf.Arguments) &&
+                                                     ToolcallParser.GetBraceDepth(buf.Arguments) == 0;
                                 }
                             }
                             catch (Exception)
@@ -1361,22 +1360,9 @@ namespace Microsoft.Extensions.AI
             arguments = new Dictionary<string, object?>();
             try
             {
-                using var doc = JsonDocument.Parse(rawArguments);
-                if (doc.RootElement.ValueKind != JsonValueKind.Object)
-                {
-                    return false;
-                }
-
-                arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(rawArguments)
-                    ?? new Dictionary<string, object?>();
-                return true;
+                return VllmUtilities.TryParseObjectDictionary(rawArguments, out arguments);
             }
             catch (System.Text.Json.JsonException ex)
-            {
-                Trace.TraceWarning("[{0}] Tool call arguments JSON parse failed: {1}", "vllm", ex.Message);
-                return false;
-            }
-            catch (Newtonsoft.Json.JsonException ex)
             {
                 Trace.TraceWarning("[{0}] Tool call arguments JSON parse failed: {1}", "vllm", ex.Message);
                 return false;
@@ -1423,13 +1409,13 @@ namespace Microsoft.Extensions.AI
                 var value = keyValueFragment.Groups["value"].Value.Trim();
                 if (!LooksLikeJsonValue(value))
                 {
-                    value = JsonSerializer.Serialize(value.Trim('"'));
+                    value = JsonSerializer.Serialize(value.Trim('"'), typeof(string), JsonContext.Default);
                 }
 
                 AddCandidate(candidates, $"{{\"{key}\":{value}}}");
             }
 
-            AddCandidate(candidates, $"{{\"input\":{JsonSerializer.Serialize(trimmed)}}}");
+            AddCandidate(candidates, $"{{\"input\":{JsonSerializer.Serialize(trimmed, typeof(string), JsonContext.Default)}}}");
             return candidates;
         }
 
@@ -1984,14 +1970,13 @@ namespace Microsoft.Extensions.AI
                 Model = chatRequest.Model,
                 MaxTokens = chatRequest.MaxTokens ?? chatRequest.MaxCompletionTokens ?? options?.MaxOutputTokens ?? 8192,
                 Messages = anthropicMessages.ToArray(),
-                System = system.Length > 0 ? JsonSerializer.SerializeToElement(new object[]
-                {
-                    new Dictionary<string, object?>
+                System = system.Length > 0 ? JsonSerializer.SerializeToElement(
+                    new JsonElement[]
                     {
-                        ["type"] = "text",
-                        ["text"] = system.ToString()
-                    }
-                }) : null,
+                        CreateAnthropicTextBlock(system.ToString())
+                    },
+                    typeof(JsonElement[]),
+                    JsonContext.Default) : null,
                 Stream = stream,
                 Tools = chatRequest.Tools?.Select(ToVllmAnthropicTool),
                 ToolChoice = ToVllmAnthropicToolChoice(chatRequest.ToolChoice),
@@ -2132,12 +2117,9 @@ namespace Microsoft.Extensions.AI
 
             try
             {
-                var json = JsonSerializer.SerializeToElement(toolChoice);
-                if (json.TryGetProperty("function", out var function) &&
-                    function.TryGetProperty("name", out var name) &&
-                    name.ValueKind == JsonValueKind.String)
+                if (TryGetFunctionName(toolChoice, out var requiredToolName))
                 {
-                    return name.GetString();
+                    return requiredToolName;
                 }
             }
             catch (Exception)
@@ -2145,6 +2127,83 @@ namespace Microsoft.Extensions.AI
             }
 
             return null;
+        }
+
+        private static bool TryGetFunctionName(object toolChoice, out string? name)
+        {
+            name = null;
+
+            if (toolChoice is JsonElement json)
+            {
+                if (json.ValueKind == JsonValueKind.Object &&
+                    json.TryGetProperty("function", out var function) &&
+                    function.TryGetProperty("name", out var nameElement) &&
+                    nameElement.ValueKind == JsonValueKind.String)
+                {
+                    name = nameElement.GetString();
+                }
+
+                return !string.IsNullOrWhiteSpace(name);
+            }
+
+            if (toolChoice is IReadOnlyDictionary<string, object?> readOnlyDictionary &&
+                TryGetFunctionName(readOnlyDictionary, out name))
+            {
+                return true;
+            }
+
+            if (toolChoice is IDictionary<string, object?> dictionary &&
+                TryGetFunctionName(dictionary, out name))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetFunctionName(IReadOnlyDictionary<string, object?> toolChoice, out string? name)
+        {
+            name = null;
+            if (!toolChoice.TryGetValue("function", out var function))
+            {
+                return false;
+            }
+
+            return TryGetFunctionNameFromObject(function, out name);
+        }
+
+        private static bool TryGetFunctionNameFromObject(object? function, out string? name)
+        {
+            name = null;
+            if (function is JsonElement json)
+            {
+                if (json.ValueKind == JsonValueKind.Object &&
+                    json.TryGetProperty("name", out var nameElement) &&
+                    nameElement.ValueKind == JsonValueKind.String)
+                {
+                    name = nameElement.GetString();
+                }
+
+                return !string.IsNullOrWhiteSpace(name);
+            }
+
+            if (function is IReadOnlyDictionary<string, object?> readOnlyDictionary &&
+                readOnlyDictionary.TryGetValue("name", out var readOnlyName) &&
+                readOnlyName is string readOnlyNameValue)
+            {
+                name = readOnlyNameValue;
+                return !string.IsNullOrWhiteSpace(name);
+            }
+
+            if (function is IDictionary<string, object?> dictionary &&
+                dictionary.TryGetValue("name", out var dictionaryName) &&
+                dictionaryName is string dictionaryNameValue)
+            {
+                name = dictionaryNameValue;
+                return !string.IsNullOrWhiteSpace(name);
+            }
+
+            return false;
         }
 
         private static IEnumerable<object> ToVllmResponsesInputItems(VllmOpenAIChatRequestMessage message)
@@ -2409,30 +2468,25 @@ namespace Microsoft.Extensions.AI
         }
 
         private static JsonElement CreateAnthropicThinkingBlock(string thinking)
-            => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            => JsonSerializer.SerializeToElement(new VllmAnthropicThinkingBlock
             {
-                ["type"] = "thinking",
-                ["thinking"] = thinking
-            });
+                Thinking = thinking
+            }, typeof(VllmAnthropicThinkingBlock), JsonContext.Default);
 
         private static JsonElement CreateAnthropicTextBlock(string text)
-            => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            => JsonSerializer.SerializeToElement(new VllmAnthropicTextBlock
             {
-                ["type"] = "text",
-                ["text"] = text
-            });
+                Text = text
+            }, typeof(VllmAnthropicTextBlock), JsonContext.Default);
 
         private static JsonElement CreateAnthropicImageBlock(string data)
-            => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            => JsonSerializer.SerializeToElement(new VllmAnthropicImageBlock
             {
-                ["type"] = "image",
-                ["source"] = new Dictionary<string, object?>
+                Source = new VllmAnthropicImageSource
                 {
-                    ["type"] = "base64",
-                    ["media_type"] = "image/png",
-                    ["data"] = data
+                    Data = data
                 }
-            });
+            }, typeof(VllmAnthropicImageBlock), JsonContext.Default);
 
         private static bool IsAnthropicToolUseBlock(JsonElement block)
             => block.ValueKind == JsonValueKind.Object
@@ -2450,31 +2504,32 @@ namespace Microsoft.Extensions.AI
         {
             if (blocks.Length == 1 && IsAnthropicTextBlock(blocks[0]))
             {
-                return JsonSerializer.SerializeToElement(blocks[0].GetProperty("text").GetString());
+                return JsonSerializer.SerializeToElement(
+                    blocks[0].GetProperty("text").GetString(),
+                    typeof(string),
+                    JsonContext.Default);
             }
 
             return BuildAnthropicContentArray(blocks);
         }
 
         private static JsonElement BuildAnthropicContentArray(JsonElement[] blocks)
-            => JsonSerializer.SerializeToElement(blocks);
+            => JsonSerializer.SerializeToElement(blocks, typeof(JsonElement[]), JsonContext.Default);
 
         private static JsonElement CreateAnthropicToolUseBlock(string id, string name, JsonElement input)
-            => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            => JsonSerializer.SerializeToElement(new VllmAnthropicToolUseBlock
             {
-                ["type"] = "tool_use",
-                ["id"] = id,
-                ["name"] = name,
-                ["input"] = input
-            });
+                Id = id,
+                Name = name,
+                Input = input
+            }, typeof(VllmAnthropicToolUseBlock), JsonContext.Default);
 
         private static JsonElement CreateAnthropicToolResultBlock(string toolUseId, string content)
-            => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            => JsonSerializer.SerializeToElement(new VllmAnthropicToolResultBlock
             {
-                ["type"] = "tool_result",
-                ["tool_use_id"] = toolUseId,
-                ["content"] = content
-            });
+                ToolUseId = toolUseId,
+                Content = content
+            }, typeof(VllmAnthropicToolResultBlock), JsonContext.Default);
 
         private protected virtual IEnumerable<VllmTool>? GetTools(ChatOptions? options)
         {

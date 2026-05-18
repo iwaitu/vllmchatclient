@@ -39,14 +39,16 @@ namespace Microsoft.Extensions.AI
                 if (message.Content.ValueKind == JsonValueKind.String)
                 {
                     var text = message.Content.GetString();
-                    message.Content = JsonSerializer.SerializeToElement(new object[]
-                    {
-                        new Dictionary<string, object?>
+                    message.Content = JsonSerializer.SerializeToElement(
+                        new[]
                         {
-                            ["type"] = "text",
-                            ["text"] = text ?? string.Empty
-                        }
-                    });
+                            new VllmAnthropicTextBlock
+                            {
+                                Text = text ?? string.Empty
+                            }
+                        },
+                        typeof(VllmAnthropicTextBlock[]),
+                        JsonContext.Default);
                 }
             }
 

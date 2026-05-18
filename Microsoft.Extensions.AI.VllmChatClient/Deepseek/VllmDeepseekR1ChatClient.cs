@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Shared.Diagnostics;
-using Newtonsoft.Json;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace Microsoft.Extensions.AI
@@ -190,8 +189,8 @@ namespace Microsoft.Extensions.AI
                         {
                             if (!string.IsNullOrEmpty(bufferName) && !string.IsNullOrEmpty(bufferParams))
                             {
-                                _ = JsonConvert.DeserializeObject(bufferParams);
-                                isJsonComplete = ToolcallParser.GetBraceDepth(bufferParams) == 0;
+                                isJsonComplete = VllmUtilities.IsValidJson(bufferParams) &&
+                                                 ToolcallParser.GetBraceDepth(bufferParams) == 0;
                             }
                         }
                         catch { }
@@ -315,7 +314,7 @@ namespace Microsoft.Extensions.AI
 #else
                 Guid.NewGuid().ToString().Substring(0, 8);
 #endif
-            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments ?? "{}");
+            _ = VllmUtilities.TryParseObjectDictionary(function.Arguments ?? "{}", out var arguments);
             return new FunctionCallContent(id, function.Name ?? "", arguments);
         }
     }

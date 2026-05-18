@@ -2,7 +2,6 @@
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using System.Text.Json;
-using Newtonsoft.Json;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 using System.Runtime.CompilerServices;
 
@@ -258,8 +257,8 @@ namespace Microsoft.Extensions.AI
                         {
                             if(buffer_params.Length > 0)
                             {
-                                var obj = JsonConvert.DeserializeObject(buffer_params);
-                                isJsonComplete = ToolcallParser.GetBraceDepth(buffer_params) == 0;
+                                isJsonComplete = VllmUtilities.IsValidJson(buffer_params) &&
+                                                 ToolcallParser.GetBraceDepth(buffer_params) == 0;
                                 var item = funcList.Where(p => p.Name == buffer_name).FirstOrDefault();
                                 if (item == null)
                                 {
@@ -473,7 +472,7 @@ namespace Microsoft.Extensions.AI
 #else
             var id = Guid.NewGuid().ToString().Substring(0, 8);
 #endif
-            var arguments = JsonConvert.DeserializeObject<IDictionary<string, object?>>(function.Arguments ?? "{}");
+            _ = VllmUtilities.TryParseObjectDictionary(function.Arguments ?? "{}", out var arguments);
             return new FunctionCallContent(id, function.Name ?? "", arguments);
         }
 

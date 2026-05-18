@@ -1,6 +1,4 @@
 ﻿
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -19,26 +17,18 @@ namespace Microsoft.Extensions.AI
 
                 try
                 {
-                    // 尝试将内容解析为 JSON 对象
-                    var jsonContent = JObject.Parse(content);
-
-                    // 提取 "name" 和 "arguments"
-                    JToken? nameToken = jsonContent["name"];
-                    JToken? argumentsToken = jsonContent["arguments"];
-
-                    if (nameToken != null && argumentsToken != null)
+                    using var jsonContent = JsonDocument.Parse(content);
+                    if (jsonContent.RootElement.TryGetProperty("name", out var nameToken) &&
+                        jsonContent.RootElement.TryGetProperty("arguments", out var argumentsToken))
                     {
-                        string name = nameToken.ToString();
-                        var arguments = argumentsToken.ToString();
+                        string name = nameToken.GetString() ?? string.Empty;
+                        var arguments = GetArgumentText(argumentsToken);
                         return new VllmFunctionToolCall { Name = name, Arguments = arguments };
+                    }
 
-                    }
-                    else
-                    {
-                        return null;
-                    }
+                    return null;
                 }
-                catch (JsonReaderException)
+                catch (JsonException)
                 {
                     // JSON 解析失败
                     return null;
@@ -198,7 +188,7 @@ namespace Microsoft.Extensions.AI
                 return new VllmFunctionToolCall
                 {
                     Name = nameProp.GetString(),
-                    Arguments = argsProp.ToString()   // 保留原始 JSON 字符串
+                    Arguments = GetArgumentText(argsProp)
                 };
             }
             catch
@@ -346,7 +336,10 @@ namespace Microsoft.Extensions.AI
                 return new VllmFunctionToolCall
                 {
                     Name = name,
-                    Arguments = System.Text.Json.JsonSerializer.Serialize(arguments)
+                    Arguments = JsonSerializer.Serialize(
+                        arguments,
+                        typeof(Dictionary<string, object?>),
+                        JsonContext.Default)
                 };
             }
             catch
@@ -375,7 +368,10 @@ namespace Microsoft.Extensions.AI
             return value.Trim('\'', '"');
         }
 
-
+        private static string GetArgumentText(JsonElement arguments)
+            => arguments.ValueKind == JsonValueKind.String
+                ? arguments.GetString() ?? string.Empty
+                : arguments.GetRawText();
 
     }
 }

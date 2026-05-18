@@ -160,7 +160,7 @@ namespace Microsoft.Extensions.AI
 
                 try
                 {
-                    var retMessage = FromVllmMessage(responseMessage!, options);
+                    var retMessage = FromVllmMessage(responseMessage!, options, choice.FinishReason);
                     bool hasToolCall = retMessage.Contents.Any(c => c is FunctionCallContent);
 
                     return new ReasoningChatResponse(retMessage, reason)
@@ -253,11 +253,15 @@ namespace Microsoft.Extensions.AI
 
             using var streamReader = new StreamReader(httpResponseStream);
             bool enableLegacyToolCallTextFallback = EnableLegacyToolCallTextFallback(options);
+            bool allowStructuredToolCallTextParsing = AllowsTextToolCallParsing(options);
             string bufferMsg = string.Empty;
             var reasoningContentBuffer = new System.Text.StringBuilder();
             // 按 tool_calls[].index 缓冲多个并行工具调用
             var toolCallBuffers = new Dictionary<int, (string? Id, string Name, string Arguments)>();
             bool thinking = true;
+            bool emittedToolCallUpdate = false;
+            bool withheldStructuredText = false;
+            string? finalFinishReason = null;
             string bufferToolCall = string.Empty;
             yield return new ChatResponseUpdate
             {
@@ -312,6 +316,10 @@ namespace Microsoft.Extensions.AI
                 }
 
                 var choice = chunk.Choices[0];
+                if (!string.IsNullOrEmpty(choice.FinishReason))
+                {
+                    finalFinishReason = choice.FinishReason;
+                }
 
                 // 按 index 缓冲每个工具调用的 id/name/arguments 片段
                 if (choice.Delta?.ToolCalls is { Length: > 0 } deltaToolCalls)
@@ -346,6 +354,7 @@ namespace Microsoft.Extensions.AI
                     {
                         if (!string.IsNullOrEmpty(kvp.Value.Name))
                         {
+                            emittedToolCallUpdate = true;
                             yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
                             {
                                 Name = kvp.Value.Name,
@@ -427,6 +436,7 @@ namespace Microsoft.Extensions.AI
                     {
                         foreach (var call in funcList)
                         {
+                            emittedToolCallUpdate = true;
                             yield return BuildToolCallUpdate(responseId, call.Call, call.CallId, reasoningContentBuffer.Length > 0 ? reasoningContentBuffer.ToString() : null);
                         }
 
@@ -440,6 +450,14 @@ namespace Microsoft.Extensions.AI
                     if (!inToolCallBlock && !isUnclosed &&
                         !string.IsNullOrEmpty(message.Content))
                     {
+                        if (allowStructuredToolCallTextParsing &&
+                            ToolcallParser.ContainsJsonContainerStart(bufferMsg) &&
+                            !emittedToolCallUpdate)
+                        {
+                            withheldStructuredText = true;
+                            continue;
+                        }
+
                         if (enableLegacyToolCallTextFallback && (message.Content is "<" or "<tool"))
                         {
                             bufferToolCall += message.Content;
@@ -452,6 +470,7 @@ namespace Microsoft.Extensions.AI
                         message.Content = message.Content.Replace("</think>", "");
                         thinking = false;
                         yield return BuildTextUpdate(responseId, message.Content, thinking);
+                        bufferMsg = string.Empty;
                     }
                 }
             }
@@ -463,6 +482,7 @@ namespace Microsoft.Extensions.AI
                 {
                     if (!string.IsNullOrEmpty(kvp.Value.Name))
                     {
+                            emittedToolCallUpdate = true;
                             yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
                         {
                             Name = kvp.Value.Name,
@@ -474,14 +494,41 @@ namespace Microsoft.Extensions.AI
                 toolCallBuffers.Clear();
             }
 
+            // Some providers set finish_reason=tool_calls but put the call in assistant text,
+            // e.g. [{"name":"Search","arguments":{"question":"..."}}].
+            if (allowStructuredToolCallTextParsing &&
+                !emittedToolCallUpdate &&
+                withheldStructuredText &&
+                !string.IsNullOrEmpty(bufferMsg) &&
+                ToolcallParser.ContainsJsonContainerStart(bufferMsg))
+            {
+                var candidate = bufferMsg;
+                if (ToolcallParser.TryExtractBareToolCallsJson(ref candidate, out var remainingBareJsonCalls) &&
+                    (IsToolCallFinishReason(finalFinishReason) || AreKnownToolCalls(remainingBareJsonCalls, options)))
+                {
+                    bufferMsg = candidate;
+                    foreach (var call in remainingBareJsonCalls)
+                    {
+                        emittedToolCallUpdate = true;
+                        yield return BuildToolCallUpdate(responseId, call, null);
+                    }
+                }
+            }
+
             // 流结束后，flush bufferMsg 中可能残留的 <tool_call> 块
             if (enableLegacyToolCallTextFallback && !string.IsNullOrEmpty(bufferMsg))
             {
                 ToolcallParser.TryFlushClosedToolCallBlocks(ref bufferMsg, out var remainingCalls);
                 foreach (var call in remainingCalls)
                 {
+                    emittedToolCallUpdate = true;
                     yield return BuildToolCallUpdate(responseId, call, null);
                 }
+            }
+
+            if (!emittedToolCallUpdate && withheldStructuredText && !string.IsNullOrEmpty(bufferMsg))
+            {
+                yield return BuildTextUpdate(responseId, bufferMsg, false);
             }
         }
 
@@ -884,8 +931,9 @@ namespace Microsoft.Extensions.AI
             {
                 endpoint = endpoint
                     .Replace("{0}", "v1", StringComparison.Ordinal)
-                    .Replace("{1}", string.Empty, StringComparison.Ordinal)
                     .TrimEnd('/');
+
+                endpoint = ReplacePathPlaceholder(endpoint, GetEndpointPath(apiMode));
             }
 
             if (endpoint.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
@@ -934,6 +982,30 @@ namespace Microsoft.Extensions.AI
                 VllmApiMode.Responses => "/v1/responses",
                 _ => "/v1/chat/completions",
             };
+        }
+
+        private static string GetEndpointPath(VllmApiMode apiMode)
+            => apiMode switch
+            {
+                VllmApiMode.AnthropicMessages => "messages",
+                VllmApiMode.Responses => "responses",
+                _ => "chat/completions",
+            };
+
+        private static string ReplacePathPlaceholder(string endpoint, string path)
+        {
+            const string placeholder = "{1}";
+            var index = endpoint.IndexOf(placeholder, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                return endpoint;
+            }
+
+            var replacement = index > 0 && endpoint[index - 1] != '/'
+                ? "/" + path
+                : path;
+
+            return endpoint.Replace(placeholder, replacement, StringComparison.Ordinal).TrimEnd('/');
         }
 
         protected virtual string GetResponsesEndpoint()
@@ -1211,15 +1283,15 @@ namespace Microsoft.Extensions.AI
             }, reasoning.ToString());
         }
 
-        private protected virtual ChatMessage FromVllmMessage(VllmChatResponseMessage message, ChatOptions? options)
+        private protected virtual ChatMessage FromVllmMessage(VllmChatResponseMessage message, ChatOptions? options, string? finishReason = null)
         {
             var contents = new List<AIContent>();
 
             var hasToolCalls = message.ToolCalls?.Length > 0;
             var allowLegacyToolCallTextFallback = EnableLegacyToolCallTextFallback(options);
+            var allowStructuredToolCallTextParsing = AllowsTextToolCallParsing(options);
             var allowToolCallParsing = allowLegacyToolCallTextFallback &&
-                                       options?.ToolMode is not NoneChatToolMode &&
-                                       options?.Tools is { Count: > 0 };
+                                       allowStructuredToolCallTextParsing;
             if (message.ToolCalls is { Length: > 0 } messageToolCalls)
             {
                 var invalidToolCalls = messageToolCalls
@@ -1252,9 +1324,23 @@ namespace Microsoft.Extensions.AI
             {
                 var raw = message.Content;
                 var afterToolCalls = raw;
-                if (!hasToolCalls && allowToolCallParsing)
+                if (!hasToolCalls && allowStructuredToolCallTextParsing)
                 {
-                    var tcList = ToolcallParser.ParseToolCalls(raw, out afterToolCalls);
+                    var candidate = afterToolCalls;
+                    if (ToolcallParser.TryExtractBareToolCallsJson(ref candidate, out var bareJsonCalls) &&
+                        (IsToolCallFinishReason(finishReason) || AreKnownToolCalls(bareJsonCalls, options)))
+                    {
+                        afterToolCalls = candidate;
+                        foreach (var call in bareJsonCalls)
+                        {
+                            contents.Add(ToFunctionCallContent(call));
+                        }
+                    }
+                }
+
+                if (!hasToolCalls && allowToolCallParsing && !string.IsNullOrEmpty(afterToolCalls))
+                {
+                    var tcList = ToolcallParser.ParseToolCalls(afterToolCalls, out afterToolCalls);
 
                     foreach (var call in tcList)
                     {
@@ -1300,6 +1386,32 @@ namespace Microsoft.Extensions.AI
             {
                 RawRepresentation = message,
             };
+        }
+
+        private static bool AllowsTextToolCallParsing(ChatOptions? options)
+            => options?.ToolMode is not NoneChatToolMode &&
+               options?.Tools is { Count: > 0 };
+
+        private static bool IsToolCallFinishReason(string? finishReason)
+            => string.Equals(finishReason, "tool_calls", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(finishReason, "tool_call", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(finishReason, "toolcall", StringComparison.OrdinalIgnoreCase);
+
+        private static bool AreKnownToolCalls(IEnumerable<VllmFunctionToolCall> calls, ChatOptions? options)
+        {
+            if (options?.Tools is not { Count: > 0 } tools)
+            {
+                return false;
+            }
+
+            var toolNames = tools
+                .OfType<AIFunction>()
+                .Select(tool => tool.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToHashSet(StringComparer.Ordinal);
+
+            return toolNames.Count > 0 &&
+                   calls.All(call => !string.IsNullOrWhiteSpace(call.Name) && toolNames.Contains(call.Name!));
         }
 
         private protected static FunctionCallContent ToFunctionCallContent(VllmFunctionToolCall function, string? callId = null)

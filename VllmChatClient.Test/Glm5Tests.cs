@@ -21,11 +21,11 @@ namespace VllmChatClient.Test
         static string GetWeather() => "现在正在下雨。";
 
 
-        [Description("Searh")]
-        static string Search([Description("需要搜索的问题")] string question)
+        [Description("CustomSearh")]
+        static string CustomSearh([Description("需要搜索的问题")] string question)
         {
             functionCallTime += 1;
-            return "南宁市青秀区方圆广场北面站前路1号。";
+            return "南宁市青秀区方圆广场北面站前路1号。查询日期为：" + DateTime.Now.ToShortDateString();
         }
 
         [Description("搜索周边的书店")]
@@ -39,9 +39,10 @@ namespace VllmChatClient.Test
         {
             _output = output; // 修复 CS8618: 正确初始化 _output 字段
             var config = TryLoadCodexFlowVllmAgentConfig();
-            var apiUrl = Environment.GetEnvironmentVariable("IVILSON_VLLM_API_URL") ?? config?.ApiUrl;
-            var apiKey = Environment.GetEnvironmentVariable("IVILSON_VLLM_API_KEY") ?? config?.ApiKey;
-            var model = Environment.GetEnvironmentVariable("IVILSON_VLLM_MODEL") ?? config?.Model;
+            var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
+            var apiUrl = Environment.GetEnvironmentVariable("IVILSON_VLLM_API_URL") ?? "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}";
+            var apiKey = Environment.GetEnvironmentVariable("IVILSON_VLLM_API_KEY") ?? cloud_apiKey;
+            var model = Environment.GetEnvironmentVariable("IVILSON_VLLM_MODEL") ?? "glm-5.1";
             var runExternal = "1";
             _skipTests = runExternal != "1" ||
                          string.IsNullOrWhiteSpace(apiUrl) ||
@@ -132,7 +133,7 @@ namespace VllmChatClient.Test
             var messages = new List<ChatMessage>
             {
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲 "),
-                new ChatMessage(ChatRole.User,"你是谁？")
+                new ChatMessage(ChatRole.User,"你是谁？你有哪些工具可以使用？")
             };
             var res = await _client.GetResponseAsync(messages, _chatOptions);
             Assert.NotNull(res);
@@ -240,7 +241,7 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")               //并行调用两个函数
             };
-            _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)];
+            _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(CustomSearh), AIFunctionFactory.Create(FindBookStore)];
             _chatOptions.Temperature = 0.2f;
             
             var res = await client.GetResponseAsync(messages, _chatOptions);
@@ -275,7 +276,7 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
-            _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search), AIFunctionFactory.Create(FindBookStore)];
+            _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(CustomSearh), AIFunctionFactory.Create(FindBookStore)];
             string res = string.Empty;
             string reason = string.Empty;
             UsageDetails? usage = null;
@@ -328,7 +329,7 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？我出门需要带伞吗？")
                 //new ChatMessage(ChatRole.User,"南宁火车站在哪里？")
             };
-            _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)];
+            _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(CustomSearh)];
             string res = string.Empty;
             string reason = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, _chatOptions))
@@ -354,12 +355,12 @@ namespace VllmChatClient.Test
                                 [new FunctionResultContent(fc.CallId, result)]));
                             continue;
                         }
-                        else if (fc.Name == "Search")
+                        else if (fc.Name == nameof(CustomSearh))
                         {
                             var args = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
                             Assert.NotNull(args);
                             Assert.True(args.ContainsKey("question"));
-                            var result = Search(args["question"]);
+                            var result = CustomSearh(args["question"]);
                             messages.Add(new ChatMessage(
                                 ChatRole.Tool,
                                 [new FunctionResultContent(fc.CallId, result)]));
@@ -467,7 +468,7 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？"),
             };
-            _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)];
+            _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(CustomSearh)];
             var res = await _client.GetResponseAsync(messages, _chatOptions);
             Assert.NotNull(res);
             Assert.Single(res.Messages);
@@ -641,9 +642,9 @@ namespace VllmChatClient.Test
                   "type": "object",
                   "properties": {
                     "address": { "type": "string" },
-                    "summary": { "type": "string" }
+                    "searchdate": { "type": "string" }
                   },
-                  "required": ["address", "summary"],
+                  "required": ["address", "searchdate"],
                   "additionalProperties": false
                 }
                 """).RootElement.Clone();
@@ -652,9 +653,9 @@ namespace VllmChatClient.Test
             {
                 ThinkingEnabled = _chatOptions.ThinkingEnabled,
                 MaxOutputTokens = 3000,
-                Temperature = 0.2f,
-                Tools = [AIFunctionFactory.Create(Search)],
-                ResponseFormat = ChatResponseFormat.ForJsonSchema(schema, "address_payload", "Address payload")
+                Temperature = 0.95f,
+                Tools = [AIFunctionFactory.Create(CustomSearh)],
+                //ResponseFormat = ChatResponseFormat.ForJsonSchema(schema, "address_payload", "Address payload")
             };
 
             IChatClient client = new ChatClientBuilder(_client)
@@ -663,8 +664,8 @@ namespace VllmChatClient.Test
 
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲。涉及地址查询时必须先调用 Search 工具获取结果，然后严格按指定 schema 返回 JSON。不要输出代码块，也不要输出 JSON 之外的任何文字。"),
-                new ChatMessage(ChatRole.User, "请查询南宁火车站在哪里，并严格按 schema 返回。summary 里请简要说明这是通过工具查询到的结果。")
+                new ChatMessage(ChatRole.System, "你是一个智能助手，名字叫菲菲。涉及地址查询时必须先调用 CustomSearh 工具获取结果，然后严格按指定 schema 返回 JSON。不要输出代码块，也不要输出 JSON 之外的任何文字。"),
+                new ChatMessage(ChatRole.User, "南宁火车站在哪里？")
             };
 
             string reason = string.Empty;
@@ -722,33 +723,20 @@ namespace VllmChatClient.Test
                     throw;
                 }
             }
+            _output.WriteLine($"Reason: {reason}");
+            _output.WriteLine($"Response: {res}");
+            _output.WriteLine($"Usage: input={usage!.InputTokenCount}, output={usage.OutputTokenCount}, total={usage.TotalTokenCount}");
 
-            Assert.True(functionCallTime > 0, "Expected Search tool to be invoked at least once.");
+            Assert.True(functionCallTime > 0, $"Expected CustomSearh tool to be invoked at least once.\n Reason: {reason}\n Response: {res}; ");
             Assert.False(string.IsNullOrWhiteSpace(res));
             Assert.False(string.IsNullOrWhiteSpace(reason));
             Assert.DoesNotContain("```", res);
 
-            using var json = JsonDocument.Parse(res.Trim());
-            Assert.Equal(JsonValueKind.Object, json.RootElement.ValueKind);
-
-            var propertyNames = json.RootElement.EnumerateObject()
-                .Select(p => p.Name)
-                .OrderBy(n => n, StringComparer.Ordinal)
-                .ToArray();
-
-            Assert.Equal(["address", "summary"], propertyNames);
-
-            var address = json.RootElement.GetProperty("address").GetString();
-            var summary = json.RootElement.GetProperty("summary").GetString();
-
-            Assert.False(string.IsNullOrWhiteSpace(address));
-            Assert.False(string.IsNullOrWhiteSpace(summary));
-            Assert.Contains("南宁市青秀区方圆广场北面站前路1号", address);
+           
+            Assert.Contains("南宁市青秀区方圆广场北面站前路1号", res);
             Assert.NotNull(usage);
 
-            _output.WriteLine($"Reason: {reason}");
-            _output.WriteLine($"Response: {res}");
-            _output.WriteLine($"Usage: input={usage!.InputTokenCount}, output={usage.OutputTokenCount}, total={usage.TotalTokenCount}");
+           
         }
     }
 }

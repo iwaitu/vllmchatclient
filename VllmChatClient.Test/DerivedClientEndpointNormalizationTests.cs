@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.AI.VllmChatClient.Glm4;
 using System.Net;
 using System.Text;
 
@@ -52,6 +53,25 @@ public class DerivedClientEndpointNormalizationTests
 
         Assert.Equal("https://api.deepseek.com/anthropic/v1/messages", requestUri?.ToString());
         Assert.Equal("hello", response.Text);
+    }
+
+    [Fact]
+    public async Task GlmClient_PathPlaceholderOnlyEndpoint_UsesChatCompletionsPath()
+    {
+        Uri? requestUri = null;
+        var handler = new CaptureHttpMessageHandler(request =>
+        {
+            requestUri = request.RequestUri;
+            return Task.FromResult(JsonResponse("{\"id\":\"resp-glm\",\"created\":1,\"model\":\"glm-5.1\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"content\":\"ok\"}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"));
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new VllmGlmChatClient("https://open.bigmodel.cn/api/paas/v4/{1}", "test-key", "glm-5.1", httpClient);
+
+        var response = await client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], new GlmChatOptions { ThinkingEnabled = true });
+
+        Assert.Equal("https://open.bigmodel.cn/api/paas/v4/chat/completions", requestUri?.ToString());
+        Assert.Equal("ok", response.Text);
     }
 
     [Theory]

@@ -181,20 +181,96 @@ namespace Microsoft.Extensions.AI
             try
             {
                 using var doc = JsonDocument.Parse(json);
-                if (!doc.RootElement.TryGetProperty("name", out var nameProp) ||
-                    !doc.RootElement.TryGetProperty("arguments", out var argsProp))
-                    return null;
-
-                return new VllmFunctionToolCall
+                if (!TryParseToolCallElement(doc.RootElement, out var call))
                 {
-                    Name = nameProp.GetString(),
-                    Arguments = GetArgumentText(argsProp)
-                };
+                    return null;
+                }
+
+                return call;
             }
             catch
             {
                 return null;        // 解析失败
             }
+        }
+
+        public static bool TryParseBareToolCallsJson(string input, out List<VllmFunctionToolCall> calls)
+        {
+            calls = new List<VllmFunctionToolCall>();
+
+            if (string.IsNullOrWhiteSpace(input) || !StartsWithJsonContainer(input))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(input.Trim());
+                if (!TryParseToolCallElements(doc.RootElement, calls))
+                {
+                    return false;
+                }
+
+                return calls.Count > 0;
+            }
+            catch
+            {
+                calls.Clear();
+                return false;
+            }
+        }
+
+        public static bool TryExtractBareToolCallsJson(ref string input, out List<VllmFunctionToolCall> calls)
+        {
+            calls = new List<VllmFunctionToolCall>();
+
+            if (string.IsNullOrWhiteSpace(input) || !ContainsJsonContainerStart(input))
+            {
+                return false;
+            }
+
+            var ranges = new List<(int Start, int Length)>();
+            foreach (var fragment in EnumerateCompleteJsonFragments(input))
+            {
+                if (TryParseBareToolCallsJson(fragment.Json, out var parsedCalls))
+                {
+                    calls.AddRange(parsedCalls);
+                    ranges.Add((fragment.Start, fragment.Json.Length));
+                }
+            }
+
+            if (calls.Count == 0)
+            {
+                return false;
+            }
+
+            for (var i = ranges.Count - 1; i >= 0; i--)
+            {
+                var range = ranges[i];
+                input = input.Remove(range.Start, range.Length);
+            }
+
+            input = StripJsonCodeFenceResidues(input);
+            return true;
+        }
+
+        public static bool StartsWithJsonContainer(string input)
+        {
+            var trimmed = input.AsSpan().TrimStart();
+            return trimmed.Length > 0 && (trimmed[0] == '{' || trimmed[0] == '[');
+        }
+
+        public static bool ContainsJsonContainerStart(string input)
+        {
+            foreach (var c in input)
+            {
+                if (c == '{' || c == '[')
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -372,6 +448,157 @@ namespace Microsoft.Extensions.AI
             => arguments.ValueKind == JsonValueKind.String
                 ? arguments.GetString() ?? string.Empty
                 : arguments.GetRawText();
+
+        private static IEnumerable<(int Start, string Json)> EnumerateCompleteJsonFragments(string input)
+        {
+            var stack = new Stack<char>();
+            var start = -1;
+            var inString = false;
+            var escape = false;
+
+            for (var i = 0; i < input.Length; i++)
+            {
+                var c = input[i];
+
+                if (escape)
+                {
+                    escape = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escape = true;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    inString = !inString;
+                    continue;
+                }
+
+                if (inString)
+                {
+                    continue;
+                }
+
+                if (c == '{' || c == '[')
+                {
+                    if (stack.Count == 0)
+                    {
+                        start = i;
+                    }
+
+                    stack.Push(c == '{' ? '}' : ']');
+                    continue;
+                }
+
+                if ((c == '}' || c == ']') && stack.Count > 0)
+                {
+                    var expected = stack.Pop();
+                    if (c != expected)
+                    {
+                        stack.Clear();
+                        start = -1;
+                        continue;
+                    }
+
+                    if (stack.Count == 0 && start >= 0)
+                    {
+                        var json = input.Substring(start, i - start + 1);
+                        if (IsValidJson(json))
+                        {
+                            yield return (start, json);
+                        }
+
+                        start = -1;
+                    }
+                }
+            }
+        }
+
+        private static string StripJsonCodeFenceResidues(string input)
+        {
+            input = Regex.Replace(input, @"```(?:json)?", string.Empty, RegexOptions.IgnoreCase);
+            return input.Replace("```", string.Empty, StringComparison.Ordinal).Trim();
+        }
+
+        private static bool TryParseToolCallElement(JsonElement element, out VllmFunctionToolCall call)
+        {
+            call = new VllmFunctionToolCall();
+
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var source = element;
+            if (element.TryGetProperty("function", out var functionProp) &&
+                functionProp.ValueKind == JsonValueKind.Object)
+            {
+                source = functionProp;
+            }
+
+            if (!source.TryGetProperty("name", out var nameProp) ||
+                nameProp.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(nameProp.GetString()) ||
+                (!source.TryGetProperty("arguments", out var argsProp) &&
+                 !source.TryGetProperty("parameters", out argsProp) &&
+                 !source.TryGetProperty("input", out argsProp)))
+            {
+                return false;
+            }
+
+            call = new VllmFunctionToolCall
+            {
+                Name = nameProp.GetString(),
+                Arguments = GetArgumentText(argsProp)
+            };
+            return true;
+        }
+
+        private static bool TryParseToolCallElements(JsonElement element, List<VllmFunctionToolCall> calls)
+        {
+            if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (!TryParseToolCallElement(item, out var call))
+                    {
+                        calls.Clear();
+                        return false;
+                    }
+
+                    calls.Add(call);
+                }
+
+                return calls.Count > 0;
+            }
+
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (TryParseToolCallElement(element, out var directCall))
+            {
+                calls.Add(directCall);
+                return true;
+            }
+
+            foreach (var propertyName in new[] { "tool_call", "tool_calls", "function_call", "function_calls" })
+            {
+                if (!element.TryGetProperty(propertyName, out var nestedCalls))
+                {
+                    continue;
+                }
+
+                return TryParseToolCallElements(nestedCalls, calls);
+            }
+
+            return false;
+        }
 
     }
 }

@@ -385,6 +385,61 @@ data: [DONE]
     }
 
     [Fact]
+    public async Task StreamingBareToolCallWrapper_IsInvokedByFunctionInvocation()
+    {
+        const string toolCallStream = """
+data: {"choices":[{"delta":{"role":"assistant","content":"{\"tool_call\":[{\"name\":\"CustomSearh\",\"arguments\":{\"question\":\"南宁火车站在哪里\"}}]}"},"finish_reason":null,"index":0}],"object":"chat.completion.chunk","usage":null,"created":1771436118,"model":"qwen3.5-plus","id":"chatcmpl-wrapper-call"}
+data: {"choices":[{"delta":{"content":""},"finish_reason":"tool_calls","index":0}],"object":"chat.completion.chunk","usage":null,"created":1771436118,"model":"qwen3.5-plus","id":"chatcmpl-wrapper-call"}
+data: [DONE]
+""";
+
+        const string finalStream = """
+data: {"choices":[{"delta":{"role":"assistant","content":"南宁火车站在站前路1号。"},"finish_reason":null,"index":0}],"object":"chat.completion.chunk","usage":null,"created":1771436119,"model":"qwen3.5-plus","id":"chatcmpl-wrapper-final"}
+data: {"choices":[{"delta":{"content":""},"finish_reason":"stop","index":0}],"object":"chat.completion.chunk","usage":null,"created":1771436119,"model":"qwen3.5-plus","id":"chatcmpl-wrapper-final"}
+data: [DONE]
+""";
+
+        var handler = new SequenceStreamingHandler([toolCallStream, finalStream]);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmQwen3NextChatClient("https://example.test/{0}/{1}", "fake-token", "qwen3.5-plus", httpClient);
+        var invokingClient = new ChatClientBuilder(client)
+            .UseFunctionInvocation()
+            .Build();
+
+        var invokeCount = 0;
+        var options = new ChatOptions
+        {
+            Tools =
+            [
+                AIFunctionFactory.Create(
+                    (string question) =>
+                    {
+                        invokeCount++;
+                        Assert.Equal("南宁火车站在哪里", question);
+                        return "南宁市青秀区方圆广场北面站前路1号。";
+                    },
+                    new AIFunctionFactoryOptions
+                    {
+                        Name = "CustomSearh",
+                        Description = "Search station address."
+                    })
+            ]
+        };
+
+        var text = string.Empty;
+        await foreach (var update in invokingClient.GetStreamingResponseAsync(
+            [new ChatMessage(ChatRole.User, "南宁火车站在哪里？")],
+            options))
+        {
+            text += update.Text;
+        }
+
+        Assert.Equal(1, invokeCount);
+        Assert.Equal(2, handler.RequestCount);
+        Assert.Contains("南宁火车站", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NonStreamingJsonText_WithoutToolCalls_PreservesOuterBracesForQwen3Next()
     {
         const string jsonResponse = """
@@ -496,6 +551,24 @@ data: [DONE]
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class SequenceStreamingHandler(IReadOnlyList<string> ssePayloads) : HttpMessageHandler
+    {
+        private int _index;
+
+        public int RequestCount => _index;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var idx = Interlocked.Increment(ref _index) - 1;
+            var payload = idx < ssePayloads.Count ? ssePayloads[idx] : ssePayloads[^1];
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "text/event-stream")
             };
             return Task.FromResult(response);
         }

@@ -24,7 +24,8 @@ A comprehensive .NET 10 chat client library that supports various LLM models inc
 - `VllmBaseChatClient` now supports vLLM structured JSON output via both:
   - `response_format = { type: "json_schema", json_schema: { name, description, schema, strict } }`
   - `extra_body = { structured_outputs: { json: schema } }`
-- Google native endpoints now use Google official structured output field `generationConfig.responseJsonSchema`, while non-Google endpoints continue to use the vLLM / OpenAI-compatible `response_format + extra_body.structured_outputs` path.
+- JSON Schema strict structured output is provider-dependent. It is only honored by backends that support OpenAI-compatible `json_schema`, vLLM `structured_outputs`, or provider-native schema fields; some compatible services only support `response_format = { type: "json_object" }`, which guarantees JSON object output but does not enforce schema fields.
+- Google native endpoints now use Google official structured output field `generationConfig.responseJsonSchema`, while non-Google endpoints use the vLLM / OpenAI-compatible `response_format + extra_body.structured_outputs` path when supported by the backend.
 - Added live `json_schema` tests for all chat clients based on `VllmBaseChatClient`.
 - Serial verification passed on: Claude, DeepSeek-R1, DeepSeek-V3.2, Gemma3, Gemma4 Google native, GLM-4.5, GPT-OSS, Kimi 2.5, MiMo v2 Flash, MiniMax-M2.7, Nemotron, OpenAI GPT, Qwen3-Next, Qwen3-VL.
 - Note for reasoning models: `json_schema` tests may require a larger `MaxOutputTokens` budget. For `MiniMax-M2.7`, increasing it from `300` to `3000` was necessary because reasoning tokens consumed most of the smaller limit.
@@ -118,7 +119,8 @@ Console.WriteLine(response.Text);
   - Google 原生 API 使用 `x-goog-api-key`
   - vLLM / OpenAI-compatible 接口使用 `Authorization: Bearer ...`
 - **Google 原生 API 支持能力**：文本对话、流式输出、图片输入、thinking 控制、自动/手动工具调用。
-- **Google 原生结构化输出**：当 endpoint 是 Google 官方 URL 时，JSON Schema 输出会走 Google 官方 `generationConfig.responseJsonSchema`；非 Google URL 仍走 `response_format=json_schema` 与 `extra_body.structured_outputs.json`。
+- **Google 原生结构化输出**：当 endpoint 是 Google 官方 URL 时，JSON Schema 输出会走 Google 官方 `generationConfig.responseJsonSchema`；非 Google URL 会优先走 `response_format=json_schema` 与 `extra_body.structured_outputs.json`。
+- **JSON Schema 平台限制**：严格 JSON Schema 约束仅在后端/模型显式支持 OpenAI-compatible `json_schema`、vLLM `structured_outputs` 或厂商原生 schema 字段时生效。部分兼容平台只支持 `response_format={ "type": "json_object" }`，这种模式只能要求返回 JSON 对象，不能强制字段、`required` 或 `additionalProperties` 等 schema 规则。
 - **vLLM 兼容支持**：支持 `Gemma 4` 的聊天、流式、JSON 输出、图片输入，以及工具调用场景。
 - **思维链处理修复**：Google 原生返回中的 `thought` / thinking 内容不再混入最终答案文本，而是通过 `ReasoningChatResponse` / `ReasoningChatResponseUpdate` 单独暴露。
 - **测试覆盖**：已补充 `Gemma4Tests`、`Gemma4ProviderCompatibilityTests`、`Gemma4NativeToolCallingTests`，分别覆盖 Google 原生与 vLLM 两条链路。
@@ -230,7 +232,8 @@ Console.WriteLine(response.Text);
   - Other URLs -> `/chat/completions`
 - **Structured JSON output routing**:
   - Google native URLs -> `generationConfig.responseJsonSchema`
-  - Other URLs -> `response_format=json_schema` + `extra_body.structured_outputs`
+  - Other URLs -> `response_format=json_schema` + `extra_body.structured_outputs` when the backend supports those fields
+- **JSON Schema compatibility note**: strict schema enforcement only works on platforms and models that explicitly support OpenAI-compatible `json_schema`, vLLM `structured_outputs`, or provider-native schema fields. Backends that only support `response_format={ "type": "json_object" }` can produce JSON objects but do not enforce the supplied JSON Schema.
 - **Auth header auto-switch**:
   - Google native -> `x-goog-api-key`
   - vLLM/OpenAI-compatible -> `Authorization: Bearer ...`

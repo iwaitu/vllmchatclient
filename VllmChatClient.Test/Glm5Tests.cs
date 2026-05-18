@@ -651,7 +651,7 @@ namespace VllmChatClient.Test
 
             var options = new GlmChatOptions
             {
-                ThinkingEnabled = _chatOptions.ThinkingEnabled,
+                ThinkingEnabled = true,
                 MaxOutputTokens = 3000,
                 Temperature = 0.95f,
                 Tools = [AIFunctionFactory.Create(CustomSearh)],

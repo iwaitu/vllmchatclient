@@ -21,6 +21,7 @@ A comprehensive .NET 10 chat client library that supports various LLM models inc
 - Added full request / response / streaming conversion for vLLM Responses API and Anthropic Messages API, including reasoning output, tool calls, usage parsing, and streaming tool-call argument deltas.
 - Added Anthropic-format integration tests for GLM-5.1 and Qwen 3.6 Plus via DashScope Anthropic endpoints.
 - Upgraded `Microsoft.Extensions.AI` to `10.5.2`.
+- Removed the Newtonsoft.Json dependency to better support Native AOT application scenarios; internal JSON handling now uses `System.Text.Json` and source-generation metadata where applicable.
 - `VllmBaseChatClient` now supports vLLM structured JSON output via both:
   - `response_format = { type: "json_schema", json_schema: { name, description, schema, strict } }`
   - `extra_body = { structured_outputs: { json: schema } }`

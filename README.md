@@ -893,7 +893,7 @@ var messages2 = new List<ChatMessage>
 Qwen3ChatOptions chatOptions = new()
 {
     Tools = [AIFunctionFactory.Create(GetWeather)],
-    NoThinking = true  // Toggle reasoning on/off
+    ThinkingEnabled = false  // Qwen3 maps this to /no_think in the system prompt
 };
 
 string res = string.Empty;

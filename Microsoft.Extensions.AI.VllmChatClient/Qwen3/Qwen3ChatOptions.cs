@@ -1,11 +1,20 @@
-﻿namespace Microsoft.Extensions.AI
+namespace Microsoft.Extensions.AI
 {
     public class Qwen3ChatOptions : VllmChatOptions
     {
-        public bool NoThinking { get; set; } = false;
-        //设置Top P为0.9，TopK为20
-        public new float? TopP { get; set; } = 0.9f;
-        public new int? TopK { get; set; } = 20;
-        public new float? Temperature { get; set; } = 0.95f;
+        public Qwen3ChatOptions()
+        {
+            ThinkingEnabled = true;
+            TopP = 0.9f;
+            TopK = 20;
+            Temperature = 0.95f;
+        }
+
+        [Obsolete("Use ThinkingEnabled instead. NoThinking = true is equivalent to ThinkingEnabled = false.")]
+        public bool NoThinking
+        {
+            get => !ThinkingEnabled;
+            set => ThinkingEnabled = !value;
+        }
     }
 }

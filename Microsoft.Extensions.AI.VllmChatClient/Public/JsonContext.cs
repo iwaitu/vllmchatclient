@@ -64,6 +64,7 @@ namespace Microsoft.Extensions.AI;
 [JsonSerializable(typeof(Dictionary<string, object?>))]
 [JsonSerializable(typeof(Dictionary<string, JsonElement>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(List<object?>))]
 [JsonSerializable(typeof(object))]
 [JsonSerializable(typeof(object[]))]
 [JsonSerializable(typeof(string[]))]

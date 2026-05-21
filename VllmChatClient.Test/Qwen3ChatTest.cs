@@ -123,7 +123,7 @@ namespace VllmChatClient.Test
             };
             var options = new Qwen3ChatOptions
             {
-                //NoThinking = false,
+                ThinkingEnabled = true,
             };
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);
@@ -140,11 +140,11 @@ namespace VllmChatClient.Test
 
             var options = new Qwen3ChatOptions
             {
-                NoThinking = true,
+                ThinkingEnabled = false,
             };
             var messages = new List<ChatMessage>
             {
-                new ChatMessage(ChatRole.User,$"请为以下文本提取3个最相关的标签。用json格式返回，不要输出代码块。\n\n文本:{text}\n/no_think")
+                new ChatMessage(ChatRole.User,$"请为以下文本提取3个最相关的标签。用json格式返回，不要输出代码块。\n\n文本:{text}")
             };
 
             var res = await _client.GetResponseAsync(messages, options);
@@ -171,8 +171,7 @@ namespace VllmChatClient.Test
             Qwen3ChatOptions chatOptions = new()
             {
                 Tools = [AIFunctionFactory.Create(GetWeather)],
-                //NoThinking = true,
-
+                ThinkingEnabled = true,
             };
             var res = await client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
@@ -192,7 +191,7 @@ namespace VllmChatClient.Test
             string reason = string.Empty;
             var options = new Qwen3ChatOptions
             {
-                NoThinking = false,
+                ThinkingEnabled = true,
             };
             await foreach (var update in _client.GetStreamingResponseAsync(messages, options))
             {
@@ -231,7 +230,7 @@ namespace VllmChatClient.Test
             Qwen3ChatOptions chatOptions = new()
             {
                 Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)],
-                NoThinking = false
+                ThinkingEnabled = true
             };
             string res = string.Empty;
             string reasoning = string.Empty;
@@ -287,7 +286,7 @@ namespace VllmChatClient.Test
             Qwen3ChatOptions chatOptions = new()
             {
                 Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)],
-                NoThinking = true
+                ThinkingEnabled = false
             };
             string res = string.Empty;
             await foreach (var update in client.GetStreamingResponseAsync(messages, chatOptions))
@@ -405,7 +404,7 @@ namespace VllmChatClient.Test
             var options = new Qwen3ChatOptions
             {
                 MaxOutputTokens = 100,
-                NoThinking = true,
+                ThinkingEnabled = false,
             };
             var res = await _client.GetResponseAsync(messages, options);
             Assert.NotNull(res);

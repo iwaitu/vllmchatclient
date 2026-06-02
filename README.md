@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.png" alt="vLLM Chat Client logo" width="128" height="128">
+</p>
+
 # vllmchatclient
 
 [![GitHub stars](https://img.shields.io/github/stars/iwaitu/vllmchatclient?style=social)](https://github.com/iwaitu/vllmchatclient/stargazers)

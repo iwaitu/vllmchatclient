@@ -6,15 +6,17 @@
     <Nullable>enable</Nullable>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <PackageId>Ivilson.AI.VllmChatClient</PackageId>
-    <!-- Version 将由 GitVersion 自动管理 -->
+    <!-- Version controls the NuGet package version and release tag. -->
     <Authors>iwaitu</Authors>
-    <Description>.NET library for the vllm server client</Description>
+    <Description>NativeAOT-ready .NET vLLM chat client for mainstream LLMs, supporting OpenAI-compatible and Anthropic APIs.</Description>
+    <PackageTags>vllm;llm;ai;chat;chatclient;openai;anthropic;claude;qwen;deepseek;gemini;glm;nativeaot;dotnet</PackageTags>
+    <PackageIcon>assets/icon.png</PackageIcon>
     <PackageProjectUrl>https://github.com/iwaitu/vllmchatclient</PackageProjectUrl>
     <RepositoryUrl>https://github.com/iwaitu/vllmchatclient</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
-    <Version>2.0.19</Version>
+    <Version>2.0.20</Version>
     <IsAotCompatible>true</IsAotCompatible>
     <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
   </PropertyGroup>
@@ -25,6 +27,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="" />
+    <None Include="..\assets\icon.png" Pack="true" PackagePath="assets\" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="VllmChatClient.Test" />

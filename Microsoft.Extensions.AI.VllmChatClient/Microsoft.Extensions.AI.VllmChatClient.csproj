@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
-    <PackageId>Ivilson.AI.VllmChatClient</PackageId>
+    <PackageId>VllmChatClient</PackageId>
     <!-- Version controls the NuGet package version and release tag. -->
     <Authors>iwaitu</Authors>
     <Description>NativeAOT-ready .NET vLLM chat client for mainstream LLMs, supporting OpenAI-compatible and Anthropic APIs.</Description>
@@ -16,7 +16,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
-    <Version>2.0.20</Version>
+    <Version>2.0.21</Version>
     <IsAotCompatible>true</IsAotCompatible>
     <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
   </PropertyGroup>

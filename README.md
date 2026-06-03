@@ -2,7 +2,7 @@
   <img src="assets/icon.png" alt="vLLM Chat Client logo" width="128" height="128">
 </p>
 
-# vllmchatclient
+# VllmChatClient
 
 [![GitHub stars](https://img.shields.io/github/stars/iwaitu/vllmchatclient?style=social)](https://github.com/iwaitu/vllmchatclient/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/iwaitu/vllmchatclient?style=social)](https://github.com/iwaitu/vllmchatclient/network)
@@ -1121,7 +1121,7 @@ await foreach (var update in client.GetStreamingResponseAsync(messages, options2
 
 ## NativeAOT Support
 
-`Ivilson.AI.VllmChatClient` is built with AOT compatibility analyzers enabled. The core package does not depend on Newtonsoft.Json and uses `System.Text.Json` source-generation metadata for internal request and response DTOs.
+`VllmChatClient` is built with AOT compatibility analyzers enabled. The core package does not depend on Newtonsoft.Json and uses `System.Text.Json` source-generation metadata for internal request and response DTOs.
 
 | API mode | Non-streaming | Streaming | Tool calls | Notes |
 | --- | --- | --- | --- | --- |

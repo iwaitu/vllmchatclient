@@ -2096,9 +2096,8 @@ namespace Microsoft.Extensions.AI
                 TopP = chatRequest.TopP ?? chatRequest.Options?.top_p,
             };
 
-            if (chatRequest.Reasoning?.Enabled == true ||
-                !string.IsNullOrEmpty(chatRequest.Reasoning?.Effort) ||
-                string.Equals(chatRequest.Thinking?.Type, "enabled", StringComparison.OrdinalIgnoreCase))
+            var thinkingType = GetAnthropicThinkingType(chatRequest, options);
+            if (string.Equals(thinkingType, "enabled", StringComparison.OrdinalIgnoreCase))
             {
                 request.Thinking = new VllmAnthropicThinkingOptions
                 {
@@ -2106,8 +2105,7 @@ namespace Microsoft.Extensions.AI
                     BudgetTokens = options?.MaxOutputTokens is int maxTokens ? Math.Min(Math.Max(maxTokens / 4, 1024), maxTokens) : null,
                 };
             }
-            else if (chatRequest.Reasoning?.Enabled == false ||
-                     string.Equals(chatRequest.Thinking?.Type, "disabled", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(thinkingType, "disabled", StringComparison.OrdinalIgnoreCase))
             {
                 request.Thinking = new VllmAnthropicThinkingOptions
                 {
@@ -2116,6 +2114,47 @@ namespace Microsoft.Extensions.AI
             }
 
             return request;
+        }
+
+        private static string? GetAnthropicThinkingType(VllmOpenAIChatRequest chatRequest, ChatOptions? options)
+        {
+            if (chatRequest.Reasoning?.Enabled == true ||
+                !string.IsNullOrEmpty(chatRequest.Reasoning?.Effort) ||
+                string.Equals(chatRequest.Thinking?.Type, "enabled", StringComparison.OrdinalIgnoreCase) ||
+                chatRequest.EnableThinking == true ||
+                TryGetBoolean(chatRequest.ChatTemplateKwargs, "enable_thinking") == true)
+            {
+                return "enabled";
+            }
+
+            if (chatRequest.Reasoning?.Enabled == false ||
+                string.Equals(chatRequest.Thinking?.Type, "disabled", StringComparison.OrdinalIgnoreCase) ||
+                chatRequest.EnableThinking == false ||
+                TryGetBoolean(chatRequest.ChatTemplateKwargs, "enable_thinking") == false)
+            {
+                return "disabled";
+            }
+
+            return options is VllmChatOptions vllmOptions
+                ? vllmOptions.ThinkingEnabled ? "enabled" : "disabled"
+                : null;
+        }
+
+        private static bool? TryGetBoolean(IReadOnlyDictionary<string, object?>? values, string key)
+        {
+            if (values is null || !values.TryGetValue(key, out var value))
+            {
+                return null;
+            }
+
+            return value switch
+            {
+                bool boolValue => boolValue,
+                JsonElement { ValueKind: JsonValueKind.True } => true,
+                JsonElement { ValueKind: JsonValueKind.False } => false,
+                string stringValue when bool.TryParse(stringValue, out var boolValue) => boolValue,
+                _ => null
+            };
         }
 
         private static VllmAnthropicMessage ToVllmAnthropicToolResultMessage(IEnumerable<VllmOpenAIChatRequestMessage> messages)

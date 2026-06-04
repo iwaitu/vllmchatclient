@@ -63,7 +63,41 @@ A comprehensive .NET 10 chat client library that supports various LLM models inc
 - **Responses API 兼容**：支持普通响应、流式响应、reasoning 输出、函数调用、usage 解析。
 - **Anthropic API 兼容**：支持 `x-api-key` / `anthropic-version` 认证头、`/v1/messages` 请求格式、system 分离、`tool_use` / `tool_result`、thinking block、流式 `input_json_delta` 工具参数拼接。
 - **客户端适配**：继承 `VllmBaseChatClient` 的主要客户端构造函数均可传入 `VllmApiMode`，包括 GLM、Qwen3Next、Claude、DeepSeek、Gemma4、GPT-OSS、Kimi、MiMo、MiniMax、Nemotron、OpenAI GPT 等。
+- **通用兼容端点入口**：`VllmBaseChatClient` 现在可直接实例化，并可通过 `VllmCompatibleEndpointProfile` 配置 token header、默认 headers、`extra_body`、thinking 参数映射和 top-level generation 参数。未来新增或升级的主流非 OpenAI / Gemini / Anthropic 原生模型，优先使用该通用入口；旧模型专用客户端保留兼容，不再作为新增默认路径。
 - **测试覆盖**：新增 `ResponsesApiModeTests`、`AnthropicApiModeTests`、`Glm5AnthropicTests`、`Qwen36PlusAnthropicTests`，覆盖 Responses / Anthropic 两种新协议，以及 DashScope Anthropic endpoint 下的 GLM-5.1 与 Qwen 3.6 Plus。
+
+#### Demo：通用兼容端点 Profile
+
+```csharp
+using Microsoft.Extensions.AI;
+
+var profile = new VllmCompatibleEndpointProfile
+{
+    ProviderName = "new-compatible-provider",
+    TokenHeaderName = "api-key",
+    ThinkingParameter = VllmCompatibleThinkingParameter.ExtraBodyThinkingType,
+    UseTopLevelGenerationOptions = true,
+    UseMaxCompletionTokens = true,
+};
+
+IChatClient client = new VllmBaseChatClient(
+    endpoint: "https://api.example.com/v1",
+    token: Environment.GetEnvironmentVariable("COMPATIBLE_API_KEY"),
+    modelId: "new-main-model",
+    httpClient: null,
+    apiMode: VllmApiMode.ChatCompletions,
+    profile: profile);
+
+var response = await client.GetResponseAsync(
+[
+    new ChatMessage(ChatRole.User, "用一句话介绍这个模型")
+],
+new VllmChatOptions
+{
+    ThinkingEnabled = true,
+    MaxOutputTokens = 1024,
+});
+```
 
 #### Demo：使用 Responses API
 

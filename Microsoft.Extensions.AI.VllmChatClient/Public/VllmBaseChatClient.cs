@@ -9,13 +9,14 @@ using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace Microsoft.Extensions.AI
 {
-    public abstract class VllmBaseChatClient : IChatClient
+    public class VllmBaseChatClient : IChatClient
     {
         private static readonly JsonElement _schemalessJsonResponseFormatValue = JsonDocument.Parse("\"json\"").RootElement;
         private static readonly ConcurrentDictionary<string, (SkillCatalog? catalog, DateTime timestamp)> _skillCatalogCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ChatClientMetadata _metadata;
         private readonly string _apiChatEndpoint;
         private readonly VllmApiMode _apiMode;
+        private readonly VllmCompatibleEndpointProfile? _profile;
         private readonly HttpClient _httpClient;
         private JsonSerializerOptions _toolCallJsonSerializerOptions = AIJsonUtilities.DefaultOptions;
 
@@ -23,7 +24,13 @@ namespace Microsoft.Extensions.AI
 
         private sealed record SkillManifest(string Name, string Description, string FileName, string RelativePath, string FullPath);
 
-        protected VllmBaseChatClient(string endpoint, string? token, string? modelId, HttpClient? httpClient, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+        public VllmBaseChatClient(
+            string endpoint,
+            string? token,
+            string? modelId,
+            HttpClient? httpClient,
+            VllmApiMode apiMode = VllmApiMode.ChatCompletions,
+            VllmCompatibleEndpointProfile? profile = null)
         {
             _ = Throw.IfNull(endpoint);
             if (modelId is not null)
@@ -33,26 +40,72 @@ namespace Microsoft.Extensions.AI
 
             _apiChatEndpoint = endpoint ?? "http://localhost:8000/{0}/{1}";
             _apiMode = apiMode;
+            _profile = profile;
             _httpClient = httpClient ?? VllmUtilities.SharedClient;
-            if (!string.IsNullOrWhiteSpace(token) && apiMode == VllmApiMode.AnthropicMessages)
+            ApplyAuthenticationHeaders(token, apiMode, profile);
+            ApplyDefaultHeaders(profile);
+
+            _metadata = new(profile?.ProviderName ?? "vllm", new Uri(_apiChatEndpoint), modelId);
+        }
+
+        private void ApplyAuthenticationHeaders(string? token, VllmApiMode apiMode, VllmCompatibleEndpointProfile? profile)
+        {
+            if (string.IsNullOrWhiteSpace(token))
             {
                 _httpClient.DefaultRequestHeaders.Authorization = null;
-                _httpClient.DefaultRequestHeaders.Remove("x-api-key");
-                _httpClient.DefaultRequestHeaders.Add("x-api-key", token);
-                _httpClient.DefaultRequestHeaders.Remove("anthropic-version");
-                _httpClient.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
-            }
-            else if (!string.IsNullOrWhiteSpace(token))
-            {
-                _httpClient.DefaultRequestHeaders.Authorization =
-                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-            }
-            else
-            {
-                _httpClient.DefaultRequestHeaders.Authorization = null;
+                var tokenHeaderNameToClear = profile?.TokenHeaderName;
+                if (string.IsNullOrWhiteSpace(tokenHeaderNameToClear) && apiMode == VllmApiMode.AnthropicMessages)
+                {
+                    tokenHeaderNameToClear = "x-api-key";
+                }
+
+                if (!string.IsNullOrWhiteSpace(tokenHeaderNameToClear) &&
+                    !string.Equals(tokenHeaderNameToClear, "Authorization", StringComparison.OrdinalIgnoreCase))
+                {
+                    _httpClient.DefaultRequestHeaders.Remove(tokenHeaderNameToClear);
+                }
+
+                return;
             }
 
-            _metadata = new("vllm", new Uri(_apiChatEndpoint), modelId);
+            var tokenHeaderName = profile?.TokenHeaderName;
+            if (string.IsNullOrWhiteSpace(tokenHeaderName) && apiMode == VllmApiMode.AnthropicMessages)
+            {
+                tokenHeaderName = "x-api-key";
+            }
+
+            if (string.IsNullOrWhiteSpace(tokenHeaderName) ||
+                string.Equals(tokenHeaderName, "Authorization", StringComparison.OrdinalIgnoreCase))
+            {
+                _httpClient.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue(profile?.TokenHeaderScheme ?? "Bearer", token);
+                return;
+            }
+
+            _httpClient.DefaultRequestHeaders.Authorization = null;
+            _httpClient.DefaultRequestHeaders.Remove(tokenHeaderName);
+            _httpClient.DefaultRequestHeaders.Add(tokenHeaderName, token);
+        }
+
+        private void ApplyDefaultHeaders(VllmCompatibleEndpointProfile? profile)
+        {
+            if (_apiMode == VllmApiMode.AnthropicMessages && profile is null)
+            {
+                _httpClient.DefaultRequestHeaders.Remove("anthropic-version");
+                _httpClient.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
+                return;
+            }
+
+            if (profile?.DefaultHeaders is not { Count: > 0 } headers)
+            {
+                return;
+            }
+
+            foreach (var header in headers)
+            {
+                _httpClient.DefaultRequestHeaders.Remove(header.Key);
+                _httpClient.DefaultRequestHeaders.Add(header.Key, header.Value);
+            }
         }
 
         protected ChatClientMetadata Metadata => _metadata;
@@ -63,7 +116,7 @@ namespace Microsoft.Extensions.AI
 
         protected VllmApiMode ApiMode => _apiMode;
 
-        protected virtual string ProviderName => "vllm";
+        protected virtual string ProviderName => _profile?.ProviderName ?? "vllm";
 
         internal virtual ChatResponseUpdate? HandleStreamingReasoningContent(Delta delta, string responseId, string modelId)
         {
@@ -2691,24 +2744,125 @@ namespace Microsoft.Extensions.AI
 
         private protected virtual void ApplyRequestOptions(VllmOpenAIChatRequest request, ChatOptions? options)
         {
-            if (options is null)
-            {
-                return;
-            }
-
-            if (options.Temperature is float temperature)
+            if (options?.Temperature is float temperature)
             {
                 (request.Options ??= new()).temperature = temperature;
             }
 
-            if (options.TopP is float topP)
+            if (options?.TopP is float topP)
             {
                 (request.Options ??= new()).top_p = topP;
             }
 
-            if (options.MaxOutputTokens is int maxTokens)
+            if (options?.MaxOutputTokens is int maxTokens)
             {
                 request.MaxTokens = maxTokens;
+            }
+
+            ApplyProfileRequestOptions(request, options);
+        }
+
+        private void ApplyProfileRequestOptions(VllmOpenAIChatRequest request, ChatOptions? options)
+        {
+            if (_profile is null)
+            {
+                return;
+            }
+
+            MergeExtraBodyDefaults(request, _profile.ExtraBody);
+            ApplyProfileThinkingOptions(request, options);
+            ApplyTopLevelGenerationOptions(request);
+        }
+
+        private static void MergeExtraBodyDefaults(VllmOpenAIChatRequest request, IReadOnlyDictionary<string, object?>? defaults)
+        {
+            if (defaults is not { Count: > 0 })
+            {
+                return;
+            }
+
+            request.ExtraBody ??= new Dictionary<string, object?>();
+            foreach (var pair in defaults)
+            {
+                request.ExtraBody.TryAdd(pair.Key, pair.Value);
+            }
+        }
+
+        private void ApplyProfileThinkingOptions(VllmOpenAIChatRequest request, ChatOptions? options)
+        {
+            if (_profile is not { ThinkingParameter: not VllmCompatibleThinkingParameter.None } profile ||
+                options is not VllmChatOptions vllmOptions)
+            {
+                return;
+            }
+
+            switch (profile.ThinkingParameter)
+            {
+                case VllmCompatibleThinkingParameter.TopLevelThinkingType:
+                    request.Thinking ??= new VllmThinkingOptions
+                    {
+                        Type = vllmOptions.ThinkingEnabled ? profile.ThinkingEnabledValue : profile.ThinkingDisabledValue
+                    };
+                    break;
+
+                case VllmCompatibleThinkingParameter.TopLevelEnableThinking:
+                    request.EnableThinking ??= vllmOptions.ThinkingEnabled;
+                    break;
+
+                case VllmCompatibleThinkingParameter.ChatTemplateEnableThinking:
+                    request.ChatTemplateKwargs ??= new Dictionary<string, object?>();
+                    request.ChatTemplateKwargs.TryAdd("enable_thinking", vllmOptions.ThinkingEnabled);
+                    break;
+
+                case VllmCompatibleThinkingParameter.ExtraBodyThinkingType:
+                    request.ExtraBody ??= new Dictionary<string, object?>();
+                    request.ExtraBody.TryAdd("thinking", new Dictionary<string, object?>
+                    {
+                        ["type"] = vllmOptions.ThinkingEnabled ? profile.ThinkingEnabledValue : profile.ThinkingDisabledValue
+                    });
+                    break;
+
+                case VllmCompatibleThinkingParameter.ReasoningEnabled:
+                    request.Reasoning ??= new VllmReasoningOptions { Enabled = vllmOptions.ThinkingEnabled };
+                    break;
+
+                case VllmCompatibleThinkingParameter.ReasoningEffort:
+                    if (vllmOptions.ThinkingEnabled)
+                    {
+                        request.Reasoning ??= new VllmReasoningOptions { Effort = profile.ReasoningEffort };
+                    }
+                    break;
+            }
+        }
+
+        private void ApplyTopLevelGenerationOptions(VllmOpenAIChatRequest request)
+        {
+            if (_profile is not { UseTopLevelGenerationOptions: true })
+            {
+                return;
+            }
+
+            if (request.MaxTokens is int maxTokens && _profile.UseMaxCompletionTokens)
+            {
+                request.MaxCompletionTokens ??= maxTokens;
+                request.MaxTokens = null;
+            }
+
+            if (request.Options?.temperature is float temperature)
+            {
+                request.Temperature ??= temperature;
+                request.Options.temperature = null;
+            }
+
+            if (request.Options?.top_p is float topP)
+            {
+                request.TopP ??= topP;
+                request.Options.top_p = null;
+            }
+
+            if (request.Options is { temperature: null, top_p: null, top_k: null, extra_body: null })
+            {
+                request.Options = null;
             }
         }
 

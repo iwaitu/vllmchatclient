@@ -40,7 +40,7 @@ namespace Microsoft.Extensions.AI
                 }
             } while (continueLoop);
         }
-        private static readonly System.Text.Json.JsonSerializerOptions _toolCallJsonSerializerOptions = new()
+        private static readonly System.Text.Json.JsonSerializerOptions _toolCallJsonSerializerOptions = new(AIJsonUtilities.DefaultOptions)
         {
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         };

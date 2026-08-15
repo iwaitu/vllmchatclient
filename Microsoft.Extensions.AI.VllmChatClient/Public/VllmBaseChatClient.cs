@@ -2445,7 +2445,7 @@ namespace Microsoft.Extensions.AI
             };
         }
 
-        private static object? GetAssistantReasoningContent(ChatMessage message)
+        private protected static object? GetAssistantReasoningContent(ChatMessage message)
         {
             if (!string.Equals(message.Role.Value, ChatRole.Assistant.Value, StringComparison.OrdinalIgnoreCase))
             {
@@ -2457,11 +2457,23 @@ namespace Microsoft.Extensions.AI
                 return rawMessage.ReasoningContent;
             }
 
+            if (message.RawRepresentation is VllmChatResponseMessage { Reasoning: { Length: > 0 } reasoning })
+            {
+                return reasoning;
+            }
+
             if (message.AdditionalProperties is { } properties &&
                 properties.TryGetValue("reasoning_content", out var reasoningContent) &&
                 reasoningContent is not null)
             {
                 return reasoningContent;
+            }
+
+            if (message.AdditionalProperties is { } reasoningProperties &&
+                reasoningProperties.TryGetValue("reasoning", out var alternateReasoning) &&
+                alternateReasoning is not null)
+            {
+                return alternateReasoning;
             }
 
             foreach (var content in message.Contents)

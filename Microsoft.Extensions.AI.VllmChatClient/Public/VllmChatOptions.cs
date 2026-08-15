@@ -2,6 +2,19 @@
 public class VllmChatOptions : ChatOptions
 {
     public bool ThinkingEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Qwen3.8 reasoning effort passed as <c>reasoning_effort</c>.
+    /// Supported chat-template values are <c>low</c>, <c>medium</c>, and <c>xhigh</c>.
+    /// A <see langword="null"/> value uses the model or chat-template default.
+    /// </summary>
+    public string? ReasoningEffort { get; set; }
+
+    /// <summary>
+    /// Controls whether Qwen3.6 or Qwen3.8 preserves historical assistant reasoning.
+    /// A <see langword="null"/> value uses the model or chat-template default.
+    /// </summary>
+    public bool? PreserveThinking { get; set; }
     
     /// <summary>
     /// 启用 legacy 文本工具调用兜底解析（例如 <tool_call>...</tool_call>）。

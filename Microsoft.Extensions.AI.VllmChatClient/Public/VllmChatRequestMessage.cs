@@ -85,6 +85,13 @@ internal sealed class VllmOpenAIImageContentPart
     public required VllmOpenAIImageUrl ImageUrl { get; set; }
 }
 
+internal sealed class VllmOpenAIVideoContentPart
+{
+    public string Type { get; set; } = "video_url";
+    [JsonPropertyName("video_url")]
+    public required VllmOpenAIImageUrl VideoUrl { get; set; }
+}
+
 internal sealed class VllmOpenAIImageUrl
 {
     public required string Url { get; set; }

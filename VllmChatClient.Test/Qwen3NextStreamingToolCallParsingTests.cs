@@ -516,6 +516,270 @@ data: [DONE]
         Assert.False(nestedEnableThinking.GetBoolean());
     }
 
+    [Fact]
+    public async Task Qwen36_VllmRequest_SendsThinkingAndPreserveWithoutReasoningEffort()
+    {
+        var handler = new CaptureJsonHandler(SuccessfulJsonResponse);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmQwen3NextChatClient(
+            "https://example.test/{0}/{1}",
+            "fake-token",
+            "qwen3.6-27b",
+            httpClient);
+
+        await client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], new VllmChatOptions
+        {
+            ThinkingEnabled = true,
+            PreserveThinking = false,
+            ReasoningEffort = "xhigh",
+        });
+
+        using var doc = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody!);
+        var root = doc.RootElement;
+        var kwargs = root.GetProperty("chat_template_kwargs");
+        Assert.True(kwargs.GetProperty("enable_thinking").GetBoolean());
+        Assert.False(kwargs.GetProperty("preserve_thinking").GetBoolean());
+        Assert.False(kwargs.TryGetProperty("reasoning_effort", out _));
+        Assert.False(root.TryGetProperty("reasoning_effort", out _));
+    }
+
+    [Fact]
+    public async Task Qwen38_VllmRequest_SendsAllChatTemplateArguments()
+    {
+        var handler = new CaptureJsonHandler(SuccessfulJsonResponse);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmQwen3NextChatClient(
+            "https://example.test/{0}/{1}",
+            "fake-token",
+            "Qwen/Qwen3.8-27B",
+            httpClient);
+
+        await client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], new VllmChatOptions
+        {
+            ThinkingEnabled = true,
+            PreserveThinking = true,
+            ReasoningEffort = "Medium",
+        });
+
+        using var doc = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody!);
+        var root = doc.RootElement;
+        var kwargs = root.GetProperty("chat_template_kwargs");
+        Assert.True(kwargs.GetProperty("enable_thinking").GetBoolean());
+        Assert.True(kwargs.GetProperty("preserve_thinking").GetBoolean());
+        Assert.False(kwargs.TryGetProperty("reasoning_effort", out _));
+        Assert.Equal("medium", root.GetProperty("reasoning_effort").GetString());
+    }
+
+    [Fact]
+    public async Task Qwen36_AliyunRequest_SendsTopLevelPreserveWithoutReasoningEffort()
+    {
+        var handler = new CaptureJsonHandler(SuccessfulJsonResponse);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmQwen3NextChatClient(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}",
+            "fake-token",
+            "qwen3.6-plus",
+            httpClient);
+
+        await client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], new VllmChatOptions
+        {
+            ThinkingEnabled = true,
+            PreserveThinking = true,
+            ReasoningEffort = "low",
+        });
+
+        using var doc = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody!);
+        var root = doc.RootElement;
+        Assert.True(root.GetProperty("enable_thinking").GetBoolean());
+        Assert.True(root.GetProperty("preserve_thinking").GetBoolean());
+        Assert.False(root.TryGetProperty("reasoning_effort", out _));
+        Assert.False(root.TryGetProperty("chat_template_kwargs", out _));
+    }
+
+    [Fact]
+    public async Task Qwen38_AliyunRequest_SendsAllTopLevelThinkingParameters()
+    {
+        var handler = new CaptureJsonHandler(SuccessfulJsonResponse);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmQwen3NextChatClient(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/{1}",
+            "fake-token",
+            "qwen3.8-max",
+            httpClient);
+
+        await client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], new VllmChatOptions
+        {
+            ThinkingEnabled = true,
+            PreserveThinking = false,
+            ReasoningEffort = "xhigh",
+        });
+
+        using var doc = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody!);
+        var root = doc.RootElement;
+        Assert.True(root.GetProperty("enable_thinking").GetBoolean());
+        Assert.False(root.GetProperty("preserve_thinking").GetBoolean());
+        Assert.Equal("xhigh", root.GetProperty("reasoning_effort").GetString());
+        Assert.False(root.TryGetProperty("chat_template_kwargs", out _));
+    }
+
+    [Fact]
+    public async Task Qwen38_PreserveThinking_SendsHistoricalReasoningContentSeparately()
+    {
+        var handler = new CaptureJsonHandler(SuccessfulJsonResponse);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmQwen3NextChatClient(
+            "https://example.test/{0}/{1}",
+            "fake-token",
+            "qwen3.8-27b",
+            httpClient);
+        var assistantMessage = new ChatMessage(ChatRole.Assistant, "visible answer")
+        {
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                ["reasoning_content"] = "historical reasoning",
+            },
+        };
+
+        await client.GetResponseAsync(
+            [
+                new ChatMessage(ChatRole.User, "first question"),
+                assistantMessage,
+                new ChatMessage(ChatRole.User, "follow-up"),
+            ],
+            new VllmChatOptions
+            {
+                ThinkingEnabled = true,
+                PreserveThinking = true,
+                ReasoningEffort = "low",
+            });
+
+        using var doc = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody!);
+        var historicalAssistant = doc.RootElement.GetProperty("messages")[1];
+        Assert.Equal("visible answer", historicalAssistant.GetProperty("content").GetString());
+        Assert.Equal("historical reasoning", historicalAssistant.GetProperty("reasoning_content").GetString());
+    }
+
+    [Fact]
+    public async Task Qwen38_PreserveThinking_MapsVllmReasoningAliasToReasoningContent()
+    {
+        var handler = new CaptureJsonHandler(SuccessfulJsonResponse);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmQwen3NextChatClient(
+            "https://example.test/{0}/{1}",
+            "fake-token",
+            "qwen3.8-27b",
+            httpClient);
+        var assistantMessage = new ChatMessage(ChatRole.Assistant, "visible answer")
+        {
+            RawRepresentation = new VllmChatResponseMessage
+            {
+                Role = "assistant",
+                Content = "visible answer",
+                Reasoning = "vLLM reasoning alias",
+            },
+        };
+
+        await client.GetResponseAsync(
+            [
+                new ChatMessage(ChatRole.User, "first question"),
+                assistantMessage,
+                new ChatMessage(ChatRole.User, "follow-up"),
+            ],
+            new VllmChatOptions
+            {
+                ThinkingEnabled = true,
+                PreserveThinking = true,
+                ReasoningEffort = "low",
+            });
+
+        using var doc = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody!);
+        var historicalAssistant = doc.RootElement.GetProperty("messages")[1];
+        Assert.Equal("vLLM reasoning alias", historicalAssistant.GetProperty("reasoning_content").GetString());
+    }
+
+    [Fact]
+    public async Task Qwen38_FullModelId_SerializesRemoteImageAndVideoInputs()
+    {
+        var handler = new CaptureJsonHandler(SuccessfulJsonResponse);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmQwen3NextChatClient(
+            "https://example.test/{0}/{1}",
+            "fake-token",
+            "Qwen/Qwen3.8-27B",
+            httpClient);
+        var message = new ChatMessage(
+            ChatRole.User,
+            [
+                new UriContent("https://example.test/image.jpg", "image/jpeg"),
+                new UriContent("https://example.test/video.mp4", "video/mp4"),
+                new TextContent("Describe the media."),
+            ]);
+
+        await client.GetResponseAsync([message], new VllmChatOptions
+        {
+            ThinkingEnabled = true,
+        });
+
+        using var doc = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody!);
+        var content = doc.RootElement.GetProperty("messages")[0].GetProperty("content");
+        Assert.Equal(System.Text.Json.JsonValueKind.Array, content.ValueKind);
+        Assert.Equal(3, content.GetArrayLength());
+        Assert.Equal("image_url", content[0].GetProperty("type").GetString());
+        Assert.Equal("https://example.test/image.jpg", content[0].GetProperty("image_url").GetProperty("url").GetString());
+        Assert.Equal("video_url", content[1].GetProperty("type").GetString());
+        Assert.Equal("https://example.test/video.mp4", content[1].GetProperty("video_url").GetProperty("url").GetString());
+        Assert.Equal("text", content[2].GetProperty("type").GetString());
+        Assert.Equal("Describe the media.", content[2].GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task Qwen38_SerializesInlineVideoAsDataUrl()
+    {
+        var handler = new CaptureJsonHandler(SuccessfulJsonResponse);
+        using var httpClient = new HttpClient(handler);
+        var client = new VllmQwen3NextChatClient(
+            "https://example.test/{0}/{1}",
+            "fake-token",
+            "qwen3.8-27b",
+            httpClient);
+        var message = new ChatMessage(
+            ChatRole.User,
+            [
+                new DataContent(new byte[] { 0, 1, 2, 3 }, "video/mp4"),
+                new TextContent("Describe the video."),
+            ]);
+
+        await client.GetResponseAsync([message], new VllmChatOptions
+        {
+            ThinkingEnabled = true,
+        });
+
+        using var doc = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody!);
+        var videoUrl = doc.RootElement
+            .GetProperty("messages")[0]
+            .GetProperty("content")[0]
+            .GetProperty("video_url")
+            .GetProperty("url")
+            .GetString();
+        Assert.StartsWith("data:video/mp4;base64,", videoUrl, StringComparison.Ordinal);
+    }
+
+    private const string SuccessfulJsonResponse = """
+{
+  "id": "chatcmpl-success",
+  "object": "chat.completion",
+  "created": 1771436118,
+  "model": "qwen",
+  "choices": [
+    {
+      "index": 0,
+      "message": { "role": "assistant", "content": "ok" },
+      "finish_reason": "stop"
+    }
+  ]
+}
+""";
+
     private sealed class FakeStreamingHandler(string ssePayload) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

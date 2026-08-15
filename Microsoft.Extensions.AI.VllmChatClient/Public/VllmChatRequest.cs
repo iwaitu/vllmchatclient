@@ -17,6 +17,8 @@ internal sealed class VllmOpenAIChatRequest
     public IEnumerable<VllmTool>? Tools { get; set; }
     public VllmThinkingOptions? Thinking { get; set; }
     public bool? EnableThinking { get; set; }
+    public string? ReasoningEffort { get; set; }
+    public bool? PreserveThinking { get; set; }
     public Dictionary<string, object?>? ChatTemplateKwargs { get; set; }
     public VllmReasoningOptions? Reasoning { get; set; }
     public float? Temperature { get; set; }

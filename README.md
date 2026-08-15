@@ -457,6 +457,30 @@ For Qwen3.5 models, `VllmQwen3NextChatClient` also supports:
 - multimodal image input for `qwen3.5*` model IDs
 - legacy text tool-call fallback for `<tool_call>...</tool_call>` outputs
 
+### Qwen3.6 / Qwen3.8 Thinking Parameters
+
+`VllmQwen3NextChatClient` selects the supported thinking parameters from the effective model ID (the per-request `ChatOptions.ModelId` takes precedence over the constructor model ID):
+
+| Model | `enable_thinking` | `preserve_thinking` | `reasoning_effort` |
+|---|---:|---:|---|
+| `qwen3.6*` | ✅ | ✅ | not sent |
+| `qwen3.8*` | ✅ | ✅ | `low`, `medium`, or `xhigh` |
+
+```csharp
+var options = new VllmChatOptions
+{
+    ThinkingEnabled = true,
+    PreserveThinking = true,
+    ReasoningEffort = "medium", // Sent only for qwen3.8 models.
+};
+
+var response = await client.GetResponseAsync(messages, options);
+```
+
+For Alibaba Cloud / DashScope endpoints, `enable_thinking` and `preserve_thinking` are serialized as top-level request fields. For self-hosted vLLM and other OpenAI-compatible endpoints, those two values are serialized under `chat_template_kwargs`. Qwen3.8 `reasoning_effort` is always a top-level request field, matching the official model card. When preserved reasoning is present on an assistant `ChatMessage`, it is sent separately as `reasoning_content` rather than being appended to `content`.
+
+Qwen3.8 model IDs also accept the fully qualified form such as `Qwen/Qwen3.8-27B`. Image and video inputs can be supplied as either inline `DataContent` or remote `UriContent`; they are serialized as OpenAI-compatible `image_url` and `video_url` content parts.
+
 ### QwQ vLLM Deployment:
 ```bash
 docker run -it --gpus all -p 8000:8000 \

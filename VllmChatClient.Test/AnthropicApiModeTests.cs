@@ -61,6 +61,51 @@ public class AnthropicApiModeTests
         Assert.Equal("hi", root.GetProperty("messages")[0].GetProperty("content").GetString());
     }
 
+    [Theory]
+    [InlineData(true, "enabled")]
+    [InlineData(false, "disabled")]
+    public async Task BaseClient_AnthropicMode_ShouldSerializeThinkingFromVllmOptions(bool thinkingEnabled, string expectedType)
+    {
+        string? requestJson = null;
+        var handler = new CaptureHttpMessageHandler(async request =>
+        {
+            requestJson = request.Content is null ? null : await request.Content.ReadAsStringAsync();
+
+            return JsonResponse("""
+                {
+                  "id": "msg-thinking-options",
+                  "type": "message",
+                  "role": "assistant",
+                  "model": "claude-test",
+                  "content": [{ "type": "text", "text": "ok" }],
+                  "stop_reason": "end_turn",
+                  "usage": { "input_tokens": 3, "output_tokens": 1 }
+                }
+                """);
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new TestVllmChatClient("http://localhost:8000/v1", null, httpClient, VllmApiMode.AnthropicMessages);
+
+        await client.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "hi")],
+            new VllmChatOptions { ThinkingEnabled = thinkingEnabled, MaxOutputTokens = 4096 });
+
+        Assert.NotNull(requestJson);
+        using var doc = JsonDocument.Parse(requestJson!);
+        var thinking = doc.RootElement.GetProperty("thinking");
+        Assert.Equal(expectedType, thinking.GetProperty("type").GetString());
+
+        if (thinkingEnabled)
+        {
+            Assert.Equal(1024, thinking.GetProperty("budget_tokens").GetInt32());
+        }
+        else
+        {
+            Assert.False(thinking.TryGetProperty("budget_tokens", out _));
+        }
+    }
+
     [Fact]
     public async Task BaseClient_AnthropicMode_ShouldParseToolUse()
     {

@@ -297,7 +297,7 @@ namespace VllmChatClient.Test
 
             var messages = new List<ChatMessage>
             {
-                new(ChatRole.System, "你是一个智能助手，名字叫菲菲，调用工具时仅能输出工具调用内容，不能输出其他文本。"),
+                new(ChatRole.System, "你是一个智能助手，名字叫菲菲。请先调用 Search 查询地址，收到工具结果后根据结果用自然语言回答用户。"),
                 new(ChatRole.User, "南宁火车站在哪里？")
             };
 
@@ -307,21 +307,25 @@ namespace VllmChatClient.Test
             Assert.Single(res.Messages);
 
             var functionCalls = res.Messages[0].Contents.OfType<FunctionCallContent>().ToList();
+            _output.WriteLine($"First response: finish={res.FinishReason}, text={res.Text}");
             Assert.NotEmpty(functionCalls);
 
+            // Preserve thinking blocks and the complete set of calls from this assistant turn.
+            messages.AddRange(res.Messages);
             foreach (var functionCall in functionCalls)
             {
-                messages.Add(new ChatMessage(ChatRole.Assistant, [functionCall]));
                 var answer = functionCall.Name == "GetWeather"
                     ? "30度，天气晴朗。"
                     : "在青秀区方圆广场附近站前路1号。";
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(functionCall.CallId, answer)]));
             }
 
+            _chatOptions.ToolMode = ChatToolMode.None;
             var result = await _client.GetResponseAsync(messages, _chatOptions);
             Assert.NotNull(result);
             Assert.Single(result.Messages);
-            Assert.False(string.IsNullOrWhiteSpace(result.Text));
+            _output.WriteLine($"Final response: finish={result.FinishReason}, text={result.Text}, calls={string.Join(",", result.Messages.SelectMany(m => m.Contents).OfType<FunctionCallContent>().Select(c => c.Name))}");
+            Assert.False(string.IsNullOrWhiteSpace(result.Text), $"Empty final answer: finish={result.FinishReason}");
 
             if (result is ReasoningChatResponse reasoningResponse)
             {

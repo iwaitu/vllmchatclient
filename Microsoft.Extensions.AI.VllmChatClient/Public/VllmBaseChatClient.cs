@@ -2312,7 +2312,7 @@ namespace Microsoft.Extensions.AI
                 null => null,
                 string value when value == "auto" => new VllmAnthropicToolChoice { Type = "auto" },
                 string value when value == "required" => new VllmAnthropicToolChoice { Type = "any" },
-                string value when value == "none" => null,
+                string value when value == "none" => new VllmAnthropicToolChoice { Type = "none" },
                 _ => TryGetRequiredToolName(toolChoice) is { } name
                     ? new VllmAnthropicToolChoice { Type = "tool", Name = name }
                     : null,

@@ -24,7 +24,8 @@ namespace VllmChatClient.Test
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
-            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.8-27b");
+            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.8-27b",
+                new HttpClient(new ToolChoiceDiagnosticHandler(output)));
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.5-397b-a17b");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
@@ -656,10 +657,11 @@ data: [DONE]
                 new ChatMessage(ChatRole.System ,"你是一个智能助手，名字叫菲菲"),
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？"),
             };
-            ChatOptions chatOptions = new()
+            VllmChatOptions chatOptions = new()
             {
                 Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)],
                 ToolMode = ChatToolMode.RequireSpecific(nameof(Search)),
+                ThinkingEnabled = false,
             };
             var res = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
@@ -694,8 +696,11 @@ data: [DONE]
             }
 
             // After returning the tool output, ask for the final answer rather than another call.
-            var answerOptions = chatOptions.Clone();
-            answerOptions.ToolMode = ChatToolMode.None;
+            var answerOptions = new VllmChatOptions
+            {
+                ThinkingEnabled = false,
+                ToolMode = ChatToolMode.None,
+            };
             var result = await _client.GetResponseAsync(messages, answerOptions);
             Assert.NotNull(result);
             Assert.Single(result.Messages);
@@ -705,6 +710,7 @@ data: [DONE]
                                    .FirstOrDefault()?.Text;
 
             Assert.False(string.IsNullOrWhiteSpace(answerText));
+            _output.WriteLine($"Final answer: {answerText}");
         }
 
         [Fact]
@@ -774,6 +780,38 @@ data: [DONE]
             Assert.Single(res.Messages);
             StructuredJsonSchemaTestHelper.AssertGreetingJson(res.Text);
             _output.WriteLine($"Response: {res.Text}");
+        }
+
+        private sealed class ToolChoiceDiagnosticHandler(ITestOutputHelper output) : DelegatingHandler(new HttpClientHandler())
+        {
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+                var root = body.RootElement;
+                bool hasToolChoice = root.TryGetProperty("tool_choice", out var toolChoice);
+                if (hasToolChoice)
+                {
+                    var thinking = root.TryGetProperty("enable_thinking", out var value) ? value.ToString() : "omitted";
+                    var toolCount = root.TryGetProperty("tools", out var tools) ? tools.GetArrayLength() : 0;
+                    output.WriteLine($"HTTP request: model={root.GetProperty("model")}, tool_choice={toolChoice}, enable_thinking={thinking}, tools={toolCount}");
+                }
+
+                var response = await base.SendAsync(request, cancellationToken);
+                if (hasToolChoice && response.Content.Headers.ContentType?.MediaType == "application/json")
+                {
+                    using var responseBody = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                    if (responseBody.RootElement.TryGetProperty("choices", out var choices))
+                    {
+                        foreach (var choice in choices.EnumerateArray())
+                        {
+                            var message = choice.GetProperty("message");
+                            var calls = message.TryGetProperty("tool_calls", out var toolCalls) ? toolCalls.ToString() : "absent";
+                            output.WriteLine($"HTTP response: finish_reason={choice.GetProperty("finish_reason")}, tool_calls={calls}");
+                        }
+                    }
+                }
+                return response;
+            }
         }
 
         private sealed class CaptureStreamingHandler(string ssePayload) : HttpMessageHandler

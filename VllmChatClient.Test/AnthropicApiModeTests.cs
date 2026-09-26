@@ -8,6 +8,32 @@ namespace VllmChatClient.Test;
 public class AnthropicApiModeTests
 {
     [Fact]
+    public async Task BaseClient_AnthropicMode_NoneToolMode_ShouldExplicitlyDisableTools()
+    {
+        string? requestJson = null;
+        var handler = new CaptureHttpMessageHandler(async request =>
+        {
+            requestJson = await request.Content!.ReadAsStringAsync();
+            return JsonResponse("""
+                {"id":"msg-none","type":"message","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}
+                """);
+        });
+        using var httpClient = new HttpClient(handler);
+        using var client = new TestVllmChatClient("https://example.test/v1", "fake-key", httpClient, VllmApiMode.AnthropicMessages);
+        await client.GetResponseAsync([new ChatMessage(ChatRole.User, "Answer without tools")], new VllmChatOptions
+        {
+            ThinkingEnabled = true,
+            Tools = [AIFunctionFactory.Create(() => "sunny", "GetWeather")],
+            ToolMode = ChatToolMode.None,
+        });
+
+        using var doc = JsonDocument.Parse(requestJson!);
+        Assert.Equal("none", doc.RootElement.GetProperty("tool_choice").GetProperty("type").GetString());
+        Assert.False(doc.RootElement.TryGetProperty("tools", out _));
+        Assert.Equal("enabled", doc.RootElement.GetProperty("thinking").GetProperty("type").GetString());
+    }
+
+    [Fact]
     public async Task BaseClient_AnthropicMode_ShouldPostMessagesRequest()
     {
         string? requestJson = null;

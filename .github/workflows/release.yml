@@ -102,3 +102,18 @@ jobs:
         RELEASE_VERSION: ${{ steps.project_version.outputs.version }}
         PACKAGE_PATH: ${{ steps.package.outputs.path }}
       run: gh release upload "v$RELEASE_VERSION" "$PACKAGE_PATH" --repo "$GITHUB_REPOSITORY" --clobber
+
+    # Tags pushed with GITHUB_TOKEN do not trigger the other workflow's tag-push publisher.
+    - name: Publish to NuGet.org
+      env:
+        NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        PACKAGE_PATH: ${{ steps.package.outputs.path }}
+      run: |
+        if [ -z "$NUGET_API_KEY" ]; then
+          echo "::error::Repository secret NUGET_API_KEY is missing."
+          exit 1
+        fi
+        dotnet nuget push "$PACKAGE_PATH" \
+          --api-key "$NUGET_API_KEY" \
+          --source https://api.nuget.org/v3/index.json \
+          --skip-duplicate

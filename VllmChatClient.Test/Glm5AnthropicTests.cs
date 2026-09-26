@@ -22,7 +22,7 @@ namespace VllmChatClient.Test
         private readonly bool _skipTests;
         //private const string MODEL = "glm-4.7";
         //private const string MODEL = "glm-5";
-        private const string MODEL = "glm-5.1";
+        private const string MODEL = "glm-5.3";
         //private const string MODEL = "glm-4.6";
         static int functionCallTime = 0;
 
@@ -408,6 +408,7 @@ namespace VllmChatClient.Test
                 new ChatMessage(ChatRole.User,"南宁火车站在哪里？"),
             };
             _chatOptions.Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)];
+            _chatOptions.ThinkingEnabled = false;
             var res = await _client.GetResponseAsync(messages, _chatOptions);
             Assert.NotNull(res);
             Assert.Single(res.Messages);

@@ -2057,8 +2057,16 @@ namespace Microsoft.Extensions.AI
                 Model = chatRequest.Model,
                 Input = chatRequest.Messages.SelectMany(ToVllmResponsesInputItems).ToArray(),
                 Stream = stream,
-                Tools = chatRequest.Tools,
-                ToolChoice = chatRequest.ToolChoice,
+                Tools = chatRequest.Tools?.Select(tool => new VllmResponsesFunctionTool
+                {
+                    Type = tool.Type,
+                    Name = tool.Function.Name,
+                    Description = tool.Function.Description,
+                    Parameters = tool.Function.Parameters,
+                }),
+                ToolChoice = chatRequest.ToolChoice is VllmOpenAIToolChoice { Function: { } function }
+                    ? new VllmResponsesFunctionToolChoice { Name = function.Name }
+                    : chatRequest.ToolChoice,
                 ResponseFormat = chatRequest.ResponseFormat,
                 Reasoning = chatRequest.Reasoning,
                 Temperature = chatRequest.Temperature ?? chatRequest.Options?.temperature,

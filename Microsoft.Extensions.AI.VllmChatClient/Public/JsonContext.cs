@@ -36,6 +36,8 @@ namespace Microsoft.Extensions.AI;
 [JsonSerializable(typeof(VllmReasoningDetail))]
 [JsonSerializable(typeof(VllmReasoningOptions))]
 [JsonSerializable(typeof(VllmResponsesRequest))]
+[JsonSerializable(typeof(VllmResponsesFunctionTool))]
+[JsonSerializable(typeof(VllmResponsesFunctionToolChoice))]
 [JsonSerializable(typeof(VllmResponsesMessageInput))]
 [JsonSerializable(typeof(VllmResponsesFunctionCallInput))]
 [JsonSerializable(typeof(VllmResponsesFunctionCallOutputInput))]

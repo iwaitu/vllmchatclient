@@ -150,9 +150,19 @@ namespace Microsoft.Extensions.AI
 
         private protected override IEnumerable<VllmOpenAIChatRequestMessage> ToVllmChatRequestMessages(ChatMessage content)
         {
+            // Preserve native tool calls and their IDs for every downstream API adapter.
+            if (content.Role == ChatRole.Tool)
+            {
+                foreach (var message in base.ToVllmChatRequestMessages(content))
+                {
+                    yield return message;
+                }
+                yield break;
+            }
+
+            var nativeMessage = base.ToVllmChatRequestMessages(content).Single();
             var text = string.Empty;
             var mediaParts = new List<JsonElement>();
-            var reasoningContent = GetAssistantReasoningContent(content);
 
             foreach (var item in content.Contents)
             {
@@ -219,41 +229,8 @@ namespace Microsoft.Extensions.AI
                         }
 
                     case TextContent textContent:
-                        text = textContent.Text;
+                        text += textContent.Text;
                         break;
-
-                    case FunctionCallContent fcc:
-                        {
-                            var toolCallJson = JsonSerializer.Serialize(
-                                new VllmFunctionCallContent
-                                {
-                                    Name = fcc.Name,
-                                    Arguments = JsonSerializer.SerializeToElement(
-                                        fcc.Arguments,
-                                        ToolCallJsonSerializerOptions.GetTypeInfo(typeof(IDictionary<string, object?>)))
-                                },
-                                JsonContext.Default.VllmFunctionCallContent);
-
-                            yield return new VllmOpenAIChatRequestMessage
-                            {
-                                Role = "assistant",
-                                Content = $"<tool_call>\n{toolCallJson}\n</tool_call>",
-                                ReasoningContent = reasoningContent,
-                            };
-                            break;
-                        }
-
-                    case FunctionResultContent frc:
-                        {
-                            var resultContent = frc.Result?.ToString() ?? "";
-                            yield return new VllmOpenAIChatRequestMessage
-                            {
-                                Role = "user",
-                                Content = $"<tool_response>\n{resultContent}\n</tool_response>",
-                                ToolCallId = frc.CallId
-                            };
-                            break;
-                        }
                 }
             }
 
@@ -272,23 +249,15 @@ namespace Microsoft.Extensions.AI
                         JsonContext.Default));
                 }
 
-                yield return new VllmOpenAIChatRequestMessage
-                {
-                    Role = content.Role.Value,
-                    Content = JsonSerializer.Serialize(parts.ToArray(), typeof(JsonElement[]), JsonContext.Default),
-                    ReasoningContent = reasoningContent,
-                };
+                nativeMessage.Content = JsonSerializer.Serialize(parts.ToArray(), typeof(JsonElement[]), JsonContext.Default);
+                nativeMessage.Images = null;
+                yield return nativeMessage;
                 yield break;
             }
 
-            if (!string.IsNullOrWhiteSpace(text))
+            if (!string.IsNullOrWhiteSpace(text) || nativeMessage.ToolCalls is { Length: > 0 })
             {
-                yield return new VllmOpenAIChatRequestMessage
-                {
-                    Role = content.Role.Value,
-                    Content = text,
-                    ReasoningContent = reasoningContent,
-                };
+                yield return nativeMessage;
             }
         }
     }

@@ -8,7 +8,7 @@ internal sealed class VllmResponsesRequest
     public required string Model { get; set; }
     public required object[] Input { get; set; }
     public bool Stream { get; set; }
-    public IEnumerable<VllmTool>? Tools { get; set; }
+    public IEnumerable<VllmResponsesFunctionTool>? Tools { get; set; }
     [JsonPropertyName("tool_choice")]
     public object? ToolChoice { get; set; }
     [JsonPropertyName("response_format")]
@@ -23,6 +23,20 @@ internal sealed class VllmResponsesRequest
     public VllmStreamOptions? StreamOptions { get; set; }
     [JsonExtensionData]
     public Dictionary<string, object?>? ExtraBody { get; set; }
+}
+
+internal sealed class VllmResponsesFunctionTool
+{
+    public string Type { get; set; } = "function";
+    public required string Name { get; set; }
+    public required string Description { get; set; }
+    public required VllmFunctionToolParameters Parameters { get; set; }
+}
+
+internal sealed class VllmResponsesFunctionToolChoice
+{
+    public string Type { get; set; } = "function";
+    public required string Name { get; set; }
 }
 
 internal sealed class VllmResponsesMessageInput

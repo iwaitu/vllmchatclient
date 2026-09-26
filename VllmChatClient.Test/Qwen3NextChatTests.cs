@@ -24,7 +24,7 @@ namespace VllmChatClient.Test
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
             var runExternal = "1";
             _skipTests = runExternal != "1" || string.IsNullOrWhiteSpace(cloud_apiKey);
-            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.6-plus");
+            _client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.8-27b");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3.5-397b-a17b");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-thinking");
             //_client = new VllmQwen3NextChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "qwen3-next-80b-a3b-instruct");
@@ -419,21 +419,16 @@ data: [DONE]
         [Fact]
         public async Task ChatWithImageTest()
         {
+            if (_skipTests)
+            {
+                return;
+            }
+
             var userMessage = new ChatMessage(ChatRole.User, "详细描述图片的内容");
-
-            var imageUrl = "https://ofasys-multimodal-wlcb-3-toshanghai.oss-accelerate.aliyuncs.com/wpf272043/keepme/image/receipt.png";
-            using var http = new HttpClient();
-            var response = await http.GetAsync(imageUrl);
-            response.EnsureSuccessStatusCode();
-
-            var mediaType = response.Content.Headers.ContentType?.MediaType;
-            Assert.False(string.IsNullOrWhiteSpace(mediaType));
-            Assert.StartsWith("image/", mediaType!, StringComparison.OrdinalIgnoreCase);
-
-            var bytes = await response.Content.ReadAsByteArrayAsync();
+            var bytes = await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "test.jpg"));
             Assert.NotEmpty(bytes);
 
-            userMessage.Contents.Add(new DataContent(bytes, mediaType!));
+            userMessage.Contents.Add(new DataContent(bytes, "image/jpeg"));
 
             var result = await _client.GetResponseAsync([userMessage], new ChatOptions());
             Assert.NotNull(result);
@@ -663,7 +658,8 @@ data: [DONE]
             };
             ChatOptions chatOptions = new()
             {
-                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)]
+                Tools = [AIFunctionFactory.Create(GetWeather), AIFunctionFactory.Create(Search)],
+                ToolMode = ChatToolMode.RequireSpecific(nameof(Search)),
             };
             var res = await _client.GetResponseAsync(messages, chatOptions);
             Assert.NotNull(res);
@@ -671,12 +667,14 @@ data: [DONE]
 
             // 至少应包含一个函数调用
             var functionCalls = res.Messages[0].Contents.OfType<FunctionCallContent>().ToList();
+            _output.WriteLine($"First response: finish={res.FinishReason}, text={res.Text}");
             Assert.NotEmpty(functionCalls);
+            Assert.All(functionCalls, call => Assert.Equal(nameof(Search), call.Name));
 
+            // Replay the complete assistant turn, including reasoning and all parallel calls.
+            messages.AddRange(res.Messages);
             foreach (var functionCall in functionCalls)
             {
-                messages.Add(new ChatMessage(ChatRole.Assistant, [functionCall]));
-
                 Assert.NotNull(functionCall);
                 var anwser = string.Empty;
                 if ("GetWeather" == functionCall.Name)
@@ -695,8 +693,10 @@ data: [DONE]
                 messages.Add(functionResultMessage);
             }
 
-
-            var result = await _client.GetResponseAsync(messages, chatOptions);
+            // After returning the tool output, ask for the final answer rather than another call.
+            var answerOptions = chatOptions.Clone();
+            answerOptions.ToolMode = ChatToolMode.None;
+            var result = await _client.GetResponseAsync(messages, answerOptions);
             Assert.NotNull(result);
             Assert.Single(result.Messages);
 

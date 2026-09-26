@@ -21,6 +21,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
@@ -46,6 +47,7 @@ jobs:
         version="${{ steps.project_version.outputs.version }}"
         if git rev-parse "v$version" >/dev/null 2>&1; then
           echo "Tag v$version already exists."
+          git checkout --detach "v$version"
           echo "created=false" >> $GITHUB_OUTPUT
         else
           git tag "v$version"
@@ -59,35 +61,44 @@ jobs:
         dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
         dotnet pack ${{ env.PROJECT_PATH }} --configuration Release --no-build --output ./artifacts
 
+    - name: Resolve NuGet package
+      id: package
+      shell: pwsh
+      run: |
+        $metadataJson = dotnet msbuild "$env:PROJECT_PATH" -getProperty:PackageId,PackageVersion
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $metadata = ($metadataJson -join "`n") | ConvertFrom-Json
+        $packageId = $metadata.Properties.PackageId
+        $packageVersion = $metadata.Properties.PackageVersion
+        if ([string]::IsNullOrWhiteSpace($packageId) -or [string]::IsNullOrWhiteSpace($packageVersion)) {
+          throw "PackageId or PackageVersion is missing."
+        }
+        if ($packageVersion -ne "${{ steps.project_version.outputs.version }}") {
+          throw "Package version does not match the release tag."
+        }
+        $packagePath = "./artifacts/$packageId.$packageVersion.nupkg"
+        if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
+          throw "NuGet package not found: $packagePath"
+        }
+        "id=$packageId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "path=$packagePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
     - name: Create GitHub Release
-      id: create_release
-      if: steps.tag.outputs.created == 'true'
-      uses: actions/create-release@v1
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: "v${{ steps.project_version.outputs.version }}"
-        release_name: "Release ${{ steps.project_version.outputs.version }}"
-        body: |
-          ## What's Changed
-          Release version ${{ steps.project_version.outputs.version }}
-          
-          ### Installation
-          ```bash
-          dotnet add package Ivilson.AI.VllmChatClient --version ${{ steps.project_version.outputs.version }}
-          ```
-          
-          **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ steps.project_version.outputs.version }}
-        draft: false
-        prerelease: false
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_VERSION: ${{ steps.project_version.outputs.version }}
+        PACKAGE_ID: ${{ steps.package.outputs.id }}
+      run: |
+        tag="v$RELEASE_VERSION"
+        if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Release $RELEASE_VERSION" \
+            --notes "Install: dotnet add package $PACKAGE_ID --version $RELEASE_VERSION"
+        fi
 
     - name: Upload NuGet package to release
-      uses: actions/upload-release-asset@v1
-      if: steps.tag.outputs.created == 'true'
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/Ivilson.AI.VllmChatClient.${{ steps.project_version.outputs.version }}.nupkg
-        asset_name: Ivilson.AI.VllmChatClient.${{ steps.project_version.outputs.version }}.nupkg
-        asset_content_type: application/zip
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_VERSION: ${{ steps.project_version.outputs.version }}
+        PACKAGE_PATH: ${{ steps.package.outputs.path }}
+      run: gh release upload "v$RELEASE_VERSION" "$PACKAGE_PATH" --repo "$GITHUB_REPOSITORY" --clobber

@@ -1230,4 +1230,4 @@ Contributions are welcome! Please feel free to submit issues, feature requests, 
 
 ## 📄 License
 
-This project is licensed under the MLP-2.0 License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MPL-2.0 License. See the [LICENSE](LICENSE) file for details.

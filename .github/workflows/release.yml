@@ -6,6 +6,8 @@ permissions:
 on:
   push:
     branches: [ main, master ]
+    paths:
+      - 'Microsoft.Extensions.AI.VllmChatClient/Microsoft.Extensions.AI.VllmChatClient.csproj'
   workflow_dispatch:
 
 env:
@@ -31,6 +33,9 @@ jobs:
     - name: Read version from project file
       id: project_version
       shell: pwsh
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        BEFORE_SHA: ${{ github.event.before }}
       run: |
         [xml]$proj = Get-Content "${{ env.PROJECT_PATH }}"
         $version = $proj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
@@ -41,7 +46,27 @@ jobs:
         "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         Write-Host "Using version: $version"
 
+        # Manual dispatch can retry a failed publish without another version bump.
+        $publish = $true
+        if ($env:EVENT_NAME -eq 'push') {
+          $previousContent = git show "${env:BEFORE_SHA}:$env:PROJECT_PATH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cannot read the version before this push. Use workflow_dispatch to release manually."
+          }
+          [xml]$previousProj = $previousContent -join "`n"
+          $previousVersion = $previousProj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($previousVersion)) {
+            throw "Version not found before this push. Use workflow_dispatch to release manually."
+          }
+          $publish = $version -ne $previousVersion
+          if (-not $publish) {
+            Write-Host "Version unchanged ($version); skipping release and NuGet publish."
+          }
+        }
+        "publish=$($publish.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
     - name: Create Git Tag
+      if: steps.project_version.outputs.publish == 'true'
       id: tag
       run: |
         version="${{ steps.project_version.outputs.version }}"
@@ -56,12 +81,14 @@ jobs:
         fi
 
     - name: Build and Pack
+      if: steps.project_version.outputs.publish == 'true'
       run: |
         dotnet restore ${{ env.PROJECT_PATH }}
         dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
         dotnet pack ${{ env.PROJECT_PATH }} --configuration Release --no-build --output ./artifacts
 
     - name: Resolve NuGet package
+      if: steps.project_version.outputs.publish == 'true'
       id: package
       shell: pwsh
       run: |
@@ -84,6 +111,7 @@ jobs:
         "path=$packagePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
     - name: Create GitHub Release
+      if: steps.project_version.outputs.publish == 'true'
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         RELEASE_VERSION: ${{ steps.project_version.outputs.version }}
@@ -97,6 +125,7 @@ jobs:
         fi
 
     - name: Upload NuGet package to release
+      if: steps.project_version.outputs.publish == 'true'
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         RELEASE_VERSION: ${{ steps.project_version.outputs.version }}
@@ -105,6 +134,7 @@ jobs:
 
     # Tags pushed with GITHUB_TOKEN do not trigger the other workflow's tag-push publisher.
     - name: Publish to NuGet.org
+      if: steps.project_version.outputs.publish == 'true'
       env:
         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         PACKAGE_PATH: ${{ steps.package.outputs.path }}

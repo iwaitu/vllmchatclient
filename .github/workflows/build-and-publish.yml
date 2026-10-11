@@ -13,6 +13,7 @@ env:
   PROJECT_PATH: 'Microsoft.Extensions.AI.VllmChatClient/Microsoft.Extensions.AI.VllmChatClient.csproj'
   TEST_PROJECT_PATH: 'VllmChatClient.Test/VllmChatClient.Test.csproj'
   NATIVE_AOT_SMOKE_PATH: 'samples/NativeAotSmoke/NativeAotSmoke.csproj'
+  OFFLINE_TEST_FILTER: 'FullyQualifiedName~StreamingCompletionTests|FullyQualifiedName~ToolResultArraySerializationTests|FullyQualifiedName~RawJsonStringConverterTests|FullyQualifiedName~Qwen3NextToolHistoryTests|FullyQualifiedName~ResponsesApiModeTests|FullyQualifiedName~AnthropicApiModeTests|FullyQualifiedName~Gemini3ProviderCompatibilityTests|FullyQualifiedName~Gemma4ProviderCompatibilityTests|FullyQualifiedName~Gemma4NativeToolCallingTests|FullyQualifiedName~NemotronProviderCompatibilityTests|FullyQualifiedName~MimoProviderCompatibilityTests'
 
 jobs:
   build:
@@ -43,18 +44,17 @@ jobs:
     - name: Build solution
       run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
 
-    - name: NativeAOT smoke publish
-      run: dotnet publish ${{ env.NATIVE_AOT_SMOKE_PATH }} --configuration Release --no-restore -p:PublishAot=true
-
-    # 完全跳过所有测试运行
-    - name: Skip all tests in CI/CD
+    - name: Offline protocol and serialization regression tests
       run: |
-        echo "?? Skipping all tests in CI/CD environment"
-        echo "?? Tests require API keys and external service connections"
-        echo "?? To run tests locally:"
-        echo "   1. Set environment variables for API keys"
-        echo "   2. Run: dotnet test"
-        echo "? Build completed successfully without test execution"
+        dotnet test "$TEST_PROJECT_PATH" --configuration Release --no-build \
+          --filter "$OFFLINE_TEST_FILTER" --logger "trx;LogFileName=offline.trx" \
+          --results-directory ./artifacts/test-results
+
+    - name: NativeAOT smoke publish and run
+      run: |
+        dotnet publish "$NATIVE_AOT_SMOKE_PATH" --configuration Release --no-restore \
+          -p:PublishAot=true --output ./artifacts/native-aot
+        ./artifacts/native-aot/NativeAotSmoke
 
     - name: Create NuGet package
       run: dotnet pack ${{ env.PROJECT_PATH }} --configuration Release --no-build --output ./artifacts

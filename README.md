@@ -21,6 +21,7 @@ A comprehensive .NET 10 chat client library that supports various LLM models inc
 
 ## 📢 Latest Update
 
+- **2.0.26** fixes JSON array tool-result serialization, premature streaming completion, and duplicate Responses tool calls. Streaming callers should read `FunctionCallContent` from each update; the final completion update contains metadata only.
 - Added `VllmApiMode` to `VllmBaseChatClient`, allowing callers to choose between OpenAI-compatible `/chat/completions`, vLLM / OpenAI `/responses`, and Anthropic Messages API formats.
 - Added full request / response / streaming conversion for vLLM Responses API and Anthropic Messages API, including reasoning output, tool calls, usage parsing, and streaming tool-call argument deltas.
 - Added Anthropic-format integration tests for GLM-5.1 and Qwen 3.6 Plus via DashScope Anthropic endpoints.
@@ -53,6 +54,12 @@ A comprehensive .NET 10 chat client library that supports various LLM models inc
 ---
 
 ## 本次更新
+
+### 2.0.26：工具结果与流式结束标记修复
+
+- Chat Completions 的工具返回值保持为 `content` 文本，包括 JSON 数组；用户消息中的多模态内容块数组保留原有格式。
+- 基于 `VllmBaseChatClient` 的流式调用在所有内容、工具调用与 usage 输出后发送一次完成标记。读取工具调用时应检查每个 update 的 `FunctionCallContent`，不要仅在 `FinishReason == ToolCalls` 时读取；完成标记本身不携带工具调用内容。
+- Responses 流式工具调用按 item id 追踪，避免同一个工具调用在流结束时再次输出。
 
 ### 🆕 vLLM Responses API 与 Anthropic Messages API 支持
 

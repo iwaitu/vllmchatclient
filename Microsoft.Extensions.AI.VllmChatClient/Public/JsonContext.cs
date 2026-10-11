@@ -9,6 +9,7 @@ namespace Microsoft.Extensions.AI;
 [JsonSerializable(typeof(VllmChatRequestMessage))]
 [JsonSerializable(typeof(VllmOpenAIChatRequest))]
 [JsonSerializable(typeof(VllmOpenAIChatRequestMessage))]
+[JsonSerializable(typeof(VllmOpenAIMessageContent))]
 [JsonSerializable(typeof(VllmOpenAITextContentPart))]
 [JsonSerializable(typeof(VllmOpenAIImageContentPart))]
 [JsonSerializable(typeof(VllmOpenAIVideoContentPart))]

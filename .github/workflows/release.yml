@@ -11,6 +11,10 @@ on:
 env:
   DOTNET_VERSION: '10.0.x'
   PROJECT_PATH: 'Microsoft.Extensions.AI.VllmChatClient/Microsoft.Extensions.AI.VllmChatClient.csproj'
+  SOLUTION_PATH: 'Microsoft.Extensions.AI.VllmChatClient.sln'
+  TEST_PROJECT_PATH: 'VllmChatClient.Test/VllmChatClient.Test.csproj'
+  NATIVE_AOT_SMOKE_PATH: 'samples/NativeAotSmoke/NativeAotSmoke.csproj'
+  OFFLINE_TEST_FILTER: 'FullyQualifiedName~StreamingCompletionTests|FullyQualifiedName~ToolResultArraySerializationTests|FullyQualifiedName~RawJsonStringConverterTests|FullyQualifiedName~Qwen3NextToolHistoryTests|FullyQualifiedName~ResponsesApiModeTests|FullyQualifiedName~AnthropicApiModeTests|FullyQualifiedName~Gemini3ProviderCompatibilityTests|FullyQualifiedName~Gemma4ProviderCompatibilityTests|FullyQualifiedName~Gemma4NativeToolCallingTests|FullyQualifiedName~NemotronProviderCompatibilityTests|FullyQualifiedName~MimoProviderCompatibilityTests'
 
 jobs:
   release:
@@ -27,6 +31,17 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Build and validate release
+      run: |
+        dotnet restore "$SOLUTION_PATH"
+        dotnet build "$SOLUTION_PATH" --configuration Release --no-restore
+        dotnet test "$TEST_PROJECT_PATH" --configuration Release --no-build \
+          --filter "$OFFLINE_TEST_FILTER" --logger "trx;LogFileName=offline.trx" \
+          --results-directory ./artifacts/test-results
+        dotnet publish "$NATIVE_AOT_SMOKE_PATH" --configuration Release --no-restore \
+          -p:PublishAot=true --output ./artifacts/native-aot
+        ./artifacts/native-aot/NativeAotSmoke
 
     - name: Read version from project file
       id: project_version

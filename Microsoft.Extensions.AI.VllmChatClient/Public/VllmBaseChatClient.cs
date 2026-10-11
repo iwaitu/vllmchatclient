@@ -369,8 +369,16 @@ namespace Microsoft.Extensions.AI
                 }
 
                 var choice = chunk.Choices[0];
+                if (finalFinishReason is not null && HasStreamingContent(choice.Delta))
+                {
+                    throw new InvalidOperationException("Chat Completions emitted content after its finish reason.");
+                }
                 if (!string.IsNullOrEmpty(choice.FinishReason))
                 {
+                    if (finalFinishReason is not null && finalFinishReason != choice.FinishReason)
+                    {
+                        throw new InvalidOperationException("Chat Completions emitted conflicting finish reasons.");
+                    }
                     finalFinishReason = choice.FinishReason;
                 }
 
@@ -583,6 +591,11 @@ namespace Microsoft.Extensions.AI
             {
                 yield return BuildTextUpdate(responseId, bufferMsg, false);
             }
+            var finishReason = ResolveStreamingFinishReason(ToFinishReason(finalFinishReason), emittedToolCallUpdate);
+            if (finishReason.HasValue)
+            {
+                yield return BuildCompletionUpdate(responseId, options?.ModelId ?? _metadata.DefaultModelId, finishReason.Value);
+            }
         }
 
         private async Task<ChatResponse> GetResponsesApiResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options, CancellationToken cancellationToken)
@@ -636,6 +649,8 @@ namespace Microsoft.Extensions.AI
             string responseId = Guid.NewGuid().ToString("N");
             string modelId = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty;
             bool emittedText = false;
+            bool emittedToolCallUpdate = false;
+            string? finalStatus = null;
             var toolCallBuffers = new Dictionary<string, (string? Name, string? CallId, string Arguments)>(StringComparer.Ordinal);
 
             yield return new ChatResponseUpdate
@@ -694,6 +709,13 @@ namespace Microsoft.Extensions.AI
                     modelId = streamedModelId;
                 }
 
+                if (finalStatus is not null && chunk.Type is
+                    ("response.output_text.delta" or "response.reasoning_summary_text.delta" or
+                     "response.output_item.added" or "response.output_item.done" or
+                     "response.function_call_arguments.delta" or "response.function_call_arguments.done"))
+                {
+                    throw new InvalidOperationException("Responses emitted content after completion.");
+                }
                 switch (chunk.Type)
                 {
                     case "response.output_text.delta":
@@ -714,7 +736,7 @@ namespace Microsoft.Extensions.AI
                     case "response.output_item.added":
                         if (chunk.Item?.Type == "function_call")
                         {
-                            string key = GetResponsesToolCallKey(chunk.ItemId, chunk.OutputIndex);
+                            string key = GetResponsesToolCallKey(chunk.ItemId ?? chunk.Item.Id, chunk.OutputIndex);
                             toolCallBuffers[key] = (chunk.Item.Name, chunk.Item.CallId, chunk.Item.Arguments ?? string.Empty);
                         }
                         break;
@@ -747,6 +769,7 @@ namespace Microsoft.Extensions.AI
                             var name = chunk.Item.Name ?? buffer.Name;
                             if (!string.IsNullOrWhiteSpace(name))
                             {
+                                emittedToolCallUpdate = true;
                                 yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
                                 {
                                     Name = name,
@@ -760,6 +783,11 @@ namespace Microsoft.Extensions.AI
                     case "response.completed":
                         if (chunk.Response is { } completed)
                         {
+                            if (finalStatus is not null && completed.Status is not null && finalStatus != completed.Status)
+                            {
+                                throw new InvalidOperationException("Responses emitted conflicting completion statuses.");
+                            }
+                            finalStatus = completed.Status;
                             if (!emittedText && !string.IsNullOrEmpty(completed.OutputText))
                             {
                                 yield return BuildResponsesTextUpdate(responseId, modelId, completed.OutputText, thinking: false);
@@ -789,12 +817,18 @@ namespace Microsoft.Extensions.AI
             {
                 if (!string.IsNullOrWhiteSpace(buffered.Name))
                 {
+                    emittedToolCallUpdate = true;
                     yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
                     {
                         Name = buffered.Name,
                         Arguments = buffered.Arguments
                     }, buffered.CallId);
                 }
+            }
+            var finishReason = ResolveStreamingFinishReason(ToResponsesFinishReason(finalStatus), emittedToolCallUpdate);
+            if (finishReason.HasValue)
+            {
+                yield return BuildCompletionUpdate(responseId, modelId, finishReason.Value);
             }
         }
 
@@ -848,6 +882,8 @@ namespace Microsoft.Extensions.AI
             string modelId = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty;
             var toolCallBuffers = new Dictionary<int, (string? Id, string? Name, string Arguments)>();
             var thinkingBuffer = new System.Text.StringBuilder();
+            bool emittedToolCallUpdate = false;
+            string? finalStopReason = null;
 
             yield return new ChatResponseUpdate
             {
@@ -901,6 +937,11 @@ namespace Microsoft.Extensions.AI
                     modelId = messageModel;
                 }
 
+                if (finalStopReason is not null && chunk.Type is
+                    ("content_block_start" or "content_block_delta" or "content_block_stop"))
+                {
+                    throw new InvalidOperationException("Anthropic Messages emitted content after its stop reason.");
+                }
                 switch (chunk.Type)
                 {
                     case "content_block_start":
@@ -946,6 +987,7 @@ namespace Microsoft.Extensions.AI
                             int index = chunk.Index ?? 0;
                             if (toolCallBuffers.TryGetValue(index, out var buffer) && !string.IsNullOrWhiteSpace(buffer.Name))
                             {
+                                emittedToolCallUpdate = true;
                                 yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
                                 {
                                     Name = buffer.Name,
@@ -957,6 +999,11 @@ namespace Microsoft.Extensions.AI
                         }
 
                     case "message_delta":
+                        if (finalStopReason is not null && chunk.Delta?.StopReason is { } stopReason && finalStopReason != stopReason)
+                        {
+                            throw new InvalidOperationException("Anthropic Messages emitted conflicting stop reasons.");
+                        }
+                        finalStopReason = chunk.Delta?.StopReason ?? finalStopReason;
                         if (chunk.Usage is { } usage)
                         {
                             yield return new UsageChatResponseUpdate
@@ -969,6 +1016,11 @@ namespace Microsoft.Extensions.AI
                         }
                         break;
                 }
+            }
+            var finishReason = ResolveStreamingFinishReason(ToAnthropicFinishReason(finalStopReason), emittedToolCallUpdate);
+            if (finishReason.HasValue)
+            {
+                yield return BuildCompletionUpdate(responseId, modelId, finishReason.Value);
             }
         }
 
@@ -1106,13 +1158,36 @@ namespace Microsoft.Extensions.AI
             return new ChatResponseUpdate
             {
                 CreatedAt = DateTimeOffset.Now,
-                FinishReason = ChatFinishReason.ToolCalls,
+                FinishReason = null,
                 ModelId = _metadata.DefaultModelId,
                 ResponseId = responseId,
                 Role = ChatRole.Assistant,
                 Contents = new List<AIContent> { functionCallContent }
             };
         }
+
+        private static ChatFinishReason? ResolveStreamingFinishReason(ChatFinishReason? providerReason, bool emittedToolCalls)
+            => emittedToolCalls && (providerReason is null || providerReason == ChatFinishReason.Stop)
+                ? ChatFinishReason.ToolCalls
+                : providerReason;
+
+        private static bool HasStreamingContent(Delta? delta)
+            => !string.IsNullOrEmpty(delta?.Content) ||
+               !string.IsNullOrEmpty(delta?.ReasoningContent) ||
+               !string.IsNullOrEmpty(delta?.Reasoning) ||
+               delta?.ReasoningDetails is { Length: > 0 } ||
+               delta?.ToolCalls is { Length: > 0 };
+
+        private static ChatResponseUpdate BuildCompletionUpdate(string responseId, string? modelId, ChatFinishReason reason)
+            => new()
+            {
+                CreatedAt = DateTimeOffset.Now,
+                ModelId = modelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                FinishReason = reason,
+                Contents = []
+            };
 
         private ChatResponseUpdate BuildResponsesTextUpdate(string responseId, string modelId, string text, bool thinking)
         {

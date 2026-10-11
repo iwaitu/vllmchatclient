@@ -47,8 +47,14 @@ public class RawJsonStringConverter : JsonConverter<string>
 internal class VllmOpenAIChatRequestMessage
 {
     public string Role { get; set; } = default!;
-    [JsonConverter(typeof(RawJsonStringConverter))]
+    [JsonIgnore]
     public string? Content { get; set; } = default!;
+    [JsonPropertyName("content")]
+    public VllmOpenAIMessageContent? SerializedContent
+    {
+        get => Content is null ? null : new(Content, Role == "tool");
+        set => Content = value?.Text;
+    }
     [JsonPropertyName("reasoning_content")]
     public object? ReasoningContent { get; set; }
     public string? Name { get; set; }
@@ -61,6 +67,27 @@ internal class VllmOpenAIChatRequestMessage
     public IList<string>? Images { get; set; }
     [JsonIgnore]
     public JsonElement[]? AnthropicContentBlocks { get; set; }
+}
+
+[JsonConverter(typeof(VllmOpenAIMessageContentConverter))]
+internal readonly record struct VllmOpenAIMessageContent(string Text, bool IsToolResult);
+
+internal sealed class VllmOpenAIMessageContentConverter : JsonConverter<VllmOpenAIMessageContent>
+{
+    private static readonly RawJsonStringConverter ContentPartsConverter = new();
+
+    public override VllmOpenAIMessageContent Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => new(reader.GetString() ?? string.Empty, IsToolResult: false);
+
+    public override void Write(Utf8JsonWriter writer, VllmOpenAIMessageContent value, JsonSerializerOptions options)
+    {
+        // Function results are data. Even a JSON array resembling content parts
+        // must remain text; only ordinary messages use the multimodal converter.
+        if (value.IsToolResult)
+            writer.WriteStringValue(value.Text);
+        else
+            ContentPartsConverter.Write(writer, value.Text, options);
+    }
 }
 
 

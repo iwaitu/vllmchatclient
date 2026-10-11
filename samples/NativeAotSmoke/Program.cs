@@ -2,15 +2,36 @@ using Microsoft.Extensions.AI;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 
 var handler = new QueueingHandler();
 using var httpClient = new HttpClient(handler);
 
 await SmokeChatCompletionsAsync(httpClient, handler);
+await SmokeArrayToolResultAsync(handler);
 await SmokeResponsesAsync(httpClient, handler);
 await SmokeAnthropicMessagesAsync(httpClient, handler);
 
 Console.WriteLine("NativeAOT smoke completed.");
+
+static async Task SmokeArrayToolResultAsync(QueueingHandler handler)
+{
+    using var toolHttpClient = new HttpClient(handler, disposeHandler: false);
+    using var client = new VllmQwen3NextChatClient("https://example.test/v1", "test", "smoke", toolHttpClient);
+    const string result = "[{\"value\":2.5,\"evidence\":\"document\"}]";
+    handler.Enqueue(Json("""
+        {"id":"chat-tool-array","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}
+        """));
+    _ = await client.GetResponseAsync([
+        new ChatMessage(ChatRole.User, "Read the document."),
+        new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call-array", "read_document", new Dictionary<string, object?>())]),
+        new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-array", result)])
+    ]);
+    using var request = JsonDocument.Parse(handler.LastRequestBody!);
+    var content = request.RootElement.GetProperty("messages")[2].GetProperty("content");
+    if (content.ValueKind != JsonValueKind.String || content.GetString() != result)
+        throw new InvalidOperationException("NativeAOT tool array result must remain JSON text.");
+}
 
 static async Task SmokeChatCompletionsAsync(HttpClient httpClient, QueueingHandler handler)
 {
@@ -99,11 +120,13 @@ static string NormalizeSse(string content)
 internal sealed class QueueingHandler : HttpMessageHandler
 {
     private readonly ConcurrentQueue<HttpResponseMessage> _responses = new();
+    public string? LastRequestBody { get; private set; }
 
     public void Enqueue(HttpResponseMessage response) => _responses.Enqueue(response);
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        LastRequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
         if (!_responses.TryDequeue(out var response))
         {
             response = new HttpResponseMessage(HttpStatusCode.InternalServerError)
@@ -112,6 +135,6 @@ internal sealed class QueueingHandler : HttpMessageHandler
             };
         }
 
-        return Task.FromResult(response);
+        return response;
     }
 }

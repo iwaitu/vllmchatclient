@@ -296,7 +296,7 @@ namespace VllmChatClient.Test
             string reason = string.Empty;
             await foreach (var update in _client.GetStreamingResponseAsync(messages, chatOptions))
             {
-                if (update.FinishReason == ChatFinishReason.ToolCalls)
+                if (update.Contents.OfType<FunctionCallContent>().Any())
                 {
                     foreach (var fc in update.Contents.OfType<FunctionCallContent>())
                     {

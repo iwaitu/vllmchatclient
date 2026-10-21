@@ -499,7 +499,8 @@ namespace Microsoft.Extensions.AI
                 yield return new VllmOpenAIChatRequestMessage
                 {
                     Role = content.Role.Value,
-                    Content = JsonSerializer.Serialize(parts.ToArray(), typeof(JsonElement[]), JsonContext.Default)
+                    Content = string.Concat(content.Contents.OfType<TextContent>().Select(text => text.Text)),
+                    ContentParts = parts.ToArray()
                 };
             }
         }

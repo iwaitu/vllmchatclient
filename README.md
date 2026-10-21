@@ -21,6 +21,7 @@ A comprehensive .NET 10 chat client library that supports various LLM models inc
 
 ## 📢 Latest Update
 
+- **2.0.27** fixes a request serialization defect: message text that is a valid JSON array (for example a JSON-array model answer replayed in history) was sent as an OpenAI `content` parts array, so OpenAI-compatible providers rejected it (`messages[i].content[0].type`). Text is now always sent as a JSON string; content arrays come only from typed media contents (`DataContent` / `UriContent` images and videos). The public `RawJsonStringConverter` is unchanged.
 - **2.0.26** fixes JSON array tool-result serialization, premature streaming completion, and duplicate Responses tool calls. Streaming callers should read `FunctionCallContent` from each update; the final completion update contains metadata only.
 - Added `VllmApiMode` to `VllmBaseChatClient`, allowing callers to choose between OpenAI-compatible `/chat/completions`, vLLM / OpenAI `/responses`, and Anthropic Messages API formats.
 - Added full request / response / streaming conversion for vLLM Responses API and Anthropic Messages API, including reasoning output, tool calls, usage parsing, and streaming tool-call argument deltas.
@@ -54,6 +55,12 @@ A comprehensive .NET 10 chat client library that supports various LLM models inc
 ---
 
 ## 本次更新
+
+### 2.0.27：JSON 数组文本不再被当作多模态内容块
+
+- 修复：user / assistant / system 文本只要是合法 JSON 数组（例如模型返回的数组答案在历史中回传），Chat Completions 请求就会把它原样写成 `content` 内容块数组，导致 OpenAI 兼容服务返回 `Missing required parameter: messages.[i].content[0].type` 或 `Invalid value: object`。
+- 现在文本一律按 JSON 字符串发送；`content` 数组只来自客户端根据 `DataContent` / `UriContent` 图片、视频构建的显式内容块（Qwen3-Next / Qwen3.x-VL、Gemma3）。工具返回值、原生工具调用、流式与非流式路径保持不变。
+- 有意移除的行为：2.0.26 及以前，调用方可以在 `TextContent` 里手写内容块 JSON 数组，由 SDK 按形状原样输出为多模态内容。该启发式无法区分文本与内容块，已从消息序列化中移除；需要多模态请使用 `DataContent` / `UriContent`。公共 `RawJsonStringConverter` 的签名和行为不变，客户端内部不再使用它。
 
 ### 2.0.26：工具结果与流式结束标记修复
 

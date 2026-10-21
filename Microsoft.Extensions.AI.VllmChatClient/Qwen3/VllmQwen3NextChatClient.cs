@@ -249,7 +249,8 @@ namespace Microsoft.Extensions.AI
                         JsonContext.Default));
                 }
 
-                nativeMessage.Content = JsonSerializer.Serialize(parts.ToArray(), typeof(JsonElement[]), JsonContext.Default);
+                nativeMessage.Content = text;
+                nativeMessage.ContentParts = parts.ToArray();
                 nativeMessage.Images = null;
                 yield return nativeMessage;
                 yield break;

@@ -74,10 +74,16 @@ public class ToolResultArraySerializationTests
     public void MultimodalParts_KeepTheirArrayShapeWithSourceGeneratedSerialization()
     {
         const string parts = """[{"type":"text","text":"Describe the media."},{"type":"image_url","image_url":{"url":"data:image/png;base64,AQID"}},{"type":"video_url","video_url":{"url":"data:video/mp4;base64,AQID"}}]""";
-        var message = new VllmOpenAIChatRequestMessage { Role = "user", Content = parts };
+        using var expected = JsonDocument.Parse(parts);
+        // Content parts are explicit since 2.0.27; array-shaped Content text stays a string.
+        var message = new VllmOpenAIChatRequestMessage
+        {
+            Role = "user",
+            Content = "Describe the media.",
+            ContentParts = expected.RootElement.EnumerateArray().Select(part => part.Clone()).ToArray(),
+        };
         var json = JsonSerializer.Serialize(message, JsonContext.Default.VllmOpenAIChatRequestMessage);
         using var request = JsonDocument.Parse(json);
-        using var expected = JsonDocument.Parse(parts);
         Assert.Equal(JsonValueKind.Array, request.RootElement.GetProperty("content").ValueKind);
         Assert.True(JsonElement.DeepEquals(expected.RootElement, request.RootElement.GetProperty("content")));
     }

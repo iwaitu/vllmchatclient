@@ -47,14 +47,38 @@ public class RawJsonStringConverter : JsonConverter<string>
 internal class VllmOpenAIChatRequestMessage
 {
     public string Role { get; set; } = default!;
+    /// <summary>
+    /// Plain message text. Always serialized as a JSON string, even when the text itself
+    /// is a JSON array (for example a model answer echoed back in history).
+    /// </summary>
     [JsonIgnore]
     public string? Content { get; set; } = default!;
+    /// <summary>
+    /// Explicit OpenAI content parts built by the client from typed media/text contents.
+    /// When set, it is the wire <c>content</c> array and <see cref="Content"/> only holds the text view.
+    /// </summary>
+    [JsonIgnore]
+    public JsonElement[]? ContentParts { get; set; }
     [JsonPropertyName("content")]
     public VllmOpenAIMessageContent? SerializedContent
     {
-        get => Content is null ? null : new(Content, Role == "tool");
-        set => Content = value?.Text;
+        get => ContentParts is { } parts
+            ? new(Content ?? string.Empty, parts)
+            : Content is null ? null : new(Content);
+        set
+        {
+            Content = value?.Text;
+            ContentParts = value?.Parts;
+        }
     }
+    /// <summary>
+    /// Text for adapters (Responses, Anthropic) that have no typed mapping for chat-completions
+    /// content parts; they keep receiving the serialized parts exactly as before 2.0.27.
+    /// </summary>
+    [JsonIgnore]
+    internal string? AdapterText => ContentParts is { } parts
+        ? JsonSerializer.Serialize(parts, typeof(JsonElement[]), JsonContext.Default)
+        : Content;
     [JsonPropertyName("reasoning_content")]
     public object? ReasoningContent { get; set; }
     public string? Name { get; set; }
@@ -70,23 +94,40 @@ internal class VllmOpenAIChatRequestMessage
 }
 
 [JsonConverter(typeof(VllmOpenAIMessageContentConverter))]
-internal readonly record struct VllmOpenAIMessageContent(string Text, bool IsToolResult);
+internal readonly record struct VllmOpenAIMessageContent(string Text, JsonElement[]? Parts = null);
 
+/// <summary>
+/// Writes request message content from its explicit representation: typed content parts become
+/// a JSON array, everything else (user/assistant/system text and tool results) stays a JSON string.
+/// Unlike <see cref="RawJsonStringConverter"/>, it never infers content parts from the text shape,
+/// so text that happens to be a JSON array is sent verbatim as text.
+/// </summary>
 internal sealed class VllmOpenAIMessageContentConverter : JsonConverter<VllmOpenAIMessageContent>
 {
-    private static readonly RawJsonStringConverter ContentPartsConverter = new();
-
     public override VllmOpenAIMessageContent Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        => new(reader.GetString() ?? string.Empty, IsToolResult: false);
+    {
+        if (reader.TokenType == JsonTokenType.StartArray)
+        {
+            using var doc = JsonDocument.ParseValue(ref reader);
+            return new(string.Empty, doc.RootElement.EnumerateArray().Select(part => part.Clone()).ToArray());
+        }
+
+        return new(reader.GetString() ?? string.Empty);
+    }
 
     public override void Write(Utf8JsonWriter writer, VllmOpenAIMessageContent value, JsonSerializerOptions options)
     {
-        // Function results are data. Even a JSON array resembling content parts
-        // must remain text; only ordinary messages use the multimodal converter.
-        if (value.IsToolResult)
-            writer.WriteStringValue(value.Text);
+        if (value.Parts is { } parts)
+        {
+            writer.WriteStartArray();
+            foreach (var part in parts)
+                part.WriteTo(writer);
+            writer.WriteEndArray();
+        }
         else
-            ContentPartsConverter.Write(writer, value.Text, options);
+        {
+            writer.WriteStringValue(value.Text);
+        }
     }
 }
 

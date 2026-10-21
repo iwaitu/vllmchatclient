@@ -2181,13 +2181,13 @@ namespace Microsoft.Extensions.AI
                 var message = chatRequest.Messages[i];
                 if (message.Role == "system")
                 {
-                    if (!string.IsNullOrEmpty(message.Content))
+                    if (!string.IsNullOrEmpty(message.AdapterText))
                     {
                         if (system.Length > 0)
                         {
                             system.AppendLine();
                         }
-                        system.Append(message.Content);
+                        system.Append(message.AdapterText);
                     }
                     continue;
                 }
@@ -2320,9 +2320,9 @@ namespace Microsoft.Extensions.AI
             }
 
             var blocks = new List<JsonElement>();
-            if (!string.IsNullOrEmpty(message.Content))
+            if (message.AdapterText is { Length: > 0 } text)
             {
-                blocks.Add(CreateAnthropicTextBlock(message.Content));
+                blocks.Add(CreateAnthropicTextBlock(text));
             }
 
             foreach (var image in message.Images ?? [])
@@ -2505,7 +2505,7 @@ namespace Microsoft.Extensions.AI
                 yield break;
             }
 
-            if (!string.IsNullOrEmpty(message.Content) || message.Images is { Count: > 0 } || message.ToolCalls is not { Length: > 0 })
+            if (!string.IsNullOrEmpty(message.AdapterText) || message.Images is { Count: > 0 } || message.ToolCalls is not { Length: > 0 })
             {
                 yield return new VllmResponsesMessageInput
                 {
@@ -2532,13 +2532,13 @@ namespace Microsoft.Extensions.AI
         {
             if (message.Images is not { Count: > 0 })
             {
-                return message.Content;
+                return message.AdapterText;
             }
 
             var parts = new List<object>();
-            if (!string.IsNullOrEmpty(message.Content))
+            if (message.AdapterText is { Length: > 0 } text)
             {
-                parts.Add(new VllmResponsesTextContentPart { Text = message.Content });
+                parts.Add(new VllmResponsesTextContentPart { Text = text });
             }
 
             foreach (var image in message.Images)

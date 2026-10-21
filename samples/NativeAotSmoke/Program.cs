@@ -9,6 +9,7 @@ using var httpClient = new HttpClient(handler);
 
 await SmokeChatCompletionsAsync(httpClient, handler);
 await SmokeArrayToolResultAsync(handler);
+await SmokeArrayTextAndMediaPartsAsync(handler);
 await SmokeResponsesAsync(httpClient, handler);
 await SmokeAnthropicMessagesAsync(httpClient, handler);
 
@@ -31,6 +32,29 @@ static async Task SmokeArrayToolResultAsync(QueueingHandler handler)
     var content = request.RootElement.GetProperty("messages")[2].GetProperty("content");
     if (content.ValueKind != JsonValueKind.String || content.GetString() != result)
         throw new InvalidOperationException("NativeAOT tool array result must remain JSON text.");
+}
+
+static async Task SmokeArrayTextAndMediaPartsAsync(QueueingHandler handler)
+{
+    using var mediaHttpClient = new HttpClient(handler, disposeHandler: false);
+    using var client = new VllmQwen3NextChatClient("https://example.test/v1", "test", "qwen3.8-27b", mediaHttpClient);
+    const string answer = "[{\"key\":\"attr:a\",\"verdict\":\"confirmed\"}]";
+    handler.Enqueue(Json("""
+        {"id":"chat-array-text","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}
+        """));
+    _ = await client.GetResponseAsync([
+        new ChatMessage(ChatRole.User, [new UriContent("https://example.test/a.jpg", "image/jpeg"), new TextContent("Describe.")]),
+        new ChatMessage(ChatRole.Assistant, answer),
+        new ChatMessage(ChatRole.User, "Return a JSON object.")
+    ]);
+    using var request = JsonDocument.Parse(handler.LastRequestBody!);
+    var messages = request.RootElement.GetProperty("messages");
+    var media = messages[0].GetProperty("content");
+    if (media.ValueKind != JsonValueKind.Array || media[0].GetProperty("type").GetString() != "image_url")
+        throw new InvalidOperationException("NativeAOT media input must remain content parts.");
+    var assistant = messages[1].GetProperty("content");
+    if (assistant.ValueKind != JsonValueKind.String || assistant.GetString() != answer)
+        throw new InvalidOperationException("NativeAOT array-shaped assistant text must remain JSON text.");
 }
 
 static async Task SmokeChatCompletionsAsync(HttpClient httpClient, QueueingHandler handler)

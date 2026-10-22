@@ -69,7 +69,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Cannot read the version before this push. Use workflow_dispatch to release manually."
           }
-          [xml]$previousProj = $previousContent -join "`n"
+          # git show keeps the csproj UTF-8 BOM, which the [xml] cast rejects.
+          [xml]$previousProj = ($previousContent -join "`n").TrimStart([char]0xFEFF)
           $previousVersion = $previousProj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
           if ([string]::IsNullOrWhiteSpace($previousVersion)) {
             throw "Version not found before this push. Use workflow_dispatch to release manually."

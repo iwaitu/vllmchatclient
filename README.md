@@ -4,6 +4,26 @@
 
 # VllmChatClient
 
+### 2.0.31: Sonnet 5.5 native Messages
+
+For the bounded `claude-sonnet-5-5` / `claude-sonnet-5.5` family in
+`VllmApiMode.AnthropicMessages`, `ThinkingEnabled=false` sends
+`thinking: {"type":"between_tools"}` and `true` sends `adaptive`. Ordinary
+`ChatOptions` without a thinking setting leaves the provider default intact.
+Between-tools mode can still return progress thinking. Forced tool selection
+(`RequireAny` or `RequireSpecific`) throws before HTTP; use `Auto` and validate
+that the required action actually happened.
+
+Signed thinking and redacted blocks travel through standard
+`TextReasoningContent.ProtectedData` as separate versioned opaque items. Hosts
+must preserve these strings and their order intact when rebuilding history.
+Displayed reasoning deltas do not create unsigned replay copies. Unknown block
+types, malformed carriers and unsupported carrier versions fail explicitly.
+This preserves blocks, but does not make edits to a provider-bound conversation
+prefix safe. Sonnet streaming usage merges cumulative start/delta fields and
+keeps cache components for accounting. Other models and API modes retain their
+existing mappings, including the V4 behavior described below.
+
 ### 2.0.30: DeepSeek V4 history replay
 
 The V4 client also cleans JSON-string Chat reasoning and native Anthropic

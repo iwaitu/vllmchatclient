@@ -4,6 +4,10 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 
+if (JsonSerializer.IsReflectionEnabledByDefault)
+    throw new InvalidOperationException("NativeAOT smoke requires reflection-based JSON serialization to be disabled.");
+Console.WriteLine("JSON reflection disabled.");
+
 var handler = new QueueingHandler();
 using var httpClient = new HttpClient(handler);
 
@@ -14,8 +18,68 @@ await SmokeResponsesAsync(httpClient, handler);
 await SmokeAnthropicMessagesAsync(httpClient, handler);
 await SmokeAnthropicJsonSchemaAsync(httpClient, handler);
 await SmokeDeepseekV4HistoryAsync();
+await SmokeSonnet55OpaqueAsync();
 
 Console.WriteLine("NativeAOT smoke completed.");
+
+static async Task SmokeSonnet55OpaqueAsync()
+{
+    var handler = new QueueingHandler();
+    using var http = new HttpClient(handler);
+    using var client = new VllmClaudeChatClient("https://example.test", "offline-only", "claude-sonnet-5-5", http, VllmApiMode.AnthropicMessages);
+    var options = new VllmChatOptions { ThinkingEnabled = false, MaxOutputTokens = 256 };
+    const string blocks = """
+        [{"type":"thinking","thinking":"thought思考","signature":"signed+/=","future":{"v":2}},
+         {"type":"redacted_thinking","data":"redacted+/="},
+         {"type":"tool_use","id":"c_sonnet","name":"echo","input":{"literal":"<ds_safety>keep</ds_safety>"}}]
+        """;
+    handler.Enqueue(Json("{\"id\":\"s\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-5-5\",\"content\":" + blocks + ",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":10,\"output_tokens\":7}}"));
+    var response = await client.GetResponseAsync([new ChatMessage(ChatRole.User, "start")], options);
+    AssertOpaque(response);
+    await ReplayAsync(response);
+
+    handler.Enqueue(Sse("""
+        data: {"type":"message_start","message":{"id":"s2","model":"claude-sonnet-5-5","usage":{"input_tokens":10,"output_tokens":0}}}
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","future":{"v":2}}}
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"thought思考"}}
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed+/="}}
+        data: {"type":"content_block_stop","index":0}
+        data: {"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"redacted+/="}}
+        data: {"type":"content_block_stop","index":1}
+        data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"c_sonnet","name":"echo","input":{"literal":"<ds_safety>keep</ds_safety>"}}}
+        data: {"type":"content_block_stop","index":2}
+        data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":7}}
+        data: {"type":"message_stop"}
+        """));
+    List<ChatResponseUpdate> updates = [];
+    await foreach (var update in client.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "start")], options)) updates.Add(update);
+    var aggregated = updates.ToChatResponse();
+    AssertOpaque(aggregated);
+    if (aggregated.Usage?.InputTokenCount != 10 || aggregated.Usage.OutputTokenCount != 7)
+        throw new InvalidOperationException("Sonnet streaming start/delta cumulative usage was lost.");
+    await ReplayAsync(aggregated);
+
+    static void AssertOpaque(ChatResponse response)
+    {
+        if (response.Messages.SelectMany(m => m.Contents).OfType<TextReasoningContent>().Count(c => c.ProtectedData is not null) != 2)
+            throw new InvalidOperationException("Sonnet opaque reasoning blocks were merged or lost.");
+    }
+    async Task ReplayAsync(ChatResponse response)
+    {
+        handler.Enqueue(Json("""{"id":"end","type":"message","role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":1}}"""));
+        List<ChatMessage> history = [new(ChatRole.User, "start")];
+        history.AddRange(response.Messages);
+        history.Add(new(ChatRole.Tool, [new FunctionResultContent("c_sonnet", "ok")]));
+        _ = await client.GetResponseAsync(history, options);
+        using var wire = JsonDocument.Parse(handler.LastRequestBody!);
+        if (wire.RootElement.GetProperty("thinking").GetProperty("type").GetString() != "between_tools")
+            throw new InvalidOperationException("Sonnet thinking=false wire mode is wrong.");
+        var assistant = wire.RootElement.GetProperty("messages").EnumerateArray().Single(m => m.GetProperty("role").GetString() == "assistant");
+        using var expected = JsonDocument.Parse(blocks);
+        if (!JsonElement.DeepEquals(expected.RootElement, assistant.GetProperty("content")))
+            throw new InvalidOperationException("Sonnet signed blocks, unknown fields, order or tool input changed on replay.");
+    }
+}
 
 static async Task SmokeDeepseekV4HistoryAsync()
 {

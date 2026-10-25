@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <WarningsAsErrors>IL2026;IL3050;IL2070;IL2072;IL2075;IL2077;IL2087;IL2090</WarningsAsErrors>
   </PropertyGroup>
 

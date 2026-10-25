@@ -845,6 +845,16 @@ namespace Microsoft.Extensions.AI
                 await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
             }
 
+            if (VllmClaudeSonnet55.IsFamily(options?.ModelId ?? _metadata.DefaultModelId))
+            {
+#if NET
+                var sonnetBody = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+#else
+                var sonnetBody = await httpResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+#endif
+                return FromSonnet55AnthropicMessagesResponse(sonnetBody, options);
+            }
+
             var response = (await httpResponse.Content.ReadFromJsonAsync(
                 JsonContext.Default.VllmAnthropicMessagesResponse,
                 cancellationToken).ConfigureAwait(false))!;
@@ -862,11 +872,419 @@ namespace Microsoft.Extensions.AI
             };
         }
 
+        /// <summary>
+        /// Sonnet 5.5 non-streaming response. The wire JSON is read with <see cref="JsonDocument"/> so every thinking / redacted_thinking block keeps its
+        /// exact original JSON (type, thinking, signature, data, unknown properties) in a versioned opaque <see cref="TextReasoningContent"/>:
+        /// the display text (if any) is a separate display-only item, the opaque item has an empty Text, and no legacy reasoning_content / anthropic_thinking /
+        /// anthropic_content_blocks copies are produced. An unknown block type is rejected, not dropped.
+        /// </summary>
+        private ChatResponse FromSonnet55AnthropicMessagesResponse(string body, ChatOptions? options)
+        {
+            var response = JsonSerializer.Deserialize(body, JsonContext.Default.VllmAnthropicMessagesResponse)
+                ?? throw new InvalidOperationException("Anthropic Messages returned an empty response.");
+
+            var contents = new List<AIContent>();
+            var reasoning = new System.Text.StringBuilder();
+            var usageAccumulator = new VllmClaudeSonnet55.UsageAccumulator();
+
+            using (var document = JsonDocument.Parse(body))
+            {
+                if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                    document.RootElement.TryGetProperty("usage", out var responseUsage))
+                {
+                    usageAccumulator.Merge(responseUsage);
+                }
+
+                if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                    document.RootElement.TryGetProperty("content", out var blocks) &&
+                    blocks.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var block in blocks.EnumerateArray())
+                    {
+                        var type = VllmClaudeSonnet55.GetString(block, "type");
+                        switch (type)
+                        {
+                            case "text":
+                                if (VllmClaudeSonnet55.GetString(block, "text") is { Length: > 0 } blockText)
+                                {
+                                    contents.Add(new TextContent(blockText));
+                                }
+
+                                break;
+                            case "thinking":
+                                if (VllmClaudeSonnet55.GetString(block, "thinking") is { Length: > 0 } thinkingText)
+                                {
+                                    contents.Add(new TextReasoningContent(thinkingText));
+                                    reasoning.Append(thinkingText);
+                                }
+
+                                contents.Add(VllmClaudeSonnet55.CreateOpaqueItem(block));
+                                break;
+                            case "redacted_thinking":
+                                contents.Add(VllmClaudeSonnet55.CreateOpaqueItem(block));
+                                break;
+                            case "tool_use":
+                                contents.Add(ToFunctionCallContent(new VllmFunctionToolCall
+                                {
+                                    Name = VllmClaudeSonnet55.GetString(block, "name") ?? string.Empty,
+                                    Arguments = block.TryGetProperty("input", out var input) && input.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                                        ? input.GetRawText()
+                                        : "{}"
+                                }, VllmClaudeSonnet55.GetString(block, "id")));
+                                break;
+                            default:
+                                throw new NotSupportedException(
+                                    $"Anthropic Messages returned a content block of type '{type ?? "(missing)"}', which this SDK does not support for Claude Sonnet 5.5; the response was rejected instead of dropping the block.");
+                        }
+                    }
+                }
+            }
+
+            var message = new ChatMessage(ChatRole.Assistant, contents) { RawRepresentation = response };
+            bool hasToolCall = contents.Any(c => c is FunctionCallContent);
+
+            return new ReasoningChatResponse(message, reasoning.ToString())
+            {
+                CreatedAt = DateTimeOffset.UtcNow,
+                FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToAnthropicFinishReason(response.StopReason),
+                ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
+                ResponseId = response.Id,
+                Usage = usageAccumulator.HasAny ? usageAccumulator.ToUsageDetails() : null,
+            };
+        }
+
+        private async IAsyncEnumerable<ChatResponseUpdate> GetSonnet55StreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            using HttpRequestMessage request = new(HttpMethod.Post, GetAnthropicMessagesEndpoint())
+            {
+                Content = JsonContent.Create(ToVllmAnthropicMessagesRequest(messages, options, stream: true), JsonContext.Default.VllmAnthropicMessagesRequest)
+            };
+
+            using var httpResponse = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                await VllmUtilities.ThrowUnsuccessfulVllmResponseAsync(httpResponse, cancellationToken).ConfigureAwait(false);
+            }
+
+            string responseId = Guid.NewGuid().ToString("N");
+            string modelId = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty;
+            var blocks = new Dictionary<int, VllmClaudeSonnet55.StreamBlock>();
+            var usage = new VllmClaudeSonnet55.UsageAccumulator();
+            bool emittedToolCallUpdate = false;
+            string? finalStopReason = null;
+
+            yield return new ChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                FinishReason = null,
+                ModelId = modelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                Contents = new List<AIContent>(),
+            };
+
+            using var httpResponseStream = await httpResponse.Content
+#if NET
+                .ReadAsStreamAsync(cancellationToken)
+#else
+                .ReadAsStreamAsync()
+#endif
+                .ConfigureAwait(false);
+
+            using var streamReader = new StreamReader(httpResponseStream);
+#if NET
+            while ((await streamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is { } line)
+#else
+            while ((await streamReader.ReadLineAsync().ConfigureAwait(false)) is { } line)
+#endif
+            {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith(':') || line.StartsWith("event:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string jsonPart = Regex.Replace(line, @"^data:\s*", "");
+                if (string.IsNullOrEmpty(jsonPart) || jsonPart == "[DONE]")
+                {
+                    continue;
+                }
+
+                JsonDocument document;
+                try
+                {
+                    document = JsonDocument.Parse(jsonPart);
+                }
+                catch (JsonException ex)
+                {
+                    throw new InvalidOperationException("Anthropic Messages emitted a malformed stream event.", ex);
+                }
+
+                using (document)
+                {
+                    var root = document.RootElement;
+                    var eventType = VllmClaudeSonnet55.GetString(root, "type");
+
+                    if (eventType == "message_start" && root.TryGetProperty("message", out var startMessage))
+                    {
+                        if (VllmClaudeSonnet55.GetString(startMessage, "id") is { Length: > 0 } messageId)
+                        {
+                            responseId = messageId;
+                        }
+
+                        if (VllmClaudeSonnet55.GetString(startMessage, "model") is { Length: > 0 } messageModel)
+                        {
+                            modelId = messageModel;
+                        }
+
+                        if (startMessage.TryGetProperty("usage", out var startUsage))
+                        {
+                            usage.Merge(startUsage);
+                        }
+                    }
+
+                    if (finalStopReason is not null && eventType is "content_block_start" or "content_block_delta" or "content_block_stop")
+                    {
+                        throw new InvalidOperationException("Anthropic Messages emitted content after its stop reason.");
+                    }
+
+                    var index = VllmClaudeSonnet55.GetInt(root, "index") ?? 0;
+                    switch (eventType)
+                    {
+                        case "error":
+                            throw new InvalidOperationException("Anthropic Messages reported an error event in the stream.");
+
+                        case "content_block_start":
+                            {
+                                if (!root.TryGetProperty("content_block", out var start) || start.ValueKind != JsonValueKind.Object)
+                                {
+                                    throw new InvalidOperationException("Anthropic Messages emitted content_block_start without a content block.");
+                                }
+
+                                if (blocks.ContainsKey(index))
+                                {
+                                    throw new InvalidOperationException("Anthropic Messages started a content block index that is still open.");
+                                }
+
+                                var blockType = VllmClaudeSonnet55.GetString(start, "type");
+                                switch (blockType)
+                                {
+                                    case "text":
+                                        blocks[index] = new VllmClaudeSonnet55.StreamBlock("text", start.Clone());
+                                        if (VllmClaudeSonnet55.GetString(start, "text") is { Length: > 0 } initialText)
+                                        {
+                                            yield return BuildResponsesTextUpdate(responseId, modelId, initialText, thinking: false);
+                                        }
+
+                                        break;
+                                    case "thinking":
+                                        {
+                                            var state = new VllmClaudeSonnet55.StreamBlock("thinking", start.Clone());
+                                            blocks[index] = state;
+                                            if (VllmClaudeSonnet55.GetString(start, "signature") is { Length: > 0 } initialSignature)
+                                            {
+                                                state.Signature.Append(initialSignature);
+                                            }
+
+                                            if (VllmClaudeSonnet55.GetString(start, "thinking") is { Length: > 0 } initialThinking)
+                                            {
+                                                state.Thinking.Append(initialThinking);
+                                                yield return BuildAnthropicReasoningUpdate(responseId, modelId, new TextReasoningContent(initialThinking));
+                                            }
+
+                                            break;
+                                        }
+
+                                    case "redacted_thinking":
+                                        blocks[index] = new VllmClaudeSonnet55.StreamBlock("redacted_thinking", start.Clone());
+                                        break;
+                                    case "tool_use":
+                                        {
+                                            JsonElement? initialInput = start.TryGetProperty("input", out var inputElement) ? inputElement : null;
+                                            blocks[index] = new VllmClaudeSonnet55.StreamBlock("tool_use", start.Clone())
+                                            {
+                                                ToolId = VllmClaudeSonnet55.GetString(start, "id"),
+                                                ToolName = VllmClaudeSonnet55.GetString(start, "name"),
+                                                ToolArguments = GetAnthropicToolInputBuffer(initialInput),
+                                            };
+                                            break;
+                                        }
+
+                                    default:
+                                        throw new NotSupportedException(
+                                            $"Anthropic Messages streamed a content block of type '{blockType ?? "(missing)"}', which this SDK does not support for Claude Sonnet 5.5; the stream was rejected instead of dropping the block.");
+                                }
+
+                                break;
+                            }
+
+                        case "content_block_delta":
+                            {
+                                if (!blocks.TryGetValue(index, out var state))
+                                {
+                                    throw new InvalidOperationException("Anthropic Messages emitted a content block delta for a block that was not started.");
+                                }
+
+                                if (!root.TryGetProperty("delta", out var delta) || delta.ValueKind != JsonValueKind.Object)
+                                {
+                                    throw new InvalidOperationException("Anthropic Messages emitted content_block_delta without a delta.");
+                                }
+
+                                var deltaType = VllmClaudeSonnet55.GetString(delta, "type");
+                                switch (deltaType)
+                                {
+                                    case "text_delta" when state.Type == "text":
+                                        if (VllmClaudeSonnet55.GetString(delta, "text") is { Length: > 0 } textDelta)
+                                        {
+                                            yield return BuildResponsesTextUpdate(responseId, modelId, textDelta, thinking: false);
+                                        }
+
+                                        break;
+                                    case "thinking_delta" when state.Type == "thinking":
+                                        if (VllmClaudeSonnet55.GetString(delta, "thinking") is { Length: > 0 } thinkingDelta)
+                                        {
+                                            state.Thinking.Append(thinkingDelta);
+                                            yield return BuildAnthropicReasoningUpdate(responseId, modelId, new TextReasoningContent(thinkingDelta));
+                                        }
+
+                                        break;
+                                    case "signature_delta" when state.Type == "thinking":
+                                        if (VllmClaudeSonnet55.GetString(delta, "signature") is { Length: > 0 } signatureDelta)
+                                        {
+                                            state.Signature.Append(signatureDelta);
+                                        }
+
+                                        break;
+                                    case "input_json_delta" when state.Type == "tool_use":
+                                        state.ToolArguments += VllmClaudeSonnet55.GetString(delta, "partial_json") ?? string.Empty;
+                                        break;
+                                    default:
+                                        throw new NotSupportedException(
+                                            $"Anthropic Messages streamed a '{deltaType ?? "(missing)"}' delta for a '{state.Type}' block, which this SDK does not support for Claude Sonnet 5.5.");
+                                }
+
+                                break;
+                            }
+
+                        case "content_block_stop":
+                            {
+                                if (!blocks.TryGetValue(index, out var state))
+                                {
+                                    throw new InvalidOperationException("Anthropic Messages stopped a content block that was not started.");
+                                }
+
+                                blocks.Remove(index);
+                                switch (state.Type)
+                                {
+                                    case "thinking":
+                                        yield return BuildAnthropicReasoningUpdate(
+                                            responseId,
+                                            modelId,
+                                            VllmClaudeSonnet55.CreateOpaqueItem(VllmClaudeSonnet55.BuildThinkingBlock(state.Start, state.Thinking.ToString(), state.Signature.ToString())));
+                                        break;
+                                    case "redacted_thinking":
+                                        yield return BuildAnthropicReasoningUpdate(responseId, modelId, VllmClaudeSonnet55.CreateOpaqueItem(state.Start));
+                                        break;
+                                    case "tool_use":
+                                        if (!string.IsNullOrWhiteSpace(state.ToolName))
+                                        {
+                                            emittedToolCallUpdate = true;
+                                            yield return BuildToolCallUpdate(responseId, new VllmFunctionToolCall
+                                            {
+                                                Name = state.ToolName!,
+                                                Arguments = string.IsNullOrWhiteSpace(state.ToolArguments) ? "{}" : state.ToolArguments
+                                            }, state.ToolId);
+                                        }
+
+                                        break;
+                                }
+
+                                break;
+                            }
+
+                        case "message_delta":
+                            {
+                                if (root.TryGetProperty("delta", out var messageDelta) &&
+                                    VllmClaudeSonnet55.GetString(messageDelta, "stop_reason") is { } stopReason)
+                                {
+                                    if (finalStopReason is not null && finalStopReason != stopReason)
+                                    {
+                                        throw new InvalidOperationException("Anthropic Messages emitted conflicting stop reasons.");
+                                    }
+
+                                    finalStopReason = stopReason;
+                                }
+
+                                // 用量按字段取“最新累计值”合并（message_start 给输入/缓存，message_delta 给累计输出，可能重复输入），
+                                // 流结束时只发一个合并后的 Usage 更新，避免下游把重复事件相加。
+                                if (root.TryGetProperty("usage", out var usageElement))
+                                {
+                                    usage.Merge(usageElement);
+                                }
+
+                                break;
+                            }
+                    }
+                }
+            }
+
+            if (blocks.Count > 0)
+            {
+                throw new InvalidOperationException("Anthropic Messages ended the stream with an unfinished content block.");
+            }
+
+            if (usage.HasAny)
+            {
+                // 同一个 UsageDetails 既放进标准 Contents（UsageContent，ToChatResponse 与 QRE 适配器都认），也放在自定义 Usage 属性（兼容既有消费者）；只发这一次。
+                var finalUsage = usage.ToUsageDetails();
+                yield return new UsageChatResponseUpdate
+                {
+                    CreatedAt = DateTimeOffset.Now,
+                    ModelId = modelId,
+                    ResponseId = responseId,
+                    Role = ChatRole.Assistant,
+                    Contents = new List<AIContent> { new UsageContent(finalUsage) },
+                    Usage = finalUsage,
+                };
+            }
+
+            var finishReason = ResolveStreamingFinishReason(ToAnthropicFinishReason(finalStopReason), emittedToolCallUpdate);
+            if (finishReason.HasValue)
+            {
+                yield return BuildCompletionUpdate(responseId, modelId, finishReason.Value);
+            }
+        }
+
+        private ChatResponseUpdate BuildAnthropicReasoningUpdate(string responseId, string modelId, AIContent content)
+        {
+            return new ReasoningChatResponseUpdate
+            {
+                CreatedAt = DateTimeOffset.Now,
+                ModelId = string.IsNullOrWhiteSpace(modelId) ? _metadata.DefaultModelId : modelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                Thinking = true,
+                Contents = new List<AIContent> { content }
+            };
+        }
+
         private async IAsyncEnumerable<ChatResponseUpdate> GetAnthropicMessagesStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            if (VllmClaudeSonnet55.IsFamily(options?.ModelId ?? _metadata.DefaultModelId))
+            {
+                await foreach (var sonnetUpdate in GetSonnet55StreamingResponseAsync(messages, options, cancellationToken).ConfigureAwait(false))
+                {
+                    yield return sonnetUpdate;
+                }
+
+                yield break;
+            }
+
             using HttpRequestMessage request = new(HttpMethod.Post, GetAnthropicMessagesEndpoint())
             {
                 Content = JsonContent.Create(ToVllmAnthropicMessagesRequest(messages, options, stream: true), JsonContext.Default.VllmAnthropicMessagesRequest)
@@ -2172,6 +2590,14 @@ namespace Microsoft.Extensions.AI
 
         private protected virtual VllmAnthropicMessagesRequest ToVllmAnthropicMessagesRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
+            var sonnet55 = VllmClaudeSonnet55.IsFamily(options?.ModelId ?? _metadata.DefaultModelId);
+            if (sonnet55)
+            {
+                // Sonnet 5.5 签名块只能由本 SDK 的版本化不透明载体回放；其它来源的 ProtectedData 无法回放，发送前明确拒绝，不静默丢弃。
+                messages = messages as IList<ChatMessage> ?? messages.ToList();
+                RejectForeignReasoningProtectedData(messages);
+            }
+
             var chatRequest = ToVllmChatRequest(messages, options, stream);
             var anthropicMessages = new List<VllmAnthropicMessage>();
             var system = new System.Text.StringBuilder();
@@ -2213,6 +2639,14 @@ namespace Microsoft.Extensions.AI
                 }
             }
 
+            var anthropicToolChoice = ToVllmAnthropicToolChoice(chatRequest.ToolChoice);
+            if (sonnet55 && anthropicToolChoice is { Type: "any" or "tool" })
+            {
+                // Sonnet 5.5 只支持 auto / none；强制工具（RequireAny / RequireSpecific）不改成 Auto，也不发出去换一个 400。
+                throw new NotSupportedException(
+                    "Claude Sonnet 5.5 supports only auto and none tool choice; forced tool use (required or a specific tool) is not supported and no request was sent.");
+            }
+
             var request = new VllmAnthropicMessagesRequest
             {
                 Model = chatRequest.Model,
@@ -2227,14 +2661,26 @@ namespace Microsoft.Extensions.AI
                     JsonContext.Default) : null,
                 Stream = stream,
                 Tools = chatRequest.Tools?.Select(ToVllmAnthropicTool),
-                ToolChoice = ToVllmAnthropicToolChoice(chatRequest.ToolChoice),
+                ToolChoice = anthropicToolChoice,
                 Temperature = chatRequest.Temperature ?? chatRequest.Options?.temperature,
                 TopP = chatRequest.TopP ?? chatRequest.Options?.top_p,
                 OutputConfig = ToVllmAnthropicOutputConfig(options?.ResponseFormat),
             };
 
             var thinkingType = GetAnthropicThinkingType(chatRequest, options);
-            if (string.Equals(thinkingType, "enabled", StringComparison.OrdinalIgnoreCase))
+            if (sonnet55)
+            {
+                // Sonnet 5.5：最低思考档是 between_tools（没有 upfront thinking）。关闭 → between_tools，启用 → adaptive，二者都只带 type；未指定则不发送。
+                if (string.Equals(thinkingType, "enabled", StringComparison.OrdinalIgnoreCase))
+                {
+                    request.Thinking = new VllmAnthropicThinkingOptions { Type = "adaptive" };
+                }
+                else if (string.Equals(thinkingType, "disabled", StringComparison.OrdinalIgnoreCase))
+                {
+                    request.Thinking = new VllmAnthropicThinkingOptions { Type = "between_tools" };
+                }
+            }
+            else if (string.Equals(thinkingType, "enabled", StringComparison.OrdinalIgnoreCase))
             {
                 request.Thinking = new VllmAnthropicThinkingOptions
                 {
@@ -2710,6 +3156,13 @@ namespace Microsoft.Extensions.AI
                 return null;
             }
 
+            // Sonnet 5.5：消息里只要有本 SDK 的版本化不透明推理项，就只按 Contents 顺序由它们还原原始 thinking / redacted_thinking JSON 块，
+            // 优先于 RawRepresentation 与旧的重建路径（那些会丢 signature / 未知属性）。
+            if (TryBuildOpaqueAssistantBlocks(message) is { } opaqueBlocks)
+            {
+                return opaqueBlocks;
+            }
+
             if (message.RawRepresentation is VllmAnthropicMessagesResponse rawResponse && rawResponse.Content is { Length: > 0 } rawBlocks)
             {
                 return ToAnthropicReplayBlocks(rawBlocks).ToArray();
@@ -2768,6 +3221,97 @@ namespace Microsoft.Extensions.AI
             return blocks.Count > 0 && (!string.IsNullOrWhiteSpace(thinking) || blocks.Any(IsAnthropicToolUseBlock))
                 ? blocks.ToArray()
                 : null;
+        }
+
+        /// <summary>
+        /// Sonnet 5.5 outbound rebuild. Returns null when the message has no versioned opaque reasoning item (the legacy path then applies unchanged).
+        /// Opaque items become their original block JSON; display-only reasoning items (no ProtectedData) never become thinking blocks; consecutive text is
+        /// one text block; tool calls become tool_use blocks; everything keeps the order of <see cref="ChatMessage.Contents"/>.
+        /// An opaque item that is malformed, truncated or of another version, or any other non-empty ProtectedData in such a message, is rejected.
+        /// </summary>
+        private static JsonElement[]? TryBuildOpaqueAssistantBlocks(ChatMessage message)
+        {
+            var hasOpaque = false;
+            foreach (var item in message.Contents)
+            {
+                if (item is TextReasoningContent reasoning && VllmClaudeSonnet55.IsOpaque(reasoning.ProtectedData))
+                {
+                    hasOpaque = true;
+                    break;
+                }
+            }
+
+            if (!hasOpaque)
+            {
+                return null;
+            }
+
+            var blocks = new List<JsonElement>();
+            var text = new System.Text.StringBuilder();
+
+            void FlushText()
+            {
+                if (text.Length > 0)
+                {
+                    blocks.Add(CreateAnthropicTextBlock(text.ToString()));
+                    text.Clear();
+                }
+            }
+
+            foreach (var item in message.Contents)
+            {
+                switch (item)
+                {
+                    case TextReasoningContent reasoning when !string.IsNullOrEmpty(reasoning.ProtectedData):
+                        FlushText();
+                        blocks.Add(VllmClaudeSonnet55.Decode(reasoning.ProtectedData!));
+                        break;
+                    case TextReasoningContent:
+                        // 展示副本：只用于显示，绝不重建为 thinking 块。
+                        break;
+                    case TextContent textContent:
+                        if (!string.IsNullOrEmpty(textContent.Text))
+                        {
+                            text.Append(textContent.Text);
+                        }
+
+                        break;
+                    case FunctionCallContent call:
+                        FlushText();
+                        blocks.Add(CreateAnthropicToolUseBlock(
+                            string.IsNullOrWhiteSpace(call.CallId) ? Guid.NewGuid().ToString("N") : call.CallId,
+                            call.Name,
+                            JsonSerializer.SerializeToElement(
+                                call.Arguments ?? new Dictionary<string, object?>(),
+                                AIJsonUtilities.DefaultOptions.GetTypeInfo(typeof(IDictionary<string, object?>)))));
+                        break;
+                }
+            }
+
+            FlushText();
+            return blocks.ToArray();
+        }
+
+        private static void RejectForeignReasoningProtectedData(IEnumerable<ChatMessage> messages)
+        {
+            foreach (var message in messages)
+            {
+                if (!string.Equals(message.Role.Value, ChatRole.Assistant.Value, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                foreach (var item in message.Contents)
+                {
+                    if (item is TextReasoningContent reasoning &&
+                        !string.IsNullOrEmpty(reasoning.ProtectedData) &&
+                        !VllmClaudeSonnet55.IsOpaque(reasoning.ProtectedData))
+                    {
+                        throw new NotSupportedException(
+                            "An assistant reasoning item carries ProtectedData that is not an Anthropic block produced by this SDK and cannot be replayed to Claude Sonnet 5.5.");
+                    }
+                }
+            }
         }
 
         private static IEnumerable<JsonElement> ToAnthropicReplayBlocks(IEnumerable<VllmAnthropicContentBlock> blocks)

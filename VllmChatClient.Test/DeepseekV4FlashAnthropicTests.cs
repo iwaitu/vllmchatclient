@@ -47,7 +47,7 @@ namespace VllmChatClient.Test
                 "https://api.deepseek.com/anthropic",
                 cloudApiKey,
                 MODEL,
-                null,
+                new HttpClient(),
                 VllmApiMode.AnthropicMessages);
             _chatOptions = new VllmChatOptions { ThinkingEnabled = true, MaxOutputTokens = 3000 };
         }

@@ -4,6 +4,16 @@
 
 # VllmChatClient
 
+### 2.0.29: DeepSeek V4.x client
+
+New `VllmDeepseekV4ChatClient` (derives from `VllmDeepseekV3ChatClient`) for
+`deepseek-v4.1-flash` / `deepseek-v4.1-flash-1017` on DashScope and other
+OpenAI/Anthropic-compatible endpoints. Some V4.1 snapshots leak an internal
+`<ds_safety>...</ds_safety>` moderation block (followed by a `Safe` marker) into
+reasoning text; in streaming mode the tag is split across chunks. The V4 client
+strips it from streamed and non-streamed text, and from reasoning echoed back
+in tool-call history. `VllmDeepseekV3ChatClient` is unchanged.
+
 ### 2.0.28: native Anthropic structured output
 
 In `VllmApiMode.AnthropicMessages`, `ChatResponseFormat.ForJsonSchema(schema, ...)`

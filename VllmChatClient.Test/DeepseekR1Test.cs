@@ -19,7 +19,7 @@ namespace VllmChatClient.Test
         {
             _output = testOutputHelper;
             var cloud_apiKey = Environment.GetEnvironmentVariable("VLLM_ALIYUN_API_KEY");
-            _client = new VllmDeepseekR1ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "deepseek-r1");
+            _client = new VllmDeepseekR1ChatClient("https://dashscope.aliyuncs.com/compatible-mode/v1/{1}", cloud_apiKey, "deepseek-r1", new HttpClient());
         }
 
         [Description("获取天气情况")]

@@ -316,6 +316,9 @@ namespace Microsoft.Extensions.AI
             bool withheldStructuredText = false;
             string? finalFinishReason = null;
             string bufferToolCall = string.Empty;
+            var chatUsage = new VllmCompletionUsageAccumulator("prompt_tokens_details.cached_tokens");
+            string? usageModelId = options?.ModelId ?? _metadata.DefaultModelId;
+            bool sawDone = false;
             yield return new ChatResponseUpdate
             {
                 CreatedAt = DateTimeOffset.Now,
@@ -345,22 +348,17 @@ namespace Microsoft.Extensions.AI
                 }
                 else if (jsonPart == "[DONE]")
                 {
+                    sawDone = true;
                     break;
                 }
 
                 var chunk = JsonSerializer.Deserialize(jsonPart, JsonContext.Default.VllmChatStreamResponse);
 
+                // 每帧 usage 都是同一次响应的累计快照：按字段合并最新值，流正常结束后只发一个聚合用量更新。
                 if (chunk?.Usage is { } streamUsage)
                 {
-                    yield return new UsageChatResponseUpdate
-                    {
-                        CreatedAt = chunk.Created > 0
-                            ? DateTimeOffset.FromUnixTimeSeconds(chunk.Created)
-                            : DateTimeOffset.Now,
-                        ModelId = chunk.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
-                        ResponseId = responseId,
-                        Usage = ParseVllmUsage(streamUsage),
-                    };
+                    chatUsage.Merge(streamUsage);
+                    usageModelId = chunk.Model ?? usageModelId;
                 }
 
                 if (chunk == null || chunk.Choices == null || chunk.Choices.Count == 0)
@@ -591,6 +589,13 @@ namespace Microsoft.Extensions.AI
             {
                 yield return BuildTextUpdate(responseId, bufferMsg, false);
             }
+
+            // 只有收到 [DONE] 的正常结束才发用量；缺少终止标志的 EOF 仍按原逻辑发出已知的 finish，但不冒充完整用量。
+            if (sawDone && chatUsage.ToUsageDetails() is { } chatFinalUsage)
+            {
+                yield return BuildFinalUsageUpdate(responseId, usageModelId, chatFinalUsage);
+            }
+
             var finishReason = ResolveStreamingFinishReason(ToFinishReason(finalFinishReason), emittedToolCallUpdate);
             if (finishReason.HasValue)
             {
@@ -651,6 +656,8 @@ namespace Microsoft.Extensions.AI
             bool emittedText = false;
             bool emittedToolCallUpdate = false;
             string? finalStatus = null;
+            var responsesUsage = new VllmCompletionUsageAccumulator("input_tokens_details.cached_tokens");
+            bool sawCompleted = false;
             var toolCallBuffers = new Dictionary<string, (string? Name, string? CallId, string Arguments)>(StringComparer.Ordinal);
 
             yield return new ChatResponseUpdate
@@ -793,18 +800,9 @@ namespace Microsoft.Extensions.AI
                                 yield return BuildResponsesTextUpdate(responseId, modelId, completed.OutputText, thinking: false);
                             }
 
-                            if (completed.Usage is { } usage)
-                            {
-                                yield return new UsageChatResponseUpdate
-                                {
-                                    CreatedAt = completed.CreatedAt > 0
-                                        ? DateTimeOffset.FromUnixTimeSeconds(completed.CreatedAt)
-                                        : DateTimeOffset.Now,
-                                    ModelId = completed.Model ?? modelId,
-                                    ResponseId = responseId,
-                                    Usage = ParseVllmResponsesUsage(usage),
-                                };
-                            }
+                            // response.completed 既是正常终止标志，也带这次响应的累计用量；先合并，循环结束后（finish 之前）只发一个用量更新。
+                            responsesUsage.Merge(completed.Usage);
+                            sawCompleted = true;
                         }
                         break;
 
@@ -825,6 +823,11 @@ namespace Microsoft.Extensions.AI
                     }, buffered.CallId);
                 }
             }
+            if (sawCompleted && responsesUsage.ToUsageDetails() is { } responsesFinalUsage)
+            {
+                yield return BuildFinalUsageUpdate(responseId, modelId, responsesFinalUsage);
+            }
+
             var finishReason = ResolveStreamingFinishReason(ToResponsesFinishReason(finalStatus), emittedToolCallUpdate);
             if (finishReason.HasValue)
             {
@@ -885,7 +888,7 @@ namespace Microsoft.Extensions.AI
 
             var contents = new List<AIContent>();
             var reasoning = new System.Text.StringBuilder();
-            var usageAccumulator = new VllmClaudeSonnet55.UsageAccumulator();
+            var usageAccumulator = new VllmAnthropicUsageAccumulator();
 
             using (var document = JsonDocument.Parse(body))
             {
@@ -949,7 +952,7 @@ namespace Microsoft.Extensions.AI
                 FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToAnthropicFinishReason(response.StopReason),
                 ModelId = response.Model ?? options?.ModelId ?? _metadata.DefaultModelId,
                 ResponseId = response.Id,
-                Usage = usageAccumulator.HasAny ? usageAccumulator.ToUsageDetails() : null,
+                Usage = usageAccumulator.ToUsageDetails(),
             };
         }
 
@@ -972,7 +975,8 @@ namespace Microsoft.Extensions.AI
             string responseId = Guid.NewGuid().ToString("N");
             string modelId = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty;
             var blocks = new Dictionary<int, VllmClaudeSonnet55.StreamBlock>();
-            var usage = new VllmClaudeSonnet55.UsageAccumulator();
+            var usage = new VllmAnthropicUsageAccumulator();
+            bool sawMessageStop = false;
             bool emittedToolCallUpdate = false;
             string? finalStopReason = null;
 
@@ -1055,6 +1059,10 @@ namespace Microsoft.Extensions.AI
                     {
                         case "error":
                             throw new InvalidOperationException("Anthropic Messages reported an error event in the stream.");
+
+                        case "message_stop":
+                            sawMessageStop = true;
+                            break;
 
                         case "content_block_start":
                             {
@@ -1235,19 +1243,11 @@ namespace Microsoft.Extensions.AI
                 throw new InvalidOperationException("Anthropic Messages ended the stream with an unfinished content block.");
             }
 
-            if (usage.HasAny)
+            // 同一个 UsageDetails 既放进标准 Contents（UsageContent，ToChatResponse 与 QRE 适配器都认），也放在自定义 Usage 属性（兼容既有消费者）；只发这一次。
+            // 只有收到 message_stop 的正常结束才发；缺少终止标志的 EOF 不冒充完整用量，finish 仍按原逻辑发出。
+            if (sawMessageStop && usage.ToUsageDetails() is { } finalUsage)
             {
-                // 同一个 UsageDetails 既放进标准 Contents（UsageContent，ToChatResponse 与 QRE 适配器都认），也放在自定义 Usage 属性（兼容既有消费者）；只发这一次。
-                var finalUsage = usage.ToUsageDetails();
-                yield return new UsageChatResponseUpdate
-                {
-                    CreatedAt = DateTimeOffset.Now,
-                    ModelId = modelId,
-                    ResponseId = responseId,
-                    Role = ChatRole.Assistant,
-                    Contents = new List<AIContent> { new UsageContent(finalUsage) },
-                    Usage = finalUsage,
-                };
+                yield return BuildFinalUsageUpdate(responseId, modelId, finalUsage);
             }
 
             var finishReason = ResolveStreamingFinishReason(ToAnthropicFinishReason(finalStopReason), emittedToolCallUpdate);
@@ -1300,6 +1300,8 @@ namespace Microsoft.Extensions.AI
             string modelId = options?.ModelId ?? _metadata.DefaultModelId ?? string.Empty;
             var toolCallBuffers = new Dictionary<int, (string? Id, string? Name, string Arguments)>();
             var thinkingBuffer = new System.Text.StringBuilder();
+            var genericUsage = new VllmAnthropicUsageAccumulator();
+            bool sawMessageStop = false;
             bool emittedToolCallUpdate = false;
             string? finalStopReason = null;
 
@@ -1353,6 +1355,11 @@ namespace Microsoft.Extensions.AI
                 if (chunk.Message?.Model is { Length: > 0 } messageModel)
                 {
                     modelId = messageModel;
+                }
+
+                if (chunk.Type == "message_start")
+                {
+                    genericUsage.Merge(chunk.Message?.Usage);
                 }
 
                 if (finalStopReason is not null && chunk.Type is
@@ -1422,19 +1429,22 @@ namespace Microsoft.Extensions.AI
                             throw new InvalidOperationException("Anthropic Messages emitted conflicting stop reasons.");
                         }
                         finalStopReason = chunk.Delta?.StopReason ?? finalStopReason;
-                        if (chunk.Usage is { } usage)
-                        {
-                            yield return new UsageChatResponseUpdate
-                            {
-                                CreatedAt = DateTimeOffset.Now,
-                                ModelId = modelId,
-                                ResponseId = responseId,
-                                Usage = ParseVllmAnthropicUsage(usage),
-                            };
-                        }
+                        // 用量是同一次响应的累计快照（message_start 给输入/缓存，message_delta 给累计输出，可能重复输入）：按字段取最新值，不逐帧发出。
+                        genericUsage.Merge(chunk.Usage);
+                        break;
+
+                    case "message_stop":
+                        sawMessageStop = true;
                         break;
                 }
             }
+
+            // 只有收到 message_stop 的正常结束才发一个聚合用量；缺少终止标志的 EOF 不冒充完整用量，finish 仍按原逻辑发出。
+            if (sawMessageStop && genericUsage.ToUsageDetails() is { } genericFinalUsage)
+            {
+                yield return BuildFinalUsageUpdate(responseId, modelId, genericFinalUsage);
+            }
+
             var finishReason = ResolveStreamingFinishReason(ToAnthropicFinishReason(finalStopReason), emittedToolCallUpdate);
             if (finishReason.HasValue)
             {
@@ -1622,53 +1632,63 @@ namespace Microsoft.Extensions.AI
 
         private static UsageDetails? ParseVllmChatResponseUsage(VllmChatResponse response)
         {
-            return ParseVllmUsage(response?.Usage);
+            return ParseSharedChatCompletionsUsage(response);
         }
 
-        private static UsageDetails? ParseVllmUsage(Usage? usage)
+        /// <summary>
+        /// Non-streaming Chat Completions usage through the shared metering rules (missing counters stay null, <c>prompt_tokens_details.cached_tokens</c> is kept
+        /// without being added again, invalid counters raise <see cref="InvalidOperationException"/>). Also used by derived clients that parse the response themselves.
+        /// </summary>
+        internal static UsageDetails? ParseSharedChatCompletionsUsage(VllmChatResponse? response)
         {
-            if (usage == null)
+            if (response?.Usage is not { } usage)
             {
                 return null;
             }
 
-            return new UsageDetails
-            {
-                InputTokenCount = usage.PromptTokens,
-                OutputTokenCount = usage.CompletionTokens,
-                TotalTokenCount = usage.TotalTokens
-            };
+            var accumulator = new VllmCompletionUsageAccumulator("prompt_tokens_details.cached_tokens");
+            accumulator.Merge(usage);
+            return accumulator.ToUsageDetails();
         }
 
         private static UsageDetails? ParseVllmResponsesUsage(VllmResponsesUsage? usage)
         {
-            if (usage == null)
+            if (usage is null)
             {
                 return null;
             }
 
-            return new UsageDetails
-            {
-                InputTokenCount = usage.InputTokens,
-                OutputTokenCount = usage.OutputTokens,
-                TotalTokenCount = usage.TotalTokens
-            };
+            var accumulator = new VllmCompletionUsageAccumulator("input_tokens_details.cached_tokens");
+            accumulator.Merge(usage);
+            return accumulator.ToUsageDetails();
         }
 
         private static UsageDetails? ParseVllmAnthropicUsage(VllmAnthropicUsage? usage)
         {
-            if (usage == null)
+            if (usage is null)
             {
                 return null;
             }
 
-            return new UsageDetails
-            {
-                InputTokenCount = usage.InputTokens,
-                OutputTokenCount = usage.OutputTokens,
-                TotalTokenCount = usage.InputTokens + usage.OutputTokens
-            };
+            var accumulator = new VllmAnthropicUsageAccumulator();
+            accumulator.Merge(usage);
+            return accumulator.ToUsageDetails();
         }
+
+        /// <summary>
+        /// The one usage update of a response: the same <see cref="UsageDetails"/> sits in the standard <see cref="UsageContent"/> (what <c>ToChatResponse()</c> and
+        /// QRE aggregate) and in the legacy <see cref="UsageChatResponseUpdate.Usage"/> property. Only built once, after a normal termination.
+        /// </summary>
+        private static UsageChatResponseUpdate BuildFinalUsageUpdate(string responseId, string? modelId, UsageDetails usage)
+            => new()
+            {
+                CreatedAt = DateTimeOffset.Now,
+                ModelId = modelId,
+                ResponseId = responseId,
+                Role = ChatRole.Assistant,
+                Contents = new List<AIContent> { new UsageContent(usage) },
+                Usage = usage,
+            };
 
         private static string GetAnthropicToolInputBuffer(JsonElement? input)
         {
@@ -2493,8 +2513,43 @@ namespace Microsoft.Extensions.AI
             return true;
         }
 
+        /// <summary>
+        /// Reads the explicit prompt-cache opt-in (<see cref="VllmAnthropicCacheControl.OptionKey"/>). Missing key or a <c>null</c> value → <c>null</c> (nothing is sent);
+        /// anything but a <see cref="VllmAnthropicCacheControl"/> is rejected. The result is a defensive copy, so the caller's object is never referenced by the request.
+        /// </summary>
+        private static VllmAnthropicCacheControlRequest? ReadPromptCacheOption(ChatOptions? options)
+        {
+            if (options?.AdditionalProperties is not { } properties ||
+                !properties.TryGetValue(VllmAnthropicCacheControl.OptionKey, out var value) ||
+                value is null)
+            {
+                return null;
+            }
+
+            if (value is not VllmAnthropicCacheControl control)
+            {
+                throw new ArgumentException(
+                    "ChatOptions.AdditionalProperties[\"anthropic.cache_control\"] must be null or a VllmAnthropicCacheControl instance; no request was sent.",
+                    nameof(options));
+            }
+
+            if (control.Ttl is not (null or "5m" or "1h"))
+            {
+                throw new ArgumentException("The cache control ttl must be null, \"5m\" or \"1h\"; no request was sent.", nameof(options));
+            }
+
+            return new VllmAnthropicCacheControlRequest { Ttl = control.Ttl };
+        }
+
         private protected virtual VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
+            if (_apiMode != VllmApiMode.AnthropicMessages && ReadPromptCacheOption(options) is not null)
+            {
+                // 缓存配置只存在于原生 Anthropic Messages 请求；其它协议不能默默丢弃它。
+                throw new NotSupportedException(
+                    "Anthropic prompt caching (anthropic.cache_control) is supported only with VllmApiMode.AnthropicMessages; no request was sent.");
+            }
+
             ValidateMessages(messages, options);
 
             VllmOpenAIChatRequest request = new()
@@ -2665,6 +2720,7 @@ namespace Microsoft.Extensions.AI
                 Temperature = chatRequest.Temperature ?? chatRequest.Options?.temperature,
                 TopP = chatRequest.TopP ?? chatRequest.Options?.top_p,
                 OutputConfig = ToVllmAnthropicOutputConfig(options),
+                CacheControl = ReadPromptCacheOption(options),
             };
 
             var thinkingType = GetAnthropicThinkingType(chatRequest, options);

@@ -48,13 +48,35 @@ internal sealed class VllmAnthropicContentBlock
     public JsonElement? Input { get; set; }
 }
 
+/// <summary>
+/// Anthropic Messages usage. Counters are raw JSON so "absent" and explicit zero stay distinguishable and invalid values are rejected by the shared accumulator.
+/// Raw <c>input_tokens</c> excludes the cache parts.
+/// </summary>
 internal sealed class VllmAnthropicUsage
 {
     [JsonPropertyName("input_tokens")]
-    public int InputTokens { get; set; }
+    public JsonElement? InputTokens { get; set; }
 
     [JsonPropertyName("output_tokens")]
-    public int OutputTokens { get; set; }
+    public JsonElement? OutputTokens { get; set; }
+
+    [JsonPropertyName("cache_read_input_tokens")]
+    public JsonElement? CacheReadInputTokens { get; set; }
+
+    [JsonPropertyName("cache_creation_input_tokens")]
+    public JsonElement? CacheCreationInputTokens { get; set; }
+
+    [JsonPropertyName("cache_creation")]
+    public VllmAnthropicCacheCreationUsage? CacheCreation { get; set; }
+}
+
+internal sealed class VllmAnthropicCacheCreationUsage
+{
+    [JsonPropertyName("ephemeral_5m_input_tokens")]
+    public JsonElement? Ephemeral5mInputTokens { get; set; }
+
+    [JsonPropertyName("ephemeral_1h_input_tokens")]
+    public JsonElement? Ephemeral1hInputTokens { get; set; }
 }
 
 internal sealed class VllmAnthropicStreamEvent

@@ -197,8 +197,9 @@ public class Sonnet55NativeCompatibilityTests
     }
 
     [Fact]
-    public async Task OtherModelsKeepTheLegacyUsageMapping()
+    public async Task OtherClaudeModelsNowShareTheUnifiedUsageMapping()
     {
+        // 2.0.33 contract change (was "OtherModelsKeepTheLegacyUsageMapping"): the generic Anthropic path uses the same shared metering as Sonnet 5.5.
         var body = J(new
         {
             id = "msg_u", type = "message", role = "assistant", model = OldClaude,
@@ -211,9 +212,12 @@ public class Sonnet55NativeCompatibilityTests
         using (client)
         {
             var response = await client.GetResponseAsync("go", Thinking);
-            Assert.Equal(10L, response.Usage!.InputTokenCount);          // unchanged: raw input only, no cache folding, no extra counts
+            Assert.Equal(19L, response.Usage!.InputTokenCount);          // changed in 2.0.33: uncached 10 + cache read 5 + cache creation 4
             Assert.Equal(7L, response.Usage.OutputTokenCount);
-            Assert.True(response.Usage.AdditionalCounts is null || response.Usage.AdditionalCounts.Count == 0);
+            Assert.Equal(26L, response.Usage.TotalTokenCount);
+            Assert.Equal(10L, response.Usage.AdditionalCounts!["input_tokens"]);   // the raw uncached input stays readable
+            Assert.Equal(5L, response.Usage.AdditionalCounts["cache_read_input_tokens"]);
+            Assert.Equal(4L, response.Usage.AdditionalCounts["cache_creation_input_tokens"]);
         }
     }
 

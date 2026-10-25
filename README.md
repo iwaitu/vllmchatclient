@@ -4,6 +4,68 @@
 
 # VllmChatClient
 
+### 2.0.33: explicit prompt caching and unified usage metering
+
+**Prompt caching is opt-in and never enabled by the SDK.** For
+`VllmApiMode.AnthropicMessages`, pass an immutable `VllmAnthropicCacheControl`
+through `ChatOptions.AdditionalProperties`:
+
+```csharp
+var options = new ChatOptions
+{
+    AdditionalProperties = new AdditionalPropertiesDictionary
+    {
+        [VllmAnthropicCacheControl.OptionKey] = new VllmAnthropicCacheControl("5m"), // or "1h", or no ttl
+    },
+};
+var response = await client.GetResponseAsync(messages, options);
+```
+
+The request then carries a top-level `cache_control` (`{"type":"ephemeral"}` plus
+`"ttl"` when set). A missing key leaves the request exactly as before, `null`
+switches it off, any other value type fails before HTTP, and a non-null setting
+used with Chat Completions or Responses is rejected (never silently dropped).
+The option key itself is never sent. Whether an Anthropic-compatible third-party
+gateway accepts the field is the caller's choice; the SDK does not probe or
+retry. Judge a cache hit from the raw usage (`cache_read_input_tokens > 0`),
+not from HTTP 200.
+
+**Usage metering is shared by all three protocols** (streaming and not):
+
+- Anthropic: raw `input_tokens` excludes cached tokens, so
+  `InputTokenCount` = uncached + cache read + cache creation (the cache creation
+  total, or the 5m + 1h parts only when no total is given), and
+  `TotalTokenCount` = input + output. Every raw number that was actually
+  returned is kept in `AdditionalCounts` (`input_tokens`, `output_tokens`,
+  `cache_read_input_tokens`, `cache_creation_input_tokens`,
+  `cache_creation.ephemeral_5m_input_tokens`,
+  `cache_creation.ephemeral_1h_input_tokens`). **This changes
+  `InputTokenCount` for Anthropic responses that use the cache**; the old value
+  is `AdditionalCounts["input_tokens"]`.
+- Chat Completions and Responses: `prompt_tokens` / `input_tokens` already
+  include cached tokens, so `InputTokenCount` is the provider value and the
+  cached part appears only in `AdditionalCounts`
+  (`prompt_tokens_details.cached_tokens` or `input_tokens_details.cached_tokens`,
+  plus the alias `cached_input_tokens` for the same quantity).
+- Missing counters are `null`, never 0; explicit zeros are kept; a response
+  without usage has `Usage == null`. `TotalTokenCount` needs both input and
+  output (or the provider's own `total_tokens` for Chat/Responses).
+- Streaming usage is a cumulative snapshot of one response: fields are merged
+  (latest value wins, nothing is added across events) and exactly one usage
+  update is emitted after a normal termination (`message_stop`, `[DONE]` or
+  `response.completed`), before the finish update. A stream that ends without
+  the marker still finishes with its known finish reason but reports no usage.
+  Separate responses (for example tool-call rounds) add up normally.
+- Invalid counters (negative, fractional, beyond `long`, non-numeric, or a sum
+  that overflows) raise `InvalidOperationException("Invalid provider usage counters.")`
+  without echoing any value.
+
+Unrecognized vendor cache fields (for example DeepSeek's
+`prompt_cache_hit_tokens`) are ignored and never change the totals. Some
+Anthropic-compatible gateways define `input_tokens` differently from the
+official API; verify raw usage there before relying on the combined total. The
+SDK does not price anything.
+
 ### 2.0.32: DeepSeek1017 JSON Object compatibility
 
 `VllmDeepseekV4ChatClient` with effective model ID `deepseek-v4.1-flash-1017`

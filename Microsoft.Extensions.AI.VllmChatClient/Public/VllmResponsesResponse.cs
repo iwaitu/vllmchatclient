@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Microsoft.Extensions.AI;
@@ -65,14 +66,24 @@ internal sealed class VllmResponsesContentPart
     public string? Text { get; set; }
 }
 
+/// <summary>Responses usage; counters are raw JSON so "absent" and explicit zero stay distinguishable and invalid values are rejected by the shared accumulator.</summary>
 internal sealed class VllmResponsesUsage
 {
     [JsonPropertyName("input_tokens")]
-    public int InputTokens { get; set; }
+    public JsonElement? InputTokens { get; set; }
 
     [JsonPropertyName("output_tokens")]
-    public int OutputTokens { get; set; }
+    public JsonElement? OutputTokens { get; set; }
 
     [JsonPropertyName("total_tokens")]
-    public int TotalTokens { get; set; }
+    public JsonElement? TotalTokens { get; set; }
+
+    [JsonPropertyName("input_tokens_details")]
+    public VllmInputTokensDetails? InputTokensDetails { get; set; }
+}
+
+internal sealed class VllmInputTokensDetails
+{
+    [JsonPropertyName("cached_tokens")]
+    public JsonElement? CachedTokens { get; set; }
 }

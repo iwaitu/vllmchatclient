@@ -20,8 +20,89 @@ await SmokeAnthropicJsonSchemaAsync(httpClient, handler);
 await SmokeDeepseekV4HistoryAsync();
 await SmokeSonnet55OpaqueAsync();
 await SmokeDeepseekJsonObjectAsync();
+await SmokePromptCacheAndUsageAsync();
 
 Console.WriteLine("NativeAOT smoke completed.");
+
+static async Task SmokePromptCacheAndUsageAsync()
+{
+    // Anthropic Messages: explicit cache_control reaches the wire, and cached usage is read back through the standard UsageDetails.
+    var anthropic = new QueueingHandler();
+    using var anthropicHttp = new HttpClient(anthropic);
+    using var claude = new VllmClaudeChatClient("https://example.test", "offline-only", "claude-haiku-5-5", anthropicHttp, VllmApiMode.AnthropicMessages);
+    var cacheOptions = new ChatOptions
+    {
+        MaxOutputTokens = 256,
+        AdditionalProperties = new AdditionalPropertiesDictionary { [VllmAnthropicCacheControl.OptionKey] = new VllmAnthropicCacheControl("1h") }
+    };
+    anthropic.Enqueue(Json("""
+        {"id":"m","type":"message","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"cache_read_input_tokens":5,"cache_creation_input_tokens":4,"cache_creation":{"ephemeral_5m_input_tokens":3,"ephemeral_1h_input_tokens":1},"output_tokens":7}}
+        """));
+    var nonStream = await claude.GetResponseAsync([new ChatMessage(ChatRole.User, "go")], cacheOptions);
+    using (var wire = JsonDocument.Parse(anthropic.LastRequestBody!))
+    {
+        var cacheControl = wire.RootElement.GetProperty("cache_control");
+        if (cacheControl.GetProperty("type").GetString() != "ephemeral" || cacheControl.GetProperty("ttl").GetString() != "1h" || anthropic.LastRequestBody!.Contains("anthropic.cache_control"))
+            throw new InvalidOperationException("NativeAOT cache_control was not serialized exactly.");
+    }
+
+    AssertCached(nonStream.Usage, "Anthropic non-streaming");
+
+    anthropic.Enqueue(Sse("""
+        data: {"type":"message_start","message":{"id":"ms","model":"claude-haiku-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":5,"cache_creation_input_tokens":4,"cache_creation":{"ephemeral_5m_input_tokens":3,"ephemeral_1h_input_tokens":1},"output_tokens":1}}}
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"ok"}}
+        data: {"type":"content_block_stop","index":0}
+        data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}
+        data: {"type":"message_stop"}
+        """));
+    List<ChatResponseUpdate> anthropicUpdates = [];
+    await foreach (var update in claude.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "go")], cacheOptions)) anthropicUpdates.Add(update);
+    AssertCached(anthropicUpdates.ToChatResponse().Usage, "Anthropic streaming");
+    if (anthropicUpdates.SelectMany(u => u.Contents).OfType<UsageContent>().Count() != 1)
+        throw new InvalidOperationException("NativeAOT Anthropic streaming usage must be emitted exactly once.");
+
+    // Chat Completions through the same public client (its non-streaming path parses the response itself) and Responses streaming.
+    var chat = new QueueingHandler();
+    using var chatHttp = new HttpClient(chat);
+    using var claudeChat = new VllmClaudeChatClient("https://example.test", "offline-only", "claude-haiku-5-5", chatHttp, VllmApiMode.ChatCompletions);
+    chat.Enqueue(Json("""
+        {"id":"c","created":0,"model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_tokens_details":{"cached_tokens":60}}}
+        """));
+    var chatUsage = (await claudeChat.GetResponseAsync([new ChatMessage(ChatRole.User, "go")])).Usage;
+    if (chatUsage?.InputTokenCount != 100 || chatUsage.TotalTokenCount != 120 || chatUsage.AdditionalCounts?["prompt_tokens_details.cached_tokens"] != 60)
+        throw new InvalidOperationException("NativeAOT Chat Completions cached usage was lost or double counted.");
+
+    var responses = new QueueingHandler();
+    using var responsesHttp = new HttpClient(responses);
+    using var responsesClient = new VllmClaudeChatClient("https://example.test", "offline-only", "claude-haiku-5-5", responsesHttp, VllmApiMode.Responses);
+    responses.Enqueue(Sse("""
+        data: {"type":"response.output_text.delta","delta":"ok"}
+        data: {"type":"response.completed","response":{"id":"r","status":"completed","usage":{"input_tokens":100,"output_tokens":20,"total_tokens":120,"input_tokens_details":{"cached_tokens":60}}}}
+        data: [DONE]
+        """));
+    List<ChatResponseUpdate> responsesUpdates = [];
+    await foreach (var update in responsesClient.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "go")])) responsesUpdates.Add(update);
+    var responsesUsage = responsesUpdates.ToChatResponse().Usage;
+    if (responsesUsage?.InputTokenCount != 100 || responsesUsage.AdditionalCounts?["input_tokens_details.cached_tokens"] != 60)
+        throw new InvalidOperationException("NativeAOT Responses cached usage was lost or double counted.");
+
+    // A cache setting with a non-Anthropic API mode is rejected before any request.
+    var rejected = false;
+    try { _ = await responsesClient.GetResponseAsync([new ChatMessage(ChatRole.User, "go")], cacheOptions); }
+    catch (NotSupportedException) { rejected = true; }
+    if (!rejected) throw new InvalidOperationException("NativeAOT cache setting with a non-Anthropic mode must be rejected.");
+
+    Console.WriteLine("Prompt cache request field and cached usage (Anthropic/Chat/Responses, streaming and non-streaming) passed.");
+
+    static void AssertCached(UsageDetails? usage, string label)
+    {
+        if (usage?.InputTokenCount != 19 || usage.OutputTokenCount != 7 || usage.TotalTokenCount != 26 ||
+            usage.AdditionalCounts?["input_tokens"] != 10 || usage.AdditionalCounts["cache_read_input_tokens"] != 5 ||
+            usage.AdditionalCounts["cache_creation_input_tokens"] != 4 ||
+            usage.AdditionalCounts["cache_creation.ephemeral_5m_input_tokens"] != 3 || usage.AdditionalCounts["cache_creation.ephemeral_1h_input_tokens"] != 1)
+            throw new InvalidOperationException($"NativeAOT {label} cached usage was lost or double counted.");
+    }
+}
 
 static async Task SmokeDeepseekJsonObjectAsync()
 {

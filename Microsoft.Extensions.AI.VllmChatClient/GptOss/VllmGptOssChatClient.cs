@@ -377,15 +377,8 @@ namespace Microsoft.Extensions.AI.VllmChatClient.GptOss
 
         private static UsageDetails? ParseGptOssUsage(VllmChatResponse response)
         {
-            if (response?.Usage == null)
-                return null;
-
-            return new UsageDetails
-            {
-                InputTokenCount = response.Usage.PromptTokens,
-                OutputTokenCount = response.Usage.CompletionTokens,
-                TotalTokenCount = response.Usage.TotalTokens
-            };
+            // 与基类 Chat Completions 共用同一份计量解析（缺失为 null、缓存细项保留、非法计量统一报错）。
+            return ParseSharedChatCompletionsUsage(response);
         }
 
         private static (bool hasReasoning, string reasoningText, string reasoningType) AnalyzeReasoningStructure(object? reasoningContent)

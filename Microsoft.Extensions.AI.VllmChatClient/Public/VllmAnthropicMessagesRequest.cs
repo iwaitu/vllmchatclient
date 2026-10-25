@@ -21,6 +21,16 @@ internal sealed class VllmAnthropicMessagesRequest
     /// <summary>Anthropic structured outputs: <c>output_config.format</c> with a JSON schema. Omitted unless a schema response format was requested.</summary>
     [JsonPropertyName("output_config")]
     public VllmAnthropicOutputConfig? OutputConfig { get; set; }
+    /// <summary>Automatic prompt caching (top-level <c>cache_control</c>). Omitted unless the caller opted in with <see cref="VllmAnthropicCacheControl"/>.</summary>
+    [JsonPropertyName("cache_control")]
+    public VllmAnthropicCacheControlRequest? CacheControl { get; set; }
+}
+
+/// <summary>Wire copy of <see cref="VllmAnthropicCacheControl"/>: <c>{"type":"ephemeral"}</c> with an optional <c>"ttl"</c>.</summary>
+internal sealed class VllmAnthropicCacheControlRequest
+{
+    public string Type { get; set; } = "ephemeral";
+    public string? Ttl { get; set; }
 }
 
 internal sealed class VllmAnthropicOutputConfig

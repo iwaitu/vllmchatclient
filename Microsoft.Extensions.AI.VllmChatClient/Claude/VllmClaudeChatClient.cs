@@ -89,7 +89,8 @@ namespace Microsoft.Extensions.AI
                 FinishReason = hasToolCall ? ChatFinishReason.ToolCalls : ToFinishReason(response.Choices[0].FinishReason),
                 ModelId = response.Model ?? options?.ModelId ?? Metadata.DefaultModelId,
                 ResponseId = response.Id,
-                Usage = ParseClaudeUsage(response),
+                // 与基类 Chat Completions 共用同一份计量解析：缺失字段为 null、非法计量统一报错，缓存细项保留在 AdditionalCounts。
+                Usage = ParseSharedChatCompletionsUsage(response),
             };
         }
 
@@ -113,21 +114,6 @@ namespace Microsoft.Extensions.AI
             }
 
             return null;
-        }
-
-        private static UsageDetails? ParseClaudeUsage(VllmChatResponse response)
-        {
-            if (response?.Usage == null)
-            {
-                return null;
-            }
-
-            return new UsageDetails
-            {
-                InputTokenCount = response.Usage.PromptTokens,
-                OutputTokenCount = response.Usage.CompletionTokens,
-                TotalTokenCount = response.Usage.TotalTokens
-            };
         }
     }
 }

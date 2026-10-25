@@ -44,6 +44,8 @@ namespace Microsoft.Extensions.AI;
 [JsonSerializable(typeof(VllmResponsesFunctionCallOutputInput))]
 [JsonSerializable(typeof(VllmResponsesImageContentPart))]
 [JsonSerializable(typeof(VllmResponsesTextContentPart))]
+[JsonSerializable(typeof(VllmResponsesTextOptions))]
+[JsonSerializable(typeof(VllmResponsesTextFormat))]
 [JsonSerializable(typeof(VllmResponsesResponse))]
 [JsonSerializable(typeof(VllmResponsesOutputItem))]
 [JsonSerializable(typeof(VllmResponsesContentPart))]

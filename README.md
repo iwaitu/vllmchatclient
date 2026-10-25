@@ -4,6 +4,36 @@
 
 # VllmChatClient
 
+### 2.0.32: DeepSeek1017 JSON Object compatibility
+
+`VllmDeepseekV4ChatClient` with effective model ID `deepseek-v4.1-flash-1017`
+accepts the existing `ChatResponseFormat.ForJsonSchema(...)` interface and
+translates the requested output format to JSON Object. No caller switch is
+required. The original schema becomes an additional system instruction;
+caller messages/options and tool parameter schemas remain unchanged.
+
+Chat Completions uses `response_format.type=json_object`, native Messages uses
+`output_config.format.type=json_object`, and Responses uses
+`text.format.type=json_object`. All three shapes are verified offline with
+streaming and nonstreaming replies and NativeAOT. Only the Aliyun native
+Messages JSON Object path has been exercised against a real provider for this
+release; Aliyun Responses support for `text.format` is unverified.
+
+JSON Object provides JSON syntax, **not server-enforced schema validation**.
+Existing business validators must still check fields and types. Response
+`AdditionalProperties` reports `vllm.structured_output.requested`,
+`vllm.structured_output.actual`, and
+`vllm.structured_output.provider_schema_enforced=false`; streaming reports
+them once and preserves them through standard MEAI aggregation. The SDK adds
+no repair or retry calls. Explicitly incompatible non-object root schemas
+fail before HTTP. Other model IDs/providers retain their previous behavior.
+
+Caller extension fields that directly override output formatting (`format`,
+`response_format`, `structured_outputs`, `output_config`, `output_format`,
+or `text`) are rejected during this mapping, including non-format siblings
+inside `output_config`/`text`. Use the normal response-format interface;
+unrelated extension parameters remain intact.
+
 ### 2.0.31: Sonnet 5.5 native Messages
 
 For the bounded `claude-sonnet-5-5` / `claude-sonnet-5.5` family in

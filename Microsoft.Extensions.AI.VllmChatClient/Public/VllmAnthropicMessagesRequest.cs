@@ -28,11 +28,14 @@ internal sealed class VllmAnthropicOutputConfig
     public required VllmAnthropicOutputFormat Format { get; set; }
 }
 
-/// <summary>The Anthropic wire shape is exactly <c>{"type":"json_schema","schema":{...}}</c>; no OpenAI name/strict wrapper.</summary>
+/// <summary>
+/// The Anthropic wire shape is exactly <c>{"type":"json_schema","schema":{...}}</c>; no OpenAI name/strict wrapper.
+/// JSON Object mode (<c>{"type":"json_object"}</c>, used only by clients that explicitly map to it) omits <see cref="Schema"/>.
+/// </summary>
 internal sealed class VllmAnthropicOutputFormat
 {
     public string Type { get; set; } = "json_schema";
-    public required JsonElement Schema { get; set; }
+    public JsonElement? Schema { get; set; }
 }
 
 internal sealed class VllmAnthropicMessage

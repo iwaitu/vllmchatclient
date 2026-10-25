@@ -13,6 +13,8 @@ internal sealed class VllmResponsesRequest
     public object? ToolChoice { get; set; }
     [JsonPropertyName("response_format")]
     public JsonElement? ResponseFormat { get; set; }
+    /// <summary>Responses API structured output setting (<c>text.format</c>). Omitted unless a client explicitly maps a response format to it.</summary>
+    public VllmResponsesTextOptions? Text { get; set; }
     public VllmReasoningOptions? Reasoning { get; set; }
     public float? Temperature { get; set; }
     [JsonPropertyName("top_p")]
@@ -23,6 +25,17 @@ internal sealed class VllmResponsesRequest
     public VllmStreamOptions? StreamOptions { get; set; }
     [JsonExtensionData]
     public Dictionary<string, object?>? ExtraBody { get; set; }
+}
+
+internal sealed class VllmResponsesTextOptions
+{
+    public required VllmResponsesTextFormat Format { get; set; }
+}
+
+/// <summary>The Responses wire shape is exactly <c>{"type":"json_object"}</c> for JSON Object mode; no schema members.</summary>
+internal sealed class VllmResponsesTextFormat
+{
+    public required string Type { get; set; }
 }
 
 internal sealed class VllmResponsesFunctionTool

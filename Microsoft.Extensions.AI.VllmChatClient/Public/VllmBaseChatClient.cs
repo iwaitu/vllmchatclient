@@ -2664,7 +2664,7 @@ namespace Microsoft.Extensions.AI
                 ToolChoice = anthropicToolChoice,
                 Temperature = chatRequest.Temperature ?? chatRequest.Options?.temperature,
                 TopP = chatRequest.TopP ?? chatRequest.Options?.top_p,
-                OutputConfig = ToVllmAnthropicOutputConfig(options?.ResponseFormat),
+                OutputConfig = ToVllmAnthropicOutputConfig(options),
             };
 
             var thinkingType = GetAnthropicThinkingType(chatRequest, options);
@@ -2704,9 +2704,9 @@ namespace Microsoft.Extensions.AI
         /// <c>{"type":"json_schema","schema":...}</c> (no OpenAI name/strict wrapper, no rewriting of the schema). Null and text send nothing.
         /// Plain JSON without a schema cannot be expressed by the Anthropic Messages API as strict structured output and is rejected before any request is sent.
         /// </summary>
-        private static VllmAnthropicOutputConfig? ToVllmAnthropicOutputConfig(ChatResponseFormat? format)
+        private protected virtual VllmAnthropicOutputConfig? ToVllmAnthropicOutputConfig(ChatOptions? options)
         {
-            if (format is not ChatResponseFormatJson jsonFormat)
+            if (options?.ResponseFormat is not ChatResponseFormatJson jsonFormat)
             {
                 return null;
             }

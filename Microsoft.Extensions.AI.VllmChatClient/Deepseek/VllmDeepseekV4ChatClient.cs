@@ -19,7 +19,24 @@ namespace Microsoft.Extensions.AI
 
         private protected override VllmOpenAIChatRequest ToVllmChatRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
         {
+            // deepseek-v4.1-flash-1017 不支持 JSON Schema，只支持 JSON Object：目标模型先在发送前校验根 Schema，
+            // 输入只枚举一次（基类会多次遍历 messages）。三种协议都经过这个入口，所以映射和指令注入只发生这一次。
+            var jsonFormat = VllmDeepseekJsonObjectCompat.IsApplicable(options, Metadata.DefaultModelId)
+                ? (ChatResponseFormatJson)options!.ResponseFormat!
+                : null;
+            if (jsonFormat is not null)
+            {
+                messages = messages as IList<ChatMessage> ?? messages.ToList();
+                VllmDeepseekJsonObjectCompat.ValidateRoot(jsonFormat);
+                VllmDeepseekJsonObjectCompat.RejectReservedAdditionalProperties(options!);
+            }
+
             var request = base.ToVllmChatRequest(messages, options, stream);
+
+            if (jsonFormat is not null)
+            {
+                ApplyJsonObjectCompatibility(request, options!, jsonFormat);
+            }
 
             // 历史消息中回传给模型的推理文本不应再带有审核标记。
             // ReasoningContent 是 object?：流式累计的值是 CLR string，非流式原始响应反序列化的值是 JsonElement(String)，
@@ -40,6 +57,107 @@ namespace Microsoft.Extensions.AI
             }
 
             return request;
+        }
+
+        /// <summary>
+        /// 把已经由基类生成的 Chat 请求就地改成 JSON Object 形态。只改这份新建的请求 DTO，不碰调用方的 messages/options：
+        /// 去掉 SDK 自动派生的 format / structured_outputs，response_format 精确为 {type:json_object}，并在开头 system 区末尾追加一条 SDK 指令。
+        /// 调用方显式带来的、能覆盖请求格式的扩展键不静默覆盖也不透传，直接拒绝（零 HTTP）。
+        /// </summary>
+        private void ApplyJsonObjectCompatibility(VllmOpenAIChatRequest request, ChatOptions options, ChatResponseFormatJson jsonFormat)
+        {
+            var sdkStructuredOutputs = ToVllmStructuredOutputs(options.ResponseFormat);
+            if (request.ExtraBody is { } extraBody)
+            {
+                foreach (var pair in extraBody)
+                {
+                    if (!VllmDeepseekJsonObjectCompat.IsConflictingExtensionKey(pair.Key))
+                    {
+                        continue;
+                    }
+
+                    // SDK 从 ResponseFormat 自动写入的 structured_outputs 是唯一允许被移除的那一项；值不同则是调用方自己的字段。
+                    if (string.Equals(pair.Key, "structured_outputs", StringComparison.Ordinal) &&
+                        sdkStructuredOutputs is { } generated &&
+                        pair.Value is JsonElement value &&
+                        string.Equals(value.GetRawText(), generated.GetRawText(), StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    throw VllmDeepseekJsonObjectCompat.ExtensionConflict();
+                }
+            }
+
+            if (request.Options?.extra_body is { } optionExtraBody)
+            {
+                foreach (var key in optionExtraBody.Keys)
+                {
+                    if (VllmDeepseekJsonObjectCompat.IsConflictingExtensionKey(key))
+                    {
+                        throw VllmDeepseekJsonObjectCompat.ExtensionConflict();
+                    }
+                }
+            }
+
+            if (request.ExtraBody is { } extra && extra.Remove("structured_outputs") && extra.Count == 0)
+            {
+                request.ExtraBody = null;
+            }
+
+            request.Format = null;
+            request.ResponseFormat = JsonSerializer.SerializeToElement(
+                new VllmResponseFormat { Type = "json_object" },
+                JsonContext.Default.VllmResponseFormat);
+
+            // 指令只在这里加一次，位于开头 system 区的末尾（没有 system 时放最前）。Anthropic / Responses 只消费这份已构造好的消息。
+            var existing = request.Messages;
+            var insertAt = 0;
+            while (insertAt < existing.Length && string.Equals(existing[insertAt].Role, "system", StringComparison.Ordinal))
+            {
+                insertAt++;
+            }
+
+            var merged = new VllmOpenAIChatRequestMessage[existing.Length + 1];
+            Array.Copy(existing, 0, merged, 0, insertAt);
+            merged[insertAt] = new VllmOpenAIChatRequestMessage
+            {
+                Role = "system",
+                Content = VllmDeepseekJsonObjectCompat.BuildInstruction(jsonFormat),
+            };
+            Array.Copy(existing, insertAt, merged, insertAt + 1, existing.Length - insertAt);
+            request.Messages = merged;
+        }
+
+        private protected override VllmResponsesRequest ToVllmResponsesRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
+        {
+            var request = base.ToVllmResponsesRequest(messages, options, stream);
+
+            if (VllmDeepseekJsonObjectCompat.IsApplicable(options, Metadata.DefaultModelId))
+            {
+                // Responses 协议用 text.format，不发送 Chat 的顶层 response_format。
+                request.ResponseFormat = null;
+                request.Text = new VllmResponsesTextOptions
+                {
+                    Format = new VllmResponsesTextFormat { Type = "json_object" },
+                };
+            }
+
+            return request;
+        }
+
+        private protected override VllmAnthropicOutputConfig? ToVllmAnthropicOutputConfig(ChatOptions? options)
+        {
+            if (!VllmDeepseekJsonObjectCompat.IsApplicable(options, Metadata.DefaultModelId))
+            {
+                return base.ToVllmAnthropicOutputConfig(options);
+            }
+
+            // 根 Schema 已在 ToVllmChatRequest 里校验过（该调用先于本方法）；这里只发 {type:json_object}，不带 schema。
+            return new VllmAnthropicOutputConfig
+            {
+                Format = new VllmAnthropicOutputFormat { Type = "json_object" },
+            };
         }
 
         private protected override VllmAnthropicMessagesRequest ToVllmAnthropicMessagesRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
@@ -162,6 +280,11 @@ namespace Microsoft.Extensions.AI
 
         public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
+            // 请求格式只在网络调用之前取一次标量快照；之后的元数据不再读取调用方的 Schema（它的 JsonDocument 可能已被释放）。
+            var requestedKind = VllmDeepseekJsonObjectCompat.IsApplicable(options, Metadata.DefaultModelId)
+                ? VllmDeepseekJsonObjectCompat.RequestedKind((ChatResponseFormatJson)options!.ResponseFormat!)
+                : null;
+
             var response = await base.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
 
             foreach (var message in response.Messages)
@@ -179,7 +302,7 @@ namespace Microsoft.Extensions.AI
                 DeepseekSafetyTagFilter.MayContainTag(reasoning.Reason) &&
                 response.Messages.Count > 0)
             {
-                return new ReasoningChatResponse(response.Messages[0], DeepseekSafetyTagFilter.Strip(reasoning.Reason))
+                response = new ReasoningChatResponse(response.Messages[0], DeepseekSafetyTagFilter.Strip(reasoning.Reason))
                 {
                     CreatedAt = response.CreatedAt,
                     FinishReason = response.FinishReason,
@@ -189,6 +312,13 @@ namespace Microsoft.Extensions.AI
                     RawRepresentation = response.RawRepresentation,
                     AdditionalProperties = response.AdditionalProperties,
                 };
+            }
+
+            // JSON Schema 被映射成 JSON Object 时，用固定元数据说明请求/实际格式和服务端并未强制 Schema（Schema 本身不写入）。
+            if (requestedKind is not null)
+            {
+                response.AdditionalProperties ??= [];
+                VllmDeepseekJsonObjectCompat.StampMetadata(response.AdditionalProperties, requestedKind);
             }
 
             return response;
@@ -202,6 +332,25 @@ namespace Microsoft.Extensions.AI
             var reasoningFilter = new DeepseekSafetyTagFilter();
             var answerFilter = new DeepseekSafetyTagFilter();
             ChatResponseUpdate? last = null;
+
+            // JSON Schema → JSON Object 的固定元数据只写一次：第一个实际发出的更新；没有任何更新的合法空流则单独补一个只含元数据的末尾更新。
+            // 标量快照在任何网络等待之前取得；之后只写标量，不再读取调用方的 Schema（其 JsonDocument 可能已释放）。
+            var requestedKind = VllmDeepseekJsonObjectCompat.IsApplicable(options, Metadata.DefaultModelId)
+                ? VllmDeepseekJsonObjectCompat.RequestedKind((ChatResponseFormatJson)options!.ResponseFormat!)
+                : null;
+            var metadataPending = requestedKind is not null;
+
+            void StampOnce(ChatResponseUpdate target)
+            {
+                if (!metadataPending)
+                {
+                    return;
+                }
+
+                metadataPending = false;
+                target.AdditionalProperties ??= [];
+                VllmDeepseekJsonObjectCompat.StampMetadata(target.AdditionalProperties, requestedKind!);
+            }
 
             await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken).ConfigureAwait(false))
             {
@@ -230,6 +379,7 @@ namespace Microsoft.Extensions.AI
                     continue;
                 }
 
+                StampOnce(update);
                 yield return update;
             }
 
@@ -242,7 +392,7 @@ namespace Microsoft.Extensions.AI
                     continue;
                 }
 
-                yield return new ReasoningChatResponseUpdate
+                var tailUpdate = new ReasoningChatResponseUpdate
                 {
                     CreatedAt = DateTimeOffset.Now,
                     ModelId = last?.ModelId,
@@ -251,6 +401,22 @@ namespace Microsoft.Extensions.AI
                     Thinking = thinking,
                     Contents = [new TextContent(tail)],
                 };
+                StampOnce(tailUpdate);
+                yield return tailUpdate;
+            }
+
+            if (metadataPending)
+            {
+                // 合法但没有任何可发出更新的流：只补元数据，不伪造 usage / finish / 文本。
+                var metadataOnly = new ChatResponseUpdate
+                {
+                    CreatedAt = DateTimeOffset.Now,
+                    ModelId = last?.ModelId,
+                    ResponseId = last?.ResponseId,
+                    Role = ChatRole.Assistant,
+                };
+                StampOnce(metadataOnly);
+                yield return metadataOnly;
             }
         }
     }

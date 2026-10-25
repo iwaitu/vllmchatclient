@@ -19,8 +19,69 @@ await SmokeAnthropicMessagesAsync(httpClient, handler);
 await SmokeAnthropicJsonSchemaAsync(httpClient, handler);
 await SmokeDeepseekV4HistoryAsync();
 await SmokeSonnet55OpaqueAsync();
+await SmokeDeepseekJsonObjectAsync();
 
 Console.WriteLine("NativeAOT smoke completed.");
+
+static async Task SmokeDeepseekJsonObjectAsync()
+{
+    const string model = "deepseek-v4.1-flash-1017";
+    using var schemaDoc = JsonDocument.Parse("""{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}""");
+    foreach (var mode in new[] { VllmApiMode.ChatCompletions, VllmApiMode.AnthropicMessages, VllmApiMode.Responses })
+    {
+        var fake = new QueueingHandler();
+        using var transport = new HttpClient(fake);
+        using var client = new VllmDeepseekV4ChatClient("https://example.test", "offline-only", model, transport, mode);
+        var options = new VllmChatOptions { ResponseFormat = ChatResponseFormat.ForJsonSchema(schemaDoc.RootElement, "probe"), ThinkingEnabled = false, MaxOutputTokens = 256 };
+        foreach (var stream in new[] { false, true })
+        {
+            string payload;
+            if (mode == VllmApiMode.AnthropicMessages)
+                payload = stream ? """
+                    data: {"type":"message_start","message":{"id":"n","model":"deepseek-v4.1-flash-1017","usage":{"input_tokens":1,"output_tokens":0}}}
+                    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+                    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\"ok\":true}"}}
+                    data: {"type":"content_block_stop","index":0}
+                    data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+                    data: {"type":"message_stop"}
+                    """ : """{"id":"n","type":"message","role":"assistant","model":"deepseek-v4.1-flash-1017","content":[{"type":"text","text":"{\"ok\":true}"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}""";
+            else if (mode == VllmApiMode.Responses)
+                payload = stream ? """
+                    data: {"type":"response.created","response":{"id":"r","model":"deepseek-v4.1-flash-1017"}}
+                    data: {"type":"response.output_text.delta","delta":"{\"ok\":true}"}
+                    data: {"type":"response.completed","response":{"id":"r","status":"completed","model":"deepseek-v4.1-flash-1017","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}
+                    """ : """{"id":"r","status":"completed","model":"deepseek-v4.1-flash-1017","output":[{"id":"m","type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}""";
+            else
+                payload = stream ? """
+                    data: {"id":"c","model":"deepseek-v4.1-flash-1017","choices":[{"index":0,"delta":{"content":"{\"ok\":true}"}}]}
+                    data: {"id":"c","model":"deepseek-v4.1-flash-1017","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}
+                    data: [DONE]
+                    """ : """{"id":"c","model":"deepseek-v4.1-flash-1017","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"{\"ok\":true}"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}""";
+            fake.Enqueue(stream ? Sse(payload) : Json(payload));
+            ChatResponse response;
+            if (stream)
+            {
+                List<ChatResponseUpdate> updates = [];
+                await foreach (var update in client.GetStreamingResponseAsync([new(ChatRole.User, "answer")], options)) updates.Add(update);
+                response = updates.ToChatResponse();
+            }
+            else response = await client.GetResponseAsync([new(ChatRole.User, "answer")], options);
+            using var requestDoc = JsonDocument.Parse(fake.LastRequestBody!);
+            var request = requestDoc.RootElement;
+            var format = mode switch
+            {
+                VllmApiMode.AnthropicMessages => request.GetProperty("output_config").GetProperty("format"),
+                VllmApiMode.Responses => request.GetProperty("text").GetProperty("format"),
+                _ => request.GetProperty("response_format")
+            };
+            if (format.GetProperty("type").GetString() != "json_object" || format.TryGetProperty("schema", out _)) throw new InvalidOperationException("DeepSeek JSON Object wire contract failed.");
+            using var result = JsonDocument.Parse(response.Text);
+            if (!result.RootElement.GetProperty("ok").GetBoolean()) throw new InvalidOperationException("DeepSeek JSON Object fake response missing.");
+            if (response.AdditionalProperties?["vllm.structured_output.actual"] as string != "json_object" || !Equals(response.AdditionalProperties?["vllm.structured_output.provider_schema_enforced"], false)) throw new InvalidOperationException("DeepSeek JSON Object metadata lost.");
+        }
+    }
+    Console.WriteLine("DeepSeek JSON Object: three protocols, streaming/nonstreaming, metadata and source-generated serialization passed.");
+}
 
 static async Task SmokeSonnet55OpaqueAsync()
 {

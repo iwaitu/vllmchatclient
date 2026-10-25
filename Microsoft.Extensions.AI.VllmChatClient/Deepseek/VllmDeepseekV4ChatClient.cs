@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Text.Json;
+
 namespace Microsoft.Extensions.AI
 {
     /// <summary>
@@ -19,16 +21,143 @@ namespace Microsoft.Extensions.AI
         {
             var request = base.ToVllmChatRequest(messages, options, stream);
 
-            // 历史消息中回传给模型的推理文本不应再带有审核标记
+            // 历史消息中回传给模型的推理文本不应再带有审核标记。
+            // ReasoningContent 是 object?：流式累计的值是 CLR string，非流式原始响应反序列化的值是 JsonElement(String)，
+            // 两者都按字符串处理；其它 JSON 类型（数组/对象）原样保留，不转成文本。只改这条出站请求的副本。
             foreach (var message in request.Messages)
             {
-                if (message.ReasoningContent is string reasoning && DeepseekSafetyTagFilter.MayContainTag(reasoning))
+                var reasoning = message.ReasoningContent switch
+                {
+                    string text => text,
+                    JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+                    _ => null,
+                };
+
+                if (reasoning is not null && DeepseekSafetyTagFilter.MayContainTag(reasoning))
                 {
                     message.ReasoningContent = DeepseekSafetyTagFilter.Strip(reasoning);
                 }
             }
 
             return request;
+        }
+
+        private protected override VllmAnthropicMessagesRequest ToVllmAnthropicMessagesRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
+        {
+            var request = base.ToVllmAnthropicMessagesRequest(messages, options, stream);
+
+            // 原生历史回放优先使用 AnthropicContentBlocks（来自原始响应块，未经显示过滤）。只在这份新建的请求 DTO 上，
+            // 清理 assistant 消息里已知的 text 块与未签名 thinking 块；其它角色、其它块与调用方对象一律不动。
+            foreach (var message in request.Messages)
+            {
+                if (string.Equals(message.Role, "assistant", StringComparison.OrdinalIgnoreCase) && message.Content.ValueKind == JsonValueKind.Array)
+                {
+                    message.Content = StripAssistantBlocks(message.Content);
+                }
+            }
+
+            return request;
+        }
+
+        /// <summary>
+        /// 当 <paramref name="block"/> 是含审核标签的 <c>text</c> 块，或不带签名的 <c>thinking</c> 块时，返回要改写的字段名和清理后的文本。
+        /// 带非空 signature 的 thinking（不透明签名对象）、redacted_thinking、tool_use、tool_result 与未知块都不改。
+        /// </summary>
+        private static bool TryGetCleanedField(JsonElement block, out string field, out string cleaned)
+        {
+            field = string.Empty;
+            cleaned = string.Empty;
+            if (block.ValueKind != JsonValueKind.Object || !block.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            switch (type.GetString())
+            {
+                case "text":
+                    field = "text";
+                    break;
+                case "thinking":
+                    if (block.TryGetProperty("signature", out var signature) &&
+                        signature.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) &&
+                        !(signature.ValueKind == JsonValueKind.String && signature.GetString()!.Length == 0))
+                    {
+                        return false;
+                    }
+
+                    field = "thinking";
+                    break;
+                default:
+                    return false;
+            }
+
+            if (!block.TryGetProperty(field, out var value) || value.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            var original = value.GetString()!;
+            if (!DeepseekSafetyTagFilter.MayContainTag(original))
+            {
+                return false;
+            }
+
+            cleaned = DeepseekSafetyTagFilter.Strip(original);
+            return true;
+        }
+
+        /// <summary>只在确有匹配的块上改写；没有任何匹配时原样返回同一个 JsonElement（出站字节与 2.0.29 完全相同）。</summary>
+        private static JsonElement StripAssistantBlocks(JsonElement content)
+        {
+            var any = false;
+            foreach (var block in content.EnumerateArray())
+            {
+                if (TryGetCleanedField(block, out _, out _))
+                {
+                    any = true;
+                    break;
+                }
+            }
+
+            if (!any)
+            {
+                return content;
+            }
+
+            var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartArray();
+                foreach (var block in content.EnumerateArray())
+                {
+                    if (!TryGetCleanedField(block, out var field, out var cleaned))
+                    {
+                        block.WriteTo(writer);
+                        continue;
+                    }
+
+                    // 按属性复制，只替换目标字符串；其它属性（含未知属性）的值与顺序保持不变。
+                    writer.WriteStartObject();
+                    foreach (var property in block.EnumerateObject())
+                    {
+                        if (property.NameEquals(field))
+                        {
+                            writer.WriteString(property.Name, cleaned);
+                        }
+                        else
+                        {
+                            property.WriteTo(writer);
+                        }
+                    }
+
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+            }
+
+            using var document = JsonDocument.Parse(buffer.WrittenMemory);
+            return document.RootElement.Clone();
         }
 
         public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)

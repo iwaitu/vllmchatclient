@@ -4,6 +4,24 @@
 
 # VllmChatClient
 
+### 2.0.30: DeepSeek V4 history replay
+
+The V4 client also cleans JSON-string Chat reasoning and native Anthropic
+assistant replay text and unsigned thinking blocks. Version 2.0.29 cleaned the
+displayed response, but replay could still use the original moderation blocks.
+Processing applies to newly built request fields; caller messages, raw captures,
+tool names/IDs/arguments and user material remain unchanged. No-tag history is
+not rewritten. V3 behavior remains unchanged.
+
+Opaque thinking blocks with a nonempty signature, redacted thinking and unknown
+blocks are preserved. This does not fix the base client's existing signature
+mapping limitations. Chat and Anthropic regular/streaming replay are verified;
+Responses replay is not covered by this fix. Anthropic streaming input-usage
+mapping is also outside this change. Requested JSON Schema is not proof of
+server enforcement; DashScope `deepseek-v4.1-flash-1017` guarantees JSON Object.
+Existing streaming history can include reasoning in replayed assistant text;
+that base mapping is preserved rather than treated as a new filtering result.
+
 ### 2.0.29: DeepSeek V4.x client
 
 New `VllmDeepseekV4ChatClient` (derives from `VllmDeepseekV3ChatClient`) for
@@ -12,7 +30,8 @@ OpenAI/Anthropic-compatible endpoints. Some V4.1 snapshots leak an internal
 `<ds_safety>...</ds_safety>` moderation block (followed by a `Safe` marker) into
 reasoning text; in streaming mode the tag is split across chunks. The V4 client
 strips it from streamed and non-streamed text, and from reasoning echoed back
-in tool-call history. `VllmDeepseekV3ChatClient` is unchanged.
+in streamed Chat reasoning history. Other replay paths are completed in 2.0.30.
+`VllmDeepseekV3ChatClient` is unchanged.
 
 ### 2.0.28: native Anthropic structured output
 

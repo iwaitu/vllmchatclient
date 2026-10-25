@@ -13,8 +13,52 @@ await SmokeArrayTextAndMediaPartsAsync(handler);
 await SmokeResponsesAsync(httpClient, handler);
 await SmokeAnthropicMessagesAsync(httpClient, handler);
 await SmokeAnthropicJsonSchemaAsync(httpClient, handler);
+await SmokeDeepseekV4HistoryAsync();
 
 Console.WriteLine("NativeAOT smoke completed.");
+
+static async Task SmokeDeepseekV4HistoryAsync()
+{
+    var handler = new QueueingHandler();
+    using var httpClient = new HttpClient(handler);
+    const string literal = "<ds_safety>keep-in-argument</ds_safety>";
+    using var blocks = JsonDocument.Parse("""
+        [{"type":"thinking","thinking":"想 <ds_safety>hidden</ds_safety>Safe\n继续","trace":{"v":1}},
+         {"type":"text","text":"答 <ds_safety>hidden</ds_safety>Safe\n完成"},
+         {"type":"tool_use","id":"call_v4","name":"echo","input":{"literal":"<ds_safety>keep-in-argument</ds_safety>"}}]
+        """);
+    var replay = blocks.RootElement.EnumerateArray().Select(b => b.Clone()).ToArray();
+    var original = replay.Select(b => b.GetRawText()).ToArray();
+    var assistant = new ChatMessage(ChatRole.Assistant,
+        [new FunctionCallContent("call_v4", "echo", new Dictionary<string, object?> { ["literal"] = literal })])
+    {
+        AdditionalProperties = new() { ["anthropic_content_blocks"] = replay }
+    };
+    using var client = new VllmDeepseekV4ChatClient("https://example.test/apps/anthropic", "test",
+        "deepseek-v4.1-flash-1017", httpClient, VllmApiMode.AnthropicMessages);
+    handler.Enqueue(Json("""
+        {"id":"v4","type":"message","role":"assistant","model":"deepseek-v4.1-flash-1017","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}
+        """));
+    _ = await client.GetResponseAsync([
+        new ChatMessage(ChatRole.User, "<ds_safety>user material</ds_safety>"), assistant,
+        new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call_v4", "ok")])
+    ], new VllmChatOptions { ThinkingEnabled = false, MaxOutputTokens = 256 });
+    using var request = JsonDocument.Parse(handler.LastRequestBody!);
+    var messages = request.RootElement.GetProperty("messages").EnumerateArray().ToArray();
+    var content = messages.Single(m => m.GetProperty("role").GetString() == "assistant").GetProperty("content");
+    if (content[0].GetProperty("thinking").GetString() != "想 继续" ||
+        content[1].GetProperty("text").GetString() != "答 完成" ||
+        content[0].GetProperty("trace").GetProperty("v").GetInt32() != 1 ||
+        content[2].GetProperty("input").GetProperty("literal").GetString() != literal ||
+        content[2].GetProperty("id").GetString() != "call_v4")
+        throw new InvalidOperationException("V4 NativeAOT history filtering lost text, unknown properties or tool arguments.");
+    if (!messages[0].GetProperty("content").GetRawText().Contains("user material") ||
+        !messages[0].GetProperty("content").GetRawText().Contains("ds_safety"))
+        throw new InvalidOperationException("V4 NativeAOT filtering changed user material.");
+    if (!replay.Select(b => b.GetRawText()).SequenceEqual(original))
+        throw new InvalidOperationException("V4 NativeAOT filtering mutated caller replay blocks.");
+    Console.WriteLine("DeepSeek V4 native replay (thinking/text/tool/raw) passed.");
+}
 
 static async Task SmokeAnthropicJsonSchemaAsync(HttpClient httpClient, QueueingHandler handler)
 {

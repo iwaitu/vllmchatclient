@@ -12,8 +12,43 @@ await SmokeArrayToolResultAsync(handler);
 await SmokeArrayTextAndMediaPartsAsync(handler);
 await SmokeResponsesAsync(httpClient, handler);
 await SmokeAnthropicMessagesAsync(httpClient, handler);
+await SmokeAnthropicJsonSchemaAsync(httpClient, handler);
 
 Console.WriteLine("NativeAOT smoke completed.");
+
+static async Task SmokeAnthropicJsonSchemaAsync(HttpClient httpClient, QueueingHandler handler)
+{
+    using var schema = JsonDocument.Parse("""
+        {"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}
+        """);
+    using var client = new VllmGlmChatClient("https://example.test/v1/messages", "test", "smoke", httpClient, VllmApiMode.AnthropicMessages);
+    var options = new ChatOptions { MaxOutputTokens = 256, ResponseFormat = ChatResponseFormat.ForJsonSchema(schema.RootElement, "probe") };
+    handler.Enqueue(Json("""
+        {"id":"msg_schema","type":"message","role":"assistant","model":"smoke","content":[{"type":"text","text":"{\"ok\":true}"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}
+        """));
+    _ = await client.GetResponseAsync([new ChatMessage(ChatRole.User, "Return JSON.")], options);
+    AssertSchema();
+    handler.Enqueue(Sse("""
+        data: {"type":"message_start","message":{"id":"msg_schema_s","type":"message","role":"assistant","model":"smoke","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\"ok\":true}"}}
+        data: {"type":"content_block_stop","index":0}
+        data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+        data: {"type":"message_stop"}
+        """));
+    await foreach (var _ in client.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "Return JSON.")], options)) { }
+    AssertSchema();
+
+    void AssertSchema()
+    {
+        using var body = JsonDocument.Parse(handler.LastRequestBody!);
+        var format = body.RootElement.GetProperty("output_config").GetProperty("format");
+        if (format.GetProperty("type").GetString() != "json_schema" || !JsonElement.DeepEquals(schema.RootElement, format.GetProperty("schema")))
+            throw new InvalidOperationException("NativeAOT Anthropic output schema was lost or changed.");
+        if (body.RootElement.TryGetProperty("response_format", out _))
+            throw new InvalidOperationException("OpenAI response_format must not leak into native Anthropic requests.");
+    }
+}
 
 static async Task SmokeArrayToolResultAsync(QueueingHandler handler)
 {

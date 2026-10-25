@@ -4,6 +4,27 @@
 
 # VllmChatClient
 
+### 2.0.28: native Anthropic structured output
+
+In `VllmApiMode.AnthropicMessages`, `ChatResponseFormat.ForJsonSchema(schema, ...)`
+now sends `output_config.format = { "type": "json_schema", "schema": ... }`
+for both regular and streaming requests. The JSON schema is preserved; OpenAI
+response-format name/description/strict wrappers are not sent to Anthropic.
+Text/default output omits `output_config`. Tool calling can be combined with
+the output schema; this release does not add strict tool-use configuration.
+
+**Behavior change:** native Anthropic `ChatResponseFormat.Json` without a schema
+now throws `NotSupportedException` before sending HTTP, instead of silently
+dropping the requested format. Supply `ForJsonSchema(...)` to request constrained
+JSON. QRE's schema-free `JsonObject` mode has the same requirement on this path.
+Other API modes retain their existing behavior.
+
+This adapter does not rewrite unsupported schema constraints. Anthropic requires
+`additionalProperties: false` for objects and supports a subset of JSON Schema;
+unsupported schemas can return HTTP 400. A refusal or `max_tokens` stop can still
+produce a response that does not match the schema. Check finish reasons and
+validate results. See the [official structured-output examples and restrictions](https://platform.claude.com/docs/en/build-with-claude/structured-outputs#curl).
+
 [![GitHub stars](https://img.shields.io/github/stars/iwaitu/vllmchatclient?style=social)](https://github.com/iwaitu/vllmchatclient/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/iwaitu/vllmchatclient?style=social)](https://github.com/iwaitu/vllmchatclient/network)
 [![GitHub issues](https://img.shields.io/github/issues/iwaitu/vllmchatclient)](https://github.com/iwaitu/vllmchatclient/issues)

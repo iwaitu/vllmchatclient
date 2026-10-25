@@ -594,6 +594,284 @@ public class AnthropicApiModeTests
         Assert.Contains(updates, u => u is UsageChatResponseUpdate usage && usage.Usage?.TotalTokenCount == 3);
     }
 
+    // ---- Anthropic structured outputs: output_config.format (JSON schema) ----------------------------------------------------------------------------------
+
+    private const string EmailSchemaJson = """{"type":"object","properties":{"name":{"type":"string"},"email":{"type":"string"},"plan_interest":{"type":"string"},"demo_requested":{"type":"boolean"}},"required":["name","email","plan_interest","demo_requested"],"additionalProperties":false}""";
+
+    private const string EmailAnswer = """{"name":"John Smith","email":"john@example.com","plan_interest":"Enterprise","demo_requested":true}""";
+
+    private static readonly string EmailMessageResponse =
+        """{"id":"msg-so","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"{\"name\":\"John Smith\",\"email\":\"john@example.com\",\"plan_interest\":\"Enterprise\",\"demo_requested\":true}"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":9}}""";
+
+    private static ChatResponseFormat SchemaFormat(string schemaJson)
+    {
+        using var document = JsonDocument.Parse(schemaJson);
+        return ChatResponseFormat.ForJsonSchema(document.RootElement.Clone(), "email_info", "Key information from an email");
+    }
+
+    private static readonly ChatMessage[] EmailPrompt =
+    [
+        new ChatMessage(ChatRole.User, "Extract the key information from this email: John Smith (john@example.com) is interested in our Enterprise plan and wants to schedule a demo for next Tuesday at 2pm.")
+    ];
+
+    /// <summary>The entity actually posted, the request headers and how many requests reached the transport.</summary>
+    private sealed class WireRecorder
+    {
+        public string? Body { get; private set; }
+        public int Requests { get; private set; }
+        public bool HadBetaHeader { get; private set; }
+
+        public HttpMessageHandler Handler(string responseJson) => new CaptureHttpMessageHandler(async request =>
+        {
+            await Record(request);
+            return JsonResponse(responseJson);
+        });
+
+        public HttpMessageHandler StreamHandler() => new CaptureHttpMessageHandler(async request =>
+        {
+            await Record(request);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "event: message_start\n" + """data: {"type":"message_start","message":{"id":"msg-so","type":"message","role":"assistant","model":"claude-test","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}""" + "\n\n"
+                    + "event: content_block_start\n" + """data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""" + "\n\n"
+                    + "event: content_block_delta\n" + """data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\"name\":\"John Smith\","}}""" + "\n\n"
+                    + "event: content_block_delta\n" + """data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\"email\":\"john@example.com\",\"plan_interest\":\"Enterprise\",\"demo_requested\":true}"}}""" + "\n\n"
+                    + "event: message_delta\n" + """data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":1,"output_tokens":9}}""" + "\n\n"
+                    + "event: message_stop\n" + """data: {"type":"message_stop"}""" + "\n\n",
+                    Encoding.UTF8,
+                    "text/event-stream")
+            };
+        });
+
+        private async Task Record(HttpRequestMessage request)
+        {
+            Requests++;
+            Body = request.Content is null ? null : await request.Content.ReadAsStringAsync();
+            HadBetaHeader = request.Headers.Contains("anthropic-beta");
+        }
+    }
+
+    private static void AssertOutputConfigCarriesSchema(string body, string expectedSchemaJson)
+    {
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        var outputConfig = root.GetProperty("output_config");
+        Assert.Equal(["format"], outputConfig.EnumerateObject().Select(p => p.Name));
+        var format = outputConfig.GetProperty("format");
+        Assert.Equal(["type", "schema"], format.EnumerateObject().Select(p => p.Name));     // no OpenAI name / strict / description wrapper
+        Assert.Equal("json_schema", format.GetProperty("type").GetString());
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(
+            System.Text.Json.Nodes.JsonNode.Parse(format.GetProperty("schema").GetRawText()),
+            System.Text.Json.Nodes.JsonNode.Parse(expectedSchemaJson)), "the schema must reach the wire semantically unchanged");
+        Assert.False(root.TryGetProperty("response_format", out _));
+        Assert.False(root.TryGetProperty("format", out _));
+        Assert.DoesNotContain("email_info", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"strict\"", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BaseClient_AnthropicMode_ShouldSendJsonSchemaAsOutputConfigFormat()
+    {
+        var wire = new WireRecorder();
+        using var httpClient = new HttpClient(wire.Handler(EmailMessageResponse));
+        using var client = new TestVllmChatClient("http://localhost:8000/v1", "test-key", httpClient, VllmApiMode.AnthropicMessages);
+
+        var response = await client.GetResponseAsync(EmailPrompt, new ChatOptions { MaxOutputTokens = 1024, ResponseFormat = SchemaFormat(EmailSchemaJson) });
+
+        Assert.Equal(1, wire.Requests);
+        Assert.False(wire.HadBetaHeader);                                                     // output_config needs no beta header
+        AssertOutputConfigCarriesSchema(wire.Body!, EmailSchemaJson);
+        Assert.Equal(EmailAnswer, response.Text);
+        using var answer = JsonDocument.Parse(response.Text);
+        Assert.True(answer.RootElement.GetProperty("demo_requested").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ClaudeClient_AnthropicMode_ShouldSendJsonSchemaAsOutputConfigFormat()
+    {
+        var wire = new WireRecorder();
+        using var httpClient = new HttpClient(wire.Handler(EmailMessageResponse));
+        using var client = new VllmClaudeChatClient("http://localhost:8000/v1", "test-key", "claude-test", httpClient, VllmApiMode.AnthropicMessages);
+
+        var response = await client.GetResponseAsync(EmailPrompt, new VllmChatOptions { ThinkingEnabled = false, MaxOutputTokens = 256, ResponseFormat = SchemaFormat(EmailSchemaJson) });
+
+        AssertOutputConfigCarriesSchema(wire.Body!, EmailSchemaJson);
+        using var document = JsonDocument.Parse(wire.Body!);
+        Assert.Equal("disabled", document.RootElement.GetProperty("thinking").GetProperty("type").GetString());
+        Assert.Equal(256, document.RootElement.GetProperty("max_tokens").GetInt32());
+        Assert.Equal(EmailAnswer, response.Text);
+    }
+
+    [Fact]
+    public async Task BaseClient_AnthropicModeStreaming_ShouldSendTheSameOutputConfigFormat()
+    {
+        var wire = new WireRecorder();
+        using var httpClient = new HttpClient(wire.StreamHandler());
+        using var client = new TestVllmChatClient("http://localhost:8000/v1", "test-key", httpClient, VllmApiMode.AnthropicMessages);
+
+        var text = new StringBuilder();
+        await foreach (var update in client.GetStreamingResponseAsync(EmailPrompt, new ChatOptions { MaxOutputTokens = 1024, ResponseFormat = SchemaFormat(EmailSchemaJson) }))
+        {
+            text.Append(string.Concat(update.Contents.OfType<TextContent>().Select(c => c.Text)));
+        }
+
+        Assert.Equal(1, wire.Requests);
+        Assert.False(wire.HadBetaHeader);
+        AssertOutputConfigCarriesSchema(wire.Body!, EmailSchemaJson);
+        using var document = JsonDocument.Parse(wire.Body!);
+        Assert.True(document.RootElement.GetProperty("stream").GetBoolean());
+        Assert.Equal(EmailAnswer, text.ToString());
+    }
+
+    public static TheoryData<string> LosslessSchemas => new()
+    {
+        // nested objects and arrays with required / additionalProperties at every level
+        """{"type":"object","properties":{"patch":{"type":"object","properties":{"upserts":{"type":"array","items":{"type":"object","properties":{"kind":{"type":"integer"},"code":{"type":"string"}},"required":["kind","code"],"additionalProperties":false}},"remove":{"type":"array","items":{"type":"string"}}},"required":["upserts","remove"],"additionalProperties":false}},"required":["patch"],"additionalProperties":false}""",
+        // $defs and $ref
+        """{"$defs":{"address":{"type":"object","properties":{"street":{"type":"string"},"city":{"type":"string"}},"required":["street","city"],"additionalProperties":false}},"type":"object","properties":{"home":{"$ref":"#/$defs/address"},"work":{"$ref":"#/$defs/address"}},"required":["home","work"],"additionalProperties":false}""",
+        // anyOf, enum, const, string formats, defaults with their original number text
+        """{"type":"object","properties":{"status":{"type":"string","enum":["Pass","Fail","NeedsReview"]},"kind":{"const":"rule"},"when":{"anyOf":[{"type":"string","format":"date-time"},{"type":"null"}]},"ratio":{"type":"number","default":1.50},"contact":{"type":"string","format":"email"}},"required":["status","kind","when","ratio","contact"],"additionalProperties":false}""",
+        // non-ASCII text in descriptions and property names
+        """{"type":"object","description":"项目名称与说明","properties":{"项目名称":{"type":"string","description":"原文中的名称"}},"required":["项目名称"],"additionalProperties":false}""",
+    };
+
+    [Theory]
+    [MemberData(nameof(LosslessSchemas))]
+    public async Task BaseClient_AnthropicMode_ShouldKeepSchemaStructureWithoutRewriting(string schemaJson)
+    {
+        foreach (var streaming in new[] { false, true })
+        {
+            var wire = new WireRecorder();
+            using var httpClient = new HttpClient(streaming ? wire.StreamHandler() : wire.Handler(EmailMessageResponse));
+            using var client = new TestVllmChatClient("http://localhost:8000/v1", "test-key", httpClient, VllmApiMode.AnthropicMessages);
+            var options = new ChatOptions { MaxOutputTokens = 512, ResponseFormat = SchemaFormat(schemaJson) };
+
+            if (streaming)
+            {
+                await foreach (var unused in client.GetStreamingResponseAsync(EmailPrompt, options)) { }
+            }
+            else
+            {
+                await client.GetResponseAsync(EmailPrompt, options);
+            }
+
+            AssertOutputConfigCarriesSchema(wire.Body!, schemaJson);                 // structure, required, additionalProperties, $ref/$defs, anyOf, enum, const untouched
+            if (schemaJson.Contains("\"default\":1.50", StringComparison.Ordinal))
+            {
+                Assert.Contains("\"default\":1.50", wire.Body, StringComparison.Ordinal);   // numbers keep their original text
+            }
+            if (schemaJson.Contains("$ref", StringComparison.Ordinal))
+            {
+                Assert.Contains("\"$ref\":\"#/$defs/address\"", wire.Body, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("text")]
+    public async Task BaseClient_AnthropicMode_NullOrTextResponseFormat_ShouldOmitOutputConfig(string kind)
+    {
+        foreach (var streaming in new[] { false, true })
+        {
+            var wire = new WireRecorder();
+            using var httpClient = new HttpClient(streaming ? wire.StreamHandler() : wire.Handler(EmailMessageResponse));
+            using var client = new TestVllmChatClient("http://localhost:8000/v1", "test-key", httpClient, VllmApiMode.AnthropicMessages);
+            var options = new ChatOptions { MaxOutputTokens = 64, ResponseFormat = kind == "text" ? ChatResponseFormat.Text : null };
+
+            if (streaming)
+            {
+                await foreach (var unused in client.GetStreamingResponseAsync(EmailPrompt, options)) { }
+            }
+            else
+            {
+                await client.GetResponseAsync(EmailPrompt, options);
+            }
+
+            using var document = JsonDocument.Parse(wire.Body!);
+            Assert.False(document.RootElement.TryGetProperty("output_config", out _));
+            Assert.DoesNotContain("output_config", wire.Body, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData("base")]
+    [InlineData("claude")]
+    public async Task AnthropicMode_SchemalessJsonResponseFormat_ShouldFailBeforeAnyHttpRequest(string clientKind)
+    {
+        var wire = new WireRecorder();
+        using var httpClient = new HttpClient(wire.Handler(EmailMessageResponse));
+        using VllmBaseChatClient client = clientKind == "claude"
+            ? new VllmClaudeChatClient("http://localhost:8000/v1", "test-key", "claude-test", httpClient, VllmApiMode.AnthropicMessages)
+            : new TestVllmChatClient("http://localhost:8000/v1", "test-key", httpClient, VllmApiMode.AnthropicMessages);
+        var options = new ChatOptions { MaxOutputTokens = 64, ResponseFormat = ChatResponseFormat.Json };
+
+        var normal = await Assert.ThrowsAsync<NotSupportedException>(() => client.GetResponseAsync(EmailPrompt, options));
+        Assert.Contains("Anthropic", normal.Message, StringComparison.Ordinal);
+        Assert.Contains("JSON schema", normal.Message, StringComparison.Ordinal);
+
+        var streaming = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (var unused in client.GetStreamingResponseAsync(EmailPrompt, options)) { }
+        });
+        Assert.Contains("Anthropic", streaming.Message, StringComparison.Ordinal);
+        Assert.Contains("JSON schema", streaming.Message, StringComparison.Ordinal);
+
+        Assert.Equal(0, wire.Requests);                                                          // nothing was sent
+        Assert.Null(wire.Body);
+    }
+
+    [Fact]
+    public async Task BaseClient_AnthropicMode_OutputConfigShouldCoexistWithToolsAndThinkingWithoutChangingThem()
+    {
+        var tools = new List<AITool> { AIFunctionFactory.Create((string city) => "sunny", "GetWeather", "Gets the weather for a city.") };
+
+        async Task<string> PostAsync(ChatResponseFormat? format)
+        {
+            var wire = new WireRecorder();
+            using var httpClient = new HttpClient(wire.Handler(EmailMessageResponse));
+            using var client = new TestVllmChatClient("http://localhost:8000/v1", "test-key", httpClient, VllmApiMode.AnthropicMessages);
+            await client.GetResponseAsync(EmailPrompt, new VllmChatOptions
+            {
+                ThinkingEnabled = false, MaxOutputTokens = 256, Tools = tools, ToolMode = ChatToolMode.RequireAny, ResponseFormat = format,
+            });
+            return wire.Body!;
+        }
+
+        var without = await PostAsync(null);
+        var with = await PostAsync(SchemaFormat(EmailSchemaJson));
+
+        AssertOutputConfigCarriesSchema(with, EmailSchemaJson);
+        using var plain = JsonDocument.Parse(without);
+        using var structured = JsonDocument.Parse(with);
+        Assert.False(plain.RootElement.TryGetProperty("output_config", out _));
+        foreach (var name in new[] { "model", "max_tokens", "messages", "tools", "tool_choice", "thinking", "stream" })
+        {
+            Assert.True(plain.RootElement.TryGetProperty(name, out var before), name);
+            Assert.True(structured.RootElement.TryGetProperty(name, out var after), name);
+            Assert.Equal(before.GetRawText(), after.GetRawText());                                // everything else is byte-identical
+        }
+        Assert.Equal("GetWeather", structured.RootElement.GetProperty("tools")[0].GetProperty("name").GetString());
+        Assert.Equal("object", structured.RootElement.GetProperty("tools")[0].GetProperty("input_schema").GetProperty("type").GetString());
+        Assert.Equal("disabled", structured.RootElement.GetProperty("thinking").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task ChatCompletionsMode_ShouldKeepItsOpenAiResponseFormatAndNeverSendOutputConfig()
+    {
+        var wire = new WireRecorder();
+        using var httpClient = new HttpClient(wire.Handler(
+            """{"id":"x","object":"chat.completion","model":"claude-test","choices":[{"index":0,"message":{"role":"assistant","content":"{}"},"finish_reason":"stop"}]}"""));
+        using var client = new TestVllmChatClient("http://localhost:8000/v1", "test-key", httpClient, VllmApiMode.ChatCompletions);
+
+        await client.GetResponseAsync(EmailPrompt, new ChatOptions { MaxOutputTokens = 64, ResponseFormat = SchemaFormat(EmailSchemaJson) });
+
+        using var document = JsonDocument.Parse(wire.Body!);
+        Assert.False(document.RootElement.TryGetProperty("output_config", out _));
+        Assert.True(document.RootElement.TryGetProperty("response_format", out _));
+    }
+
     private static HttpResponseMessage JsonResponse(string json)
     {
         return new HttpResponseMessage(HttpStatusCode.OK)

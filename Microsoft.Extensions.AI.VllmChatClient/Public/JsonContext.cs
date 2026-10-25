@@ -60,6 +60,8 @@ namespace Microsoft.Extensions.AI;
 [JsonSerializable(typeof(VllmAnthropicTool))]
 [JsonSerializable(typeof(VllmAnthropicToolChoice))]
 [JsonSerializable(typeof(VllmAnthropicThinkingOptions))]
+[JsonSerializable(typeof(VllmAnthropicOutputConfig))]
+[JsonSerializable(typeof(VllmAnthropicOutputFormat))]
 [JsonSerializable(typeof(VllmAnthropicMessagesResponse))]
 [JsonSerializable(typeof(VllmAnthropicContentBlock))]
 [JsonSerializable(typeof(VllmAnthropicUsage))]

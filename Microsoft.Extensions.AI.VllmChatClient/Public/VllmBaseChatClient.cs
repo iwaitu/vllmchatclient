@@ -2230,6 +2230,7 @@ namespace Microsoft.Extensions.AI
                 ToolChoice = ToVllmAnthropicToolChoice(chatRequest.ToolChoice),
                 Temperature = chatRequest.Temperature ?? chatRequest.Options?.temperature,
                 TopP = chatRequest.TopP ?? chatRequest.Options?.top_p,
+                OutputConfig = ToVllmAnthropicOutputConfig(options?.ResponseFormat),
             };
 
             var thinkingType = GetAnthropicThinkingType(chatRequest, options);
@@ -2250,6 +2251,31 @@ namespace Microsoft.Extensions.AI
             }
 
             return request;
+        }
+
+        /// <summary>
+        /// Maps <see cref="ChatOptions.ResponseFormat"/> to Anthropic <c>output_config.format</c>. A schema response format sends the schema unchanged as
+        /// <c>{"type":"json_schema","schema":...}</c> (no OpenAI name/strict wrapper, no rewriting of the schema). Null and text send nothing.
+        /// Plain JSON without a schema cannot be expressed by the Anthropic Messages API as strict structured output and is rejected before any request is sent.
+        /// </summary>
+        private static VllmAnthropicOutputConfig? ToVllmAnthropicOutputConfig(ChatResponseFormat? format)
+        {
+            if (format is not ChatResponseFormatJson jsonFormat)
+            {
+                return null;
+            }
+
+            if (jsonFormat.Schema is not { } schema || schema.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+            {
+                throw new NotSupportedException(
+                    "The Anthropic Messages API supports structured output only with a JSON schema. " +
+                    "ChatResponseFormat.Json without a schema is not supported; use ChatResponseFormat.ForJsonSchema(...) or remove the response format.");
+            }
+
+            return new VllmAnthropicOutputConfig
+            {
+                Format = new VllmAnthropicOutputFormat { Schema = schema },
+            };
         }
 
         private static string? GetAnthropicThinkingType(VllmOpenAIChatRequest chatRequest, ChatOptions? options)

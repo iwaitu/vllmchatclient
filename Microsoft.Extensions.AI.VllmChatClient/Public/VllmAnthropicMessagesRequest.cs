@@ -18,6 +18,21 @@ internal sealed class VllmAnthropicMessagesRequest
     public float? Temperature { get; set; }
     [JsonPropertyName("top_p")]
     public float? TopP { get; set; }
+    /// <summary>Anthropic structured outputs: <c>output_config.format</c> with a JSON schema. Omitted unless a schema response format was requested.</summary>
+    [JsonPropertyName("output_config")]
+    public VllmAnthropicOutputConfig? OutputConfig { get; set; }
+}
+
+internal sealed class VllmAnthropicOutputConfig
+{
+    public required VllmAnthropicOutputFormat Format { get; set; }
+}
+
+/// <summary>The Anthropic wire shape is exactly <c>{"type":"json_schema","schema":{...}}</c>; no OpenAI name/strict wrapper.</summary>
+internal sealed class VllmAnthropicOutputFormat
+{
+    public string Type { get; set; } = "json_schema";
+    public required JsonElement Schema { get; set; }
 }
 
 internal sealed class VllmAnthropicMessage

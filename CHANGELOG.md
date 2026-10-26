@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.34
+
+- In `VllmGlmChatClient` Chat Completions, map `ThinkingEnabled=false` to
+  enabled thinking with `reasoning_effort=low` for exact GLM-5.3-Flash model
+  IDs, including the optional `ZHIPU/` prefix and per-call model overrides.
+  This is low-effort reasoning, not a guarantee of zero reasoning tokens.
+- Preserve explicit `low`, `high`, or `max` effort when thinking is enabled;
+  reject unsupported non-empty effort values before sending HTTP. Keep older
+  model behavior and caller-owned options unchanged.
+- Add offline request coverage for streaming, tools, history replay, model
+  overrides, and repeated calls. Include these tests in build and release CI.
+
 ## 2.0.33
 
 - Add an explicit, opt-in Anthropic prompt-cache setting for the native

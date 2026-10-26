@@ -4,6 +4,17 @@
 
 # VllmChatClient
 
+### 2.0.34: GLM-5.3-Flash thinking compatibility
+
+With `VllmGlmChatClient` in Chat Completions mode, `ThinkingEnabled=false`
+uses enabled thinking with `reasoning_effort=low` for `glm-5.3-flash` and
+`ZHIPU/GLM-5.3-Flash`. These models cannot disable reasoning; low effort can
+still consume reasoning tokens. Other GLM model IDs retain their behavior.
+When thinking is enabled, `ReasoningEffort` accepts `low`, `high`, or `max`;
+null/whitespace keeps the model default, and unsupported non-empty values
+are rejected before HTTP. Model IDs are matched case-insensitively without
+rewriting the ID sent to the provider. Per-call model overrides are honored.
+
 ### 2.0.33: explicit prompt caching and unified usage metering
 
 **Prompt caching is opt-in and never enabled by the SDK.** For

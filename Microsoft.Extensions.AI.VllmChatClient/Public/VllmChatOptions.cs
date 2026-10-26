@@ -7,6 +7,13 @@ public class VllmChatOptions : ChatOptions
     /// Qwen3.8 reasoning effort passed as <c>reasoning_effort</c>.
     /// Supported chat-template values are <c>low</c>, <c>medium</c>, and <c>xhigh</c>.
     /// A <see langword="null"/> value uses the model or chat-template default.
+    /// <para>
+    /// <c>VllmGlmChatClient</c> only reads this for the always-thinking GLM-5.3-Flash model, whose legal values are
+    /// <c>low</c>, <c>high</c>, and <c>max</c>: with <see cref="ThinkingEnabled"/> = <see langword="true"/> a legal value is sent
+    /// (case-insensitive), null/whitespace keeps the model default, and any other non-empty value (such as <c>medium</c> or <c>xhigh</c>)
+    /// throws <see cref="ArgumentException"/> before any request is sent. With <see cref="ThinkingEnabled"/> = <see langword="false"/>
+    /// the model cannot disable thinking, so thinking stays enabled with <c>low</c>, regardless of this value. Other GLM models ignore it.
+    /// </para>
     /// </summary>
     public string? ReasoningEffort { get; set; }
 

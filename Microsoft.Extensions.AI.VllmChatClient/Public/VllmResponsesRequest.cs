@@ -44,6 +44,7 @@ internal sealed class VllmResponsesFunctionTool
     public required string Name { get; set; }
     public required string Description { get; set; }
     public required VllmFunctionToolParameters Parameters { get; set; }
+    public bool? Strict { get; set; }
 }
 
 internal sealed class VllmResponsesFunctionToolChoice

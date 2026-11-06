@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.35
+
+- Add opt-in tool-level `strict`. Set
+  `AIFunction.AdditionalProperties["strictJsonSchema"]` to `true` or `false`
+  (the same key Microsoft.Extensions.AI.OpenAI reads) and the flag is sent on
+  the tool definition: `tools[].function.strict` for Chat Completions,
+  `tools[].strict` for Responses and Anthropic Messages. When the key is absent
+  or not a boolean, `strict` is omitted and requests are unchanged.
+- This only forwards the flag. Whether the schema is enforced depends on the
+  backend (for vLLM `tool_choice="auto"`, on its strict-tool-calling setting),
+  and the caller must supply an OpenAI-strict-compatible schema
+  (`additionalProperties: false`, every property in `required`). Older vLLM
+  versions rejected the `strict` field, so leave it unset for those backends.
+- Clients with their own tool builders (Qwq, Gemma, Gemini 3) are not changed.
+
 ## 2.0.34
 
 - In `VllmGlmChatClient` Chat Completions, map `ThinkingEnabled=false` to

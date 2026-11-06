@@ -103,6 +103,7 @@ internal sealed class VllmAnthropicTool
     public string? Description { get; set; }
     [JsonPropertyName("input_schema")]
     public required VllmFunctionToolParameters InputSchema { get; set; }
+    public bool? Strict { get; set; }
 }
 
 internal sealed class VllmAnthropicToolChoice

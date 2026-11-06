@@ -2611,6 +2611,7 @@ namespace Microsoft.Extensions.AI
                     Name = tool.Function.Name,
                     Description = tool.Function.Description,
                     Parameters = tool.Function.Parameters,
+                    Strict = tool.Function.Strict,
                 }),
                 ToolChoice = chatRequest.ToolChoice is VllmOpenAIToolChoice { Function: { } function }
                     ? new VllmResponsesFunctionToolChoice { Name = function.Name }
@@ -2905,6 +2906,7 @@ namespace Microsoft.Extensions.AI
                 Name = tool.Function.Name,
                 Description = tool.Function.Description,
                 InputSchema = tool.Function.Parameters,
+                Strict = tool.Function.Strict,
             };
         }
 
@@ -3601,6 +3603,7 @@ namespace Microsoft.Extensions.AI
                     Name = function.Name,
                     Description = function.Description,
                     Parameters = JsonSerializer.Deserialize(function.JsonSchema, JsonContext.Default.VllmFunctionToolParameters)!,
+                    Strict = VllmToolStrictness.Read(function),
                 }
             };
         }

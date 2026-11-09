@@ -7,10 +7,52 @@ namespace Microsoft.Extensions.AI
 {
     public class VllmOpenAiGptClient : VllmBaseChatClient
     {
-        public VllmOpenAiGptClient(string endpoint, string? token = null, string? modelId = "openai/gpt-5.2-codex", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
-            : base(NormalizeOpenAICompatibleEndpoint(endpoint, apiMode), token, modelId, httpClient, apiMode)
+        // OpenAI's own API (api.openai.com) rejects the OpenRouter/vLLM-style extensions this client adds for other hosts
+        // (a nested "options" object, "reasoning", "include_reasoning", ...): it answers 400 unknown_parameter. For that host
+        // the request carries only fields the official Chat Completions / Responses API defines.
+        private static readonly VllmCompatibleEndpointProfile OfficialOpenAiProfile = new()
         {
+            ProviderName = "openai",
+            UseTopLevelGenerationOptions = true,
+            UseMaxCompletionTokens = true,
+        };
+
+        private readonly bool _officialOpenAi;
+
+        public VllmOpenAiGptClient(string endpoint, string? token = null, string? modelId = "openai/gpt-5.2-codex", HttpClient? httpClient = null, VllmApiMode apiMode = VllmApiMode.ChatCompletions)
+            : base(NormalizeOpenAICompatibleEndpoint(endpoint, apiMode), token, modelId, httpClient, apiMode, IsOfficialOpenAiEndpoint(endpoint) ? OfficialOpenAiProfile : null)
+        {
+            _officialOpenAi = IsOfficialOpenAiEndpoint(endpoint);
         }
+
+        // GPT-5/6 (not the -pro variants) accept reasoning effort "none"; o-series and -pro models do not.
+        private static bool SupportsNoReasoning(string? model)
+        {
+            var name = ModelName(model);
+            return (name.StartsWith("gpt-5", StringComparison.Ordinal) || name.StartsWith("gpt-6", StringComparison.Ordinal)) &&
+                   !name.Contains("-pro", StringComparison.Ordinal);
+        }
+
+        // Reasoning models refuse temperature/top_p while they reason; with effort "none" they are accepted again.
+        private static bool SamplingRefused(string? model, string? effort)
+        {
+            var name = ModelName(model);
+            var reasoningFamily = name.StartsWith("gpt-5", StringComparison.Ordinal) ||
+                                  name.StartsWith("gpt-6", StringComparison.Ordinal) ||
+                                  name.StartsWith("o1", StringComparison.Ordinal) ||
+                                  name.StartsWith("o3", StringComparison.Ordinal) ||
+                                  name.StartsWith("o4", StringComparison.Ordinal);
+            return reasoningFamily && !string.Equals(effort, "none", StringComparison.Ordinal);
+        }
+
+        private static string ModelName(string? model)
+        {
+            var name = (model ?? string.Empty).Trim().ToLowerInvariant();
+            return name.StartsWith("openai/", StringComparison.Ordinal) ? name["openai/".Length..] : name;
+        }
+
+        internal static bool IsOfficialOpenAiEndpoint(string endpoint)
+            => endpoint.Contains("//api.openai.com", StringComparison.OrdinalIgnoreCase);
 
         public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
@@ -48,6 +90,48 @@ namespace Microsoft.Extensions.AI
         private protected override void ApplyRequestOptions(VllmOpenAIChatRequest request, ChatOptions? options)
         {
             base.ApplyRequestOptions(request, options);
+
+            if (_officialOpenAi)
+            {
+                // Sampling and the token limit were moved to the top level by the profile. Reasoning effort is the only
+                // reasoning control the official API takes, and only when the caller asked for one.
+                var officialEffort = options switch
+                {
+                    OpenAiGptChatOptions gpt => gpt.ReasoningLevel switch
+                    {
+                        OpenAiGptReasoningLevel.Low => "low",
+                        OpenAiGptReasoningLevel.High => "high",
+                        _ => "medium"
+                    },
+                    VllmChatOptions { ReasoningEffort: { Length: > 0 } effort } when !string.IsNullOrWhiteSpace(effort) => effort,
+                    // ThinkingEnabled=false means "do not reason". The GPT-5/6 families take that as effort "none", and for them it is
+                    // also what makes function tools usable on /chat/completions (the API refuses tools with a reasoning effort there).
+                    VllmChatOptions { ThinkingEnabled: false } when SupportsNoReasoning(request.Model) => "none",
+                    // Without an explicit choice, function tools on /chat/completions still need "none" or the API answers 400.
+                    not VllmChatOptions { ThinkingEnabled: true } when ApiMode != VllmApiMode.Responses && request.Tools?.Any() == true && SupportsNoReasoning(request.Model) => "none",
+                    _ => null
+                };
+
+                if (officialEffort is not null)
+                {
+                    if (ApiMode == VllmApiMode.Responses)
+                    {
+                        request.Reasoning = new VllmReasoningOptions { Effort = officialEffort };
+                    }
+                    else
+                    {
+                        request.ReasoningEffort = officialEffort;
+                    }
+                }
+
+                if (SamplingRefused(request.Model, officialEffort))
+                {
+                    request.Temperature = null;
+                    request.TopP = null;
+                }
+
+                return;
+            }
 
             if (options is VllmChatOptions vllmOptions && vllmOptions.ThinkingEnabled)
             {

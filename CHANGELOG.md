@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.36
+
+- Fix `VllmOpenAiGptClient` against OpenAI's own API (`api.openai.com`). It used to add OpenRouter/vLLM-style fields
+  (a nested `options` object, `reasoning`, `include_reasoning`, `enable_reasoning`, `stream_reasoning`) that OpenAI answers
+  with `400 unknown_parameter`, so no request could succeed. For that host the request now carries only fields the official
+  Chat Completions / Responses API defines: top-level `temperature`, `top_p`, `max_completion_tokens`
+  (`max_output_tokens` for Responses) and, when asked for, `reasoning_effort` (Chat Completions) or `reasoning.effort`
+  (Responses). Other hosts (OpenRouter, vLLM, ...) keep their existing request shape.
+- Reasoning effort on the official API: an explicit `VllmChatOptions.ReasoningEffort` or `OpenAiGptChatOptions.ReasoningLevel`
+  is sent as given. `VllmChatOptions.ThinkingEnabled = false` is sent as effort `none` for GPT-5/6 models (not `-pro`, not
+  o-series, which do not accept `none`). On `/chat/completions` with function tools and no explicit choice the client also
+  sends `none`, because the API refuses tools there with any reasoning effort.
+- GPT-5/6 and o-series models refuse `temperature` / `top_p` while they reason, so those two fields are not sent unless the
+  effort is `none`.
+- Verified live against `gpt-6.1-terra` (Chat Completions and Responses, streaming, with a function tool) and
+  `gemini-3.8-flash` (native endpoint). Both live checks are env-gated (`VLLM_LIVE_OPENAI=1` + `OPENAI_API_KEY`,
+  `VLLM_LIVE_GEMINI=1` + `GEMINI_API_KEY`) and do nothing otherwise.
+
 ## 2.0.35
 
 - Add opt-in tool-level `strict`. Set

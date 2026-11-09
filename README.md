@@ -4,6 +4,12 @@
 
 # VllmChatClient
 
+### 2.0.36: works against OpenAI's own API
+
+`VllmOpenAiGptClient` now talks to `api.openai.com` (Chat Completions and Responses): it no longer sends the
+OpenRouter/vLLM-style extensions OpenAI rejects with `unknown_parameter`, and maps `ThinkingEnabled = false` to
+reasoning effort `none` for GPT-5/6 models. See the changelog for the exact rules. Other hosts are unchanged.
+
 ### 2.0.35: opt-in tool-level `strict`
 
 Set `AIFunction.AdditionalProperties["strictJsonSchema"]` to `true` or `false`

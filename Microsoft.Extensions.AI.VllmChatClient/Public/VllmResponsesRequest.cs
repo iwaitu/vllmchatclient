@@ -32,10 +32,17 @@ internal sealed class VllmResponsesTextOptions
     public required VllmResponsesTextFormat Format { get; set; }
 }
 
-/// <summary>The Responses wire shape is exactly <c>{"type":"json_object"}</c> for JSON Object mode; no schema members.</summary>
+/// <summary>
+/// The Responses wire shape: exactly <c>{"type":"json_object"}</c> for JSON Object mode; for JSON Schema mode
+/// <c>{"type":"json_schema","name":...,"schema":...,"strict":...}</c> (the members are omitted when null).
+/// </summary>
 internal sealed class VllmResponsesTextFormat
 {
     public required string Type { get; set; }
+    public string? Name { get; set; }
+    public string? Description { get; set; }
+    public JsonElement? Schema { get; set; }
+    public bool? Strict { get; set; }
 }
 
 internal sealed class VllmResponsesFunctionTool

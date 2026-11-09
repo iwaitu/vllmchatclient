@@ -4,6 +4,10 @@
 
 # VllmChatClient
 
+### 2.0.37: structured output on OpenAI's Responses API
+
+JSON mode and JSON schema now work against `api.openai.com` in Responses mode (sent as `text.format`).
+
 ### 2.0.36: works against OpenAI's own API
 
 `VllmOpenAiGptClient` now talks to `api.openai.com` (Chat Completions and Responses): it no longer sends the

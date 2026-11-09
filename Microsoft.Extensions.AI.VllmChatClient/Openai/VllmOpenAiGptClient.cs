@@ -51,6 +51,38 @@ namespace Microsoft.Extensions.AI
             return name.StartsWith("openai/", StringComparison.Ordinal) ? name["openai/".Length..] : name;
         }
 
+        // The Responses API takes structured output as text.format, not the Chat Completions response_format.
+        private protected override VllmResponsesRequest ToVllmResponsesRequest(IEnumerable<ChatMessage> messages, ChatOptions? options, bool stream)
+        {
+            var request = base.ToVllmResponsesRequest(messages, options, stream);
+
+            if (_officialOpenAi && request.ResponseFormat is { } format)
+            {
+                request.ResponseFormat = null;
+                request.Text = new VllmResponsesTextOptions { Format = ToResponsesTextFormat(format) };
+            }
+
+            return request;
+        }
+
+        private static VllmResponsesTextFormat ToResponsesTextFormat(JsonElement chatFormat)
+        {
+            var type = chatFormat.TryGetProperty("type", out var typeElement) ? typeElement.GetString() ?? "json_object" : "json_object";
+            if (type == "json_schema" && chatFormat.TryGetProperty("json_schema", out var schema))
+            {
+                return new VllmResponsesTextFormat
+                {
+                    Type = "json_schema",
+                    Name = schema.TryGetProperty("name", out var name) ? name.GetString() : null,
+                    Description = schema.TryGetProperty("description", out var description) ? description.GetString() : null,
+                    Schema = schema.TryGetProperty("schema", out var body) ? body.Clone() : null,
+                    Strict = schema.TryGetProperty("strict", out var strict) && strict.ValueKind is JsonValueKind.True or JsonValueKind.False ? strict.GetBoolean() : null,
+                };
+            }
+
+            return new VllmResponsesTextFormat { Type = type };
+        }
+
         internal static bool IsOfficialOpenAiEndpoint(string endpoint)
             => endpoint.Contains("//api.openai.com", StringComparison.OrdinalIgnoreCase);
 
@@ -93,6 +125,10 @@ namespace Microsoft.Extensions.AI
 
             if (_officialOpenAi)
             {
+                // vLLM-only members the shared builder may have added (structured_outputs under extra_body, the Ollama-style "format").
+                request.ExtraBody = null;
+                request.Format = null;
+
                 // Sampling and the token limit were moved to the top level by the profile. Reasoning effort is the only
                 // reasoning control the official API takes, and only when the caller asked for one.
                 var officialEffort = options switch

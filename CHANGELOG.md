@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.37
+
+- Structured output against OpenAI's own API (`VllmOpenAiGptClient`, `api.openai.com`). In Responses mode the format was sent as the
+  Chat Completions `response_format`, which the Responses API rejects ("moved to `text.format`"); it is now sent as `text.format`
+  (`json_object`, or `json_schema` with `name`, `description`, `schema`, `strict`). In both modes the vLLM-only `extra_body`
+  (`structured_outputs`) and the Ollama-style `format` are no longer sent to that host.
+- Verified live against `gpt-6.1-terra` with a JSON schema, in Chat Completions and in Responses.
+
 ## 2.0.36
 
 - Fix `VllmOpenAiGptClient` against OpenAI's own API (`api.openai.com`). It used to add OpenRouter/vLLM-style fields

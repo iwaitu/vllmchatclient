@@ -106,6 +106,56 @@ public class OfficialOpenAiRequestTests
         Assert.False(root.TryGetProperty("reasoning_effort", out _));
     }
 
+    // Structured output: Chat Completions keeps response_format; Responses moves it to text.format. Neither may carry the vLLM-only
+    // structured_outputs (under extra_body) or the Ollama-style "format".
+    [Fact]
+    public async Task OfficialHost_JsonSchema_ChatCompletions_KeepsResponseFormat_WithoutVllmExtras()
+    {
+        var root = await CaptureAsync("https://api.openai.com/v1/{1}", VllmApiMode.ChatCompletions,
+            new ChatOptions { ResponseFormat = ChatResponseFormat.ForJsonSchema(JsonDocument.Parse("""{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false}""").RootElement, "answer") });
+
+        Assert.Equal("json_schema", root.GetProperty("response_format").GetProperty("type").GetString());
+        Assert.Equal("answer", root.GetProperty("response_format").GetProperty("json_schema").GetProperty("name").GetString());
+        Assert.False(root.TryGetProperty("extra_body", out _));
+        Assert.False(root.TryGetProperty("format", out _));
+    }
+
+    [Fact]
+    public async Task OfficialHost_JsonSchema_Responses_UsesTextFormat()
+    {
+        var root = await CaptureAsync("https://api.openai.com/v1/{1}", VllmApiMode.Responses,
+            new ChatOptions { ResponseFormat = ChatResponseFormat.ForJsonSchema(JsonDocument.Parse("""{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false}""").RootElement, "answer") });
+
+        Assert.False(root.TryGetProperty("response_format", out _));
+        Assert.False(root.TryGetProperty("extra_body", out _));
+        Assert.False(root.TryGetProperty("structured_outputs", out _));
+        var format = root.GetProperty("text").GetProperty("format");
+        Assert.Equal("json_schema", format.GetProperty("type").GetString());
+        Assert.Equal("answer", format.GetProperty("name").GetString());
+        Assert.True(format.GetProperty("strict").GetBoolean());
+        Assert.Equal("object", format.GetProperty("schema").GetProperty("type").GetString());
+    }
+
+    [Theory]
+    [InlineData(VllmApiMode.ChatCompletions)]
+    [InlineData(VllmApiMode.Responses)]
+    public async Task OfficialHost_JsonObject_UsesTheModeOwnShape(VllmApiMode mode)
+    {
+        var root = await CaptureAsync("https://api.openai.com/v1/{1}", mode, new ChatOptions { ResponseFormat = ChatResponseFormat.Json });
+
+        if (mode == VllmApiMode.Responses)
+        {
+            Assert.False(root.TryGetProperty("response_format", out _));
+            Assert.Equal("json_object", root.GetProperty("text").GetProperty("format").GetProperty("type").GetString());
+        }
+        else
+        {
+            Assert.Equal("json_object", root.GetProperty("response_format").GetProperty("type").GetString());
+        }
+
+        Assert.False(root.TryGetProperty("extra_body", out _));
+    }
+
     [Fact]
     public async Task OtherHosts_KeepTheirExistingShape()
     {

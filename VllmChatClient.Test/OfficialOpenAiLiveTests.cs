@@ -43,6 +43,26 @@ public class OfficialOpenAiLiveTests
         Assert.Contains(updates, update => update.Contents.OfType<FunctionCallContent>().Any(call => call.Name == "get_weather"));
     }
 
+    [Theory]
+    [InlineData(VllmApiMode.ChatCompletions)]
+    [InlineData(VllmApiMode.Responses)]
+    public async Task StructuredOutput_JsonSchema_IsAccepted_AndReturnsMatchingJson(VllmApiMode mode)
+    {
+        if (Settings() is not { } settings)
+        {
+            return;
+        }
+
+        var client = new VllmOpenAiGptClient("https://api.openai.com/v1/{1}", settings.Key, settings.Model, null, mode);
+        var schema = System.Text.Json.JsonDocument.Parse("""{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false}""").RootElement;
+        var response = await client.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "Return the capital of France.")],
+            new VllmChatOptions { ResponseFormat = ChatResponseFormat.ForJsonSchema(schema, "capital"), ThinkingEnabled = false });
+
+        using var parsed = System.Text.Json.JsonDocument.Parse(response.Text);
+        Assert.True(parsed.RootElement.TryGetProperty("city", out _));
+    }
+
     // The same real-API check for Gemini (native endpoint). Needs GEMINI_API_KEY and VLLM_LIVE_GEMINI=1; model from
     // VLLM_LIVE_GEMINI_MODEL, default gemini-3.8-flash.
     [Fact]

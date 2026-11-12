@@ -166,6 +166,43 @@ public class OfficialOpenAiRequestTests
         Assert.True(options.TryGetProperty("extra_body", out _));
     }
 
+    [Fact]
+    public async Task OtherHosts_Responses_SendNoBooleanReasoningExtras()
+    {
+        // The Responses request flattens extra_body to the top level, where "reasoning" must be an object:
+        // OpenRouter answers 400 "expected object, received boolean" to the flags Chat Completions carries.
+        var root = await CaptureAsync("https://openrouter.ai/api/v1/{1}", VllmApiMode.Responses, new ChatOptions { MaxOutputTokens = 64 }, "openai/gpt-5-nano");
+
+        foreach (var name in new[] { "reasoning", "include_reasoning", "enable_reasoning", "stream_reasoning" })
+        {
+            Assert.False(root.TryGetProperty(name, out _), $"unexpected '{name}' in the Responses request");
+        }
+        Assert.Equal("openai/gpt-5-nano", root.GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public async Task OtherHosts_Responses_ThinkingEnabled_SendsReasoningAsAnObject()
+    {
+        var root = await CaptureAsync("https://openrouter.ai/api/v1/{1}", VllmApiMode.Responses, new VllmChatOptions { ThinkingEnabled = true }, "openai/gpt-5-nano");
+
+        Assert.Equal(JsonValueKind.Object, root.GetProperty("reasoning").ValueKind);
+        Assert.False(root.TryGetProperty("include_reasoning", out _));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OtherHosts_Responses_StructuredOutput_UsesTextFormat(bool schema)
+    {
+        using var document = JsonDocument.Parse("""{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}""");
+        var format = schema ? ChatResponseFormat.ForJsonSchema(document.RootElement, "result") : ChatResponseFormat.Json;
+        var root = await CaptureAsync("https://openrouter.ai/api/v1/{1}", VllmApiMode.Responses, new ChatOptions { ResponseFormat = format }, "openai/gpt-5-nano");
+
+        Assert.Equal(schema ? "json_schema" : "json_object", root.GetProperty("text").GetProperty("format").GetProperty("type").GetString());
+        Assert.False(root.TryGetProperty("response_format", out _));
+        Assert.False(root.TryGetProperty("structured_outputs", out _));
+    }
+
     private static async Task<JsonElement> CaptureAsync(string endpoint, VllmApiMode mode, ChatOptions options, string model = "gpt-4.1")
     {
         string? body = null;

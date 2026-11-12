@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.39
+
+- Fix `VllmOpenAiGptClient` in Responses mode against hosts other than `api.openai.com` (OpenRouter and similar gateways).
+  The client added the Chat Completions reasoning flags (`reasoning`, `include_reasoning`, `enable_reasoning`,
+  `stream_reasoning`, all booleans) to every request; a Responses request carries them at the top level, where
+  `reasoning` must be an object, so the gateway answered 400 "expected object, received boolean" and no request could
+  succeed. They are no longer sent in Responses mode; `ThinkingEnabled` and `OpenAiGptChatOptions.ReasoningLevel` still
+  send the `reasoning` object.
+- Structured output in Responses mode now uses `text.format` on every host, not only `api.openai.com`, and the vLLM-only
+  `structured_outputs` is not sent with it. A gateway that forwards to OpenAI rejects `response_format` there.
+- Verified live through OpenRouter with `openai/gpt-5-nano`: a tool round trip (streaming and not), thinking enabled,
+  JSON object and JSON schema output. Chat Completions requests are unchanged.
+
 ## 2.0.38
 
 - Add an opt-in to keep sending tool definitions under `ChatToolMode.None`. Set

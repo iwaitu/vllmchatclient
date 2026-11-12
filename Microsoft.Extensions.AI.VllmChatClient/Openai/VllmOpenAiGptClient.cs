@@ -56,10 +56,17 @@ namespace Microsoft.Extensions.AI
         {
             var request = base.ToVllmResponsesRequest(messages, options, stream);
 
-            if (_officialOpenAi && request.ResponseFormat is { } format)
+            // 所有主机都如此：GPT 模型的 Responses 接口（包括 OpenRouter 这类转发网关）只接受 text.format，
+            // 对 response_format 以及 vLLM 专用的 structured_outputs 都会返回 400。
+            if (request.ResponseFormat is { } format)
             {
                 request.ResponseFormat = null;
                 request.Text = new VllmResponsesTextOptions { Format = ToResponsesTextFormat(format) };
+                request.ExtraBody?.Remove("structured_outputs");
+                if (request.ExtraBody is { Count: 0 })
+                {
+                    request.ExtraBody = null;
+                }
             }
 
             return request;
@@ -191,6 +198,13 @@ namespace Microsoft.Extensions.AI
                 request.Reasoning.Enabled = true;
                 request.Reasoning.Effort = effort;
                 request.Reasoning.Exclude = openAiGptOptions.ExcludeReasoning;
+            }
+
+            if (ApiMode == VllmApiMode.Responses)
+            {
+                // Responses 请求会把 extra_body 展开到顶层；那里的 reasoning 必须是对象，布尔值会被网关以 400 拒绝。
+                // 思考配置由上面的 request.Reasoning（对象）携带。
+                return;
             }
 
             (request.Options ??= new()).extra_body = new Dictionary<string, object?>

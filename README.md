@@ -4,6 +4,13 @@
 
 # VllmChatClient
 
+### 2.0.39: Responses mode through OpenRouter-style gateways
+
+`VllmOpenAiGptClient` with `VllmApiMode.Responses` now works against hosts other than `api.openai.com`. It no longer
+sends the Chat Completions boolean reasoning flags at the top level of a Responses request (a gateway answers 400
+"expected object, received boolean"), and structured output goes out as `text.format` on every host. Chat Completions
+requests are unchanged.
+
 ### 2.0.38: keep tool definitions under `ChatToolMode.None`
 
 By default a request with `ToolMode = ChatToolMode.None` sends `tool_choice: "none"` and no `tools`. Providers render

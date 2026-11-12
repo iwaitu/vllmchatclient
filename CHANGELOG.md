@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.38
+
+- Add an opt-in to keep sending tool definitions under `ChatToolMode.None`. Set
+  `ChatOptions.AdditionalProperties["tools.keep_when_none"]` (`VllmToolDeclarations.KeepWhenToolModeNoneKey`) to `true`
+  and the request carries the same `tools` as before together with `tool_choice: "none"`. By default a `None` request
+  sends no `tools`; providers render tool definitions ahead of the conversation, so a turn that drops them misses the
+  provider's prompt cache for everything sent so far.
+- A missing key, `null` or `false` leaves requests unchanged. Any other value is rejected before a request is sent, and
+  the key itself is never sent. Applies to Chat Completions, Responses and Anthropic Messages requests built by
+  `VllmBaseChatClient`; clients with their own tool builders (Qwq, Gemma, Gemini 3) are unchanged. Tool calls written as
+  text are still not parsed under `None`.
+
 ## 2.0.37
 
 - Structured output against OpenAI's own API (`VllmOpenAiGptClient`, `api.openai.com`). In Responses mode the format was sent as the

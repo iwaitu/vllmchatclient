@@ -4,6 +4,24 @@
 
 # VllmChatClient
 
+### 2.0.38: keep tool definitions under `ChatToolMode.None`
+
+By default a request with `ToolMode = ChatToolMode.None` sends `tool_choice: "none"` and no `tools`. Providers render
+tool definitions ahead of the conversation, so the turn that drops them (for example an agent's final, tool-free answer)
+no longer shares a prefix with earlier turns and misses the prompt cache. Opt in to keep the definitions on the wire:
+
+```csharp
+var options = new ChatOptions { Tools = tools, ToolMode = ChatToolMode.None };
+options.AdditionalProperties = new AdditionalPropertiesDictionary
+{
+    [VllmToolDeclarations.KeepWhenToolModeNoneKey] = true,
+};
+```
+
+A missing key, `null` or `false` keeps requests unchanged; any other value is rejected before a request is sent. Whether
+the backend honours `tool_choice: "none"` with tools present is the caller's decision. Clients with their own tool
+builders (Qwq, Gemma, Gemini 3) are unchanged.
+
 ### 2.0.37: structured output on OpenAI's Responses API
 
 JSON mode and JSON schema now work against `api.openai.com` in Responses mode (sent as `text.format`).

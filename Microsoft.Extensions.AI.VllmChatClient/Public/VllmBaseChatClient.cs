@@ -3460,7 +3460,9 @@ namespace Microsoft.Extensions.AI
 
         private protected virtual IEnumerable<VllmTool>? GetTools(ChatOptions? options)
         {
-            return options?.ToolMode is not NoneChatToolMode && options?.Tools is { Count: > 0 } tools
+            // 默认 None 模式不发工具定义；显式开关下保留定义，让请求前缀与之前的轮次一致。
+            var keepWhenNone = VllmToolDeclarations.KeepWhenToolModeNone(options);
+            return (options?.ToolMode is not NoneChatToolMode || keepWhenNone) && options?.Tools is { Count: > 0 } tools
                 ? tools.OfType<AIFunction>().Select(ToVllmTool)
                 : null;
         }

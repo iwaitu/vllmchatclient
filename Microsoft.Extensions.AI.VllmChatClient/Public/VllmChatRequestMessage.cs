@@ -71,14 +71,6 @@ internal class VllmOpenAIChatRequestMessage
             ContentParts = value?.Parts;
         }
     }
-    /// <summary>
-    /// Text for adapters (Responses, Anthropic) that have no typed mapping for chat-completions
-    /// content parts; they keep receiving the serialized parts exactly as before 2.0.27.
-    /// </summary>
-    [JsonIgnore]
-    internal string? AdapterText => ContentParts is { } parts
-        ? JsonSerializer.Serialize(parts, typeof(JsonElement[]), JsonContext.Default)
-        : Content;
     [JsonPropertyName("reasoning_content")]
     public object? ReasoningContent { get; set; }
     public string? Name { get; set; }

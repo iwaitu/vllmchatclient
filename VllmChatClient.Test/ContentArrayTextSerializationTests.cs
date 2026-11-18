@@ -283,6 +283,112 @@ public class ContentArrayTextSerializationTests
         }
     }
 
+    [Theory]
+    [InlineData(VllmApiMode.Responses, false)]
+    [InlineData(VllmApiMode.Responses, true)]
+    [InlineData(VllmApiMode.AnthropicMessages, false)]
+    [InlineData(VllmApiMode.AnthropicMessages, true)]
+    public async Task Qwen3NextMedia_OtherApiModes_SendStructuredMediaParts(VllmApiMode mode, bool stream)
+    {
+        const string answer = """[{"key":"attr:a"}]""";
+        using var handler = new CaptureHandler(stream, mode);
+        using var http = new HttpClient(handler);
+        using var client = new VllmQwen3NextChatClient("https://example.test/v1", modelId: "qwen3.8-27b", httpClient: http, apiMode: mode);
+        ChatMessage[] history =
+        [
+            new(ChatRole.User,
+            [
+                new DataContent(new byte[] { 1, 2, 3 }, "image/jpeg"),
+                new UriContent("https://example.test/frame.png", "image/png"),
+                new TextContent(answer),
+            ]),
+            new(ChatRole.User, [new DataContent(new byte[] { 4, 5, 6 }, "image/png")]),
+        ];
+
+        await SendAsync(client, history, stream);
+
+        using var doc = JsonDocument.Parse(handler.Body!);
+        if (mode == VllmApiMode.Responses)
+        {
+            var input = doc.RootElement.GetProperty("input");
+            var first = input[0].GetProperty("content");
+            Assert.Equal(JsonValueKind.Array, first.ValueKind);
+            Assert.Equal(["input_image", "input_image", "input_text"],
+                first.EnumerateArray().Select(p => p.GetProperty("type").GetString()));
+            Assert.Equal("data:image/jpeg;base64,AQID", first[0].GetProperty("image_url").GetString());
+            Assert.Equal("auto", first[0].GetProperty("detail").GetString());
+            Assert.Equal("https://example.test/frame.png", first[1].GetProperty("image_url").GetString());
+            Assert.Equal("auto", first[1].GetProperty("detail").GetString());
+            Assert.Equal(answer, first[2].GetProperty("text").GetString());
+
+            var second = input[1].GetProperty("content");
+            Assert.Equal(JsonValueKind.Array, second.ValueKind);
+            Assert.Single(second.EnumerateArray());
+            Assert.Equal("input_image", second[0].GetProperty("type").GetString());
+            Assert.Equal("data:image/png;base64,BAUG", second[0].GetProperty("image_url").GetString());
+            Assert.Equal("auto", second[0].GetProperty("detail").GetString());
+        }
+        else
+        {
+            var messages = doc.RootElement.GetProperty("messages");
+            var first = messages[0].GetProperty("content");
+            Assert.Equal(JsonValueKind.Array, first.ValueKind);
+            Assert.Equal(["image", "image", "text"],
+                first.EnumerateArray().Select(p => p.GetProperty("type").GetString()));
+            Assert.Equal("base64", first[0].GetProperty("source").GetProperty("type").GetString());
+            Assert.Equal("image/jpeg", first[0].GetProperty("source").GetProperty("media_type").GetString());
+            Assert.Equal("AQID", first[0].GetProperty("source").GetProperty("data").GetString());
+            Assert.Equal("url", first[1].GetProperty("source").GetProperty("type").GetString());
+            Assert.Equal("https://example.test/frame.png", first[1].GetProperty("source").GetProperty("url").GetString());
+            Assert.Equal(answer, first[2].GetProperty("text").GetString());
+
+            var second = messages[1].GetProperty("content");
+            Assert.Equal(JsonValueKind.Array, second.ValueKind);
+            Assert.Single(second.EnumerateArray());
+            Assert.Equal("image", second[0].GetProperty("type").GetString());
+            Assert.Equal("image/png", second[0].GetProperty("source").GetProperty("media_type").GetString());
+            Assert.Equal("BAUG", second[0].GetProperty("source").GetProperty("data").GetString());
+        }
+    }
+
+    [Theory]
+    [InlineData(VllmApiMode.Responses)]
+    [InlineData(VllmApiMode.AnthropicMessages)]
+    public async Task Qwen3NextSystemAndMedia_OtherApiModes_KeepSystemTextAndMapMediaParts(VllmApiMode mode)
+    {
+        using var handler = new CaptureHandler(stream: false, mode);
+        using var http = new HttpClient(handler);
+        using var client = new VllmQwen3NextChatClient("https://example.test/v1", modelId: "qwen3.8-27b", httpClient: http, apiMode: mode);
+        ChatMessage[] history =
+        [
+            new(ChatRole.System, "Be concise."),
+            new(ChatRole.User, [new TextContent("Describe."), new DataContent(new byte[] { 1, 2, 3 }, "image/png")]),
+        ];
+
+        await SendAsync(client, history, stream: false);
+
+        using var doc = JsonDocument.Parse(handler.Body!);
+        if (mode == VllmApiMode.Responses)
+        {
+            var input = doc.RootElement.GetProperty("input");
+            Assert.Equal("Be concise.", input[0].GetProperty("content").GetString());
+            var user = input[1].GetProperty("content");
+            Assert.Equal(["input_image", "input_text"],
+                user.EnumerateArray().Select(p => p.GetProperty("type").GetString()));
+            Assert.Equal("data:image/png;base64,AQID", user[0].GetProperty("image_url").GetString());
+            Assert.Equal("Describe.", user[1].GetProperty("text").GetString());
+        }
+        else
+        {
+            Assert.Equal("Be concise.", doc.RootElement.GetProperty("system")[0].GetProperty("text").GetString());
+            var user = doc.RootElement.GetProperty("messages")[0].GetProperty("content");
+            Assert.Equal(["image", "text"],
+                user.EnumerateArray().Select(p => p.GetProperty("type").GetString()));
+            Assert.Equal("AQID", user[0].GetProperty("source").GetProperty("data").GetString());
+            Assert.Equal("Describe.", user[1].GetProperty("text").GetString());
+        }
+    }
+
     [Fact]
     public void ExplicitParts_AreTheOnlyWayToSerializeAContentArray()
     {

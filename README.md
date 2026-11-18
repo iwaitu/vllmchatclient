@@ -4,6 +4,10 @@
 
 # VllmChatClient
 
+### 2.0.40: multimodal images in Responses and Anthropic Messages modes
+
+`VllmQwen3NextChatClient` (and `ContentParts`-based messages) now send structured image content in `VllmApiMode.Responses` (`input_image` with `detail: "auto"` + `input_text`) and `VllmApiMode.AnthropicMessages` (`image` + `text`), instead of serializing the OpenAI Chat Completions content array as a plain string.
+
 ### 2.0.39: Responses mode through OpenRouter-style gateways
 
 `VllmOpenAiGptClient` with `VllmApiMode.Responses` now works against hosts other than `api.openai.com`. It no longer

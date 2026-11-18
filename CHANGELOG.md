@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.40
+
+- Fix multimodal `ContentParts` serialization in `VllmApiMode.Responses` and `VllmApiMode.AnthropicMessages` (affecting `VllmQwen3NextChatClient` and other clients populating `ContentParts`).
+  - Previously, `VllmBaseChatClient` read `AdapterText` (which JSON-serialized `ContentParts` as a plain string) for `Responses` and `AnthropicMessages`, causing large base64 image payloads to be tokenized as text and overflow the model context window.
+  - `ToVllmResponsesMessageContent` now maps `ContentParts` directly into structured `input_text` and `input_image` parts, and `VllmResponsesImageContentPart` now includes `detail: "auto"` as required by `ResponseInputImageParam`.
+  - `ToVllmAnthropicMessages` now maps `ContentParts` into structured Anthropic `text` and `image` blocks (preserving `media_type` for `data:` URIs and mapping remote URLs to `source.type = "url"`), while system prompts extract plain text instead of serialized JSON parts.
+- Verified with offline serialization tests across streaming and non-streaming modes and live against a vLLM `qwen3.8-27b-fp8` endpoint in both `Responses` and `ChatCompletions` modes.
+
 ## 2.0.39
 
 - Fix `VllmOpenAiGptClient` in Responses mode against hosts other than `api.openai.com` (OpenRouter and similar gateways).

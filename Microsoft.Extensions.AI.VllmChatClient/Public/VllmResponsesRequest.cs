@@ -88,6 +88,7 @@ internal sealed class VllmResponsesImageContentPart
     public string Type { get; set; } = "input_image";
     [JsonPropertyName("image_url")]
     public required string ImageUrl { get; set; }
+    public string Detail { get; set; } = "auto";
 }
 
 internal sealed class VllmResponsesTextContentPart

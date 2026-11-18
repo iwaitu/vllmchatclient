@@ -77,8 +77,9 @@ internal sealed class VllmAnthropicImageSource
 {
     public string Type { get; set; } = "base64";
     [JsonPropertyName("media_type")]
-    public string MediaType { get; set; } = "image/png";
-    public required string Data { get; set; }
+    public string? MediaType { get; set; } = "image/png";
+    public string? Data { get; set; }
+    public string? Url { get; set; }
 }
 
 internal sealed class VllmAnthropicToolUseBlock

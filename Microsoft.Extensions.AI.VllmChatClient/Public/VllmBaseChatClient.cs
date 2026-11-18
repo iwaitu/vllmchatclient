@@ -2663,13 +2663,14 @@ namespace Microsoft.Extensions.AI
                 var message = chatRequest.Messages[i];
                 if (message.Role == "system")
                 {
-                    if (!string.IsNullOrEmpty(message.AdapterText))
+                    var systemText = ExtractPlainText(message);
+                    if (!string.IsNullOrEmpty(systemText))
                     {
                         if (system.Length > 0)
                         {
                             system.AppendLine();
                         }
-                        system.Append(message.AdapterText);
+                        system.Append(systemText);
                     }
                     continue;
                 }
@@ -2849,14 +2850,38 @@ namespace Microsoft.Extensions.AI
             }
 
             var blocks = new List<JsonElement>();
-            if (message.AdapterText is { Length: > 0 } text)
+            if (message.ContentParts is { Length: > 0 } contentParts)
             {
-                blocks.Add(CreateAnthropicTextBlock(text));
-            }
+                foreach (var part in contentParts)
+                {
+                    if (!TryReadContentPart(part, out var partText, out var imageUrl))
+                    {
+                        continue;
+                    }
 
-            foreach (var image in message.Images ?? [])
+                    if (!string.IsNullOrEmpty(partText))
+                    {
+                        blocks.Add(CreateAnthropicTextBlock(partText));
+                    }
+                    else if (!string.IsNullOrEmpty(imageUrl))
+                    {
+                        blocks.Add(TryParseDataUri(imageUrl, out var mediaType, out var base64Data)
+                            ? CreateAnthropicImageBlock(base64Data, mediaType)
+                            : CreateAnthropicImageUrlBlock(imageUrl));
+                    }
+                }
+            }
+            else
             {
-                blocks.Add(CreateAnthropicImageBlock(image));
+                if (message.Content is { Length: > 0 } text)
+                {
+                    blocks.Add(CreateAnthropicTextBlock(text));
+                }
+
+                foreach (var image in message.Images ?? [])
+                {
+                    blocks.Add(CreateAnthropicImageBlock(image));
+                }
             }
 
             foreach (var toolCall in message.ToolCalls ?? [])
@@ -3035,12 +3060,13 @@ namespace Microsoft.Extensions.AI
                 yield break;
             }
 
-            if (!string.IsNullOrEmpty(message.AdapterText) || message.Images is { Count: > 0 } || message.ToolCalls is not { Length: > 0 })
+            var responsesContent = ToVllmResponsesMessageContent(message);
+            if (responsesContent is not null || message.ToolCalls is not { Length: > 0 })
             {
                 yield return new VllmResponsesMessageInput
                 {
                     Role = message.Role,
-                    Content = ToVllmResponsesMessageContent(message),
+                    Content = responsesContent,
                 };
             }
 
@@ -3060,13 +3086,41 @@ namespace Microsoft.Extensions.AI
 
         private static object? ToVllmResponsesMessageContent(VllmOpenAIChatRequestMessage message)
         {
+            if (message.ContentParts is { Length: > 0 } contentParts)
+            {
+                var mapped = new List<object>(contentParts.Length);
+                foreach (var part in contentParts)
+                {
+                    if (!TryReadContentPart(part, out var partText, out var imageUrl))
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(partText))
+                    {
+                        mapped.Add(new VllmResponsesTextContentPart { Text = partText });
+                    }
+                    else if (!string.IsNullOrEmpty(imageUrl))
+                    {
+                        mapped.Add(new VllmResponsesImageContentPart { ImageUrl = imageUrl });
+                    }
+                }
+
+                if (mapped.Count > 0)
+                {
+                    return mapped;
+                }
+
+                return string.IsNullOrEmpty(message.Content) ? null : message.Content;
+            }
+
             if (message.Images is not { Count: > 0 })
             {
-                return message.AdapterText;
+                return string.IsNullOrEmpty(message.Content) ? null : message.Content;
             }
 
             var parts = new List<object>();
-            if (message.AdapterText is { Length: > 0 } text)
+            if (message.Content is { Length: > 0 } text)
             {
                 parts.Add(new VllmResponsesTextContentPart { Text = text });
             }
@@ -3406,14 +3460,106 @@ namespace Microsoft.Extensions.AI
                 Text = text
             }, typeof(VllmAnthropicTextBlock), JsonContext.Default);
 
-        private static JsonElement CreateAnthropicImageBlock(string data)
+        private static JsonElement CreateAnthropicImageBlock(string data, string mediaType = "image/png")
             => JsonSerializer.SerializeToElement(new VllmAnthropicImageBlock
             {
                 Source = new VllmAnthropicImageSource
                 {
+                    MediaType = mediaType,
                     Data = data
                 }
             }, typeof(VllmAnthropicImageBlock), JsonContext.Default);
+
+        private static JsonElement CreateAnthropicImageUrlBlock(string url)
+            => JsonSerializer.SerializeToElement(new VllmAnthropicImageBlock
+            {
+                Source = new VllmAnthropicImageSource
+                {
+                    Type = "url",
+                    MediaType = null,
+                    Url = url
+                }
+            }, typeof(VllmAnthropicImageBlock), JsonContext.Default);
+
+        private static string? ExtractPlainText(VllmOpenAIChatRequestMessage message)
+        {
+            if (!string.IsNullOrEmpty(message.Content) || message.ContentParts is not { Length: > 0 } parts)
+            {
+                return message.Content;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            foreach (var part in parts)
+            {
+                if (TryReadContentPart(part, out var text, out _) && !string.IsNullOrEmpty(text))
+                {
+                    sb.Append(text);
+                }
+            }
+
+            return sb.Length > 0 ? sb.ToString() : null;
+        }
+
+        private static bool TryReadContentPart(JsonElement part, out string? text, out string? imageUrl)
+        {
+            text = null;
+            imageUrl = null;
+            if (part.ValueKind != JsonValueKind.Object ||
+                !part.TryGetProperty("type", out var typeProp) ||
+                typeProp.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            var type = typeProp.GetString();
+            if (string.Equals(type, "text", StringComparison.Ordinal))
+            {
+                if (part.TryGetProperty("text", out var textProp) && textProp.ValueKind == JsonValueKind.String)
+                {
+                    text = textProp.GetString();
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (string.Equals(type, "image_url", StringComparison.Ordinal) &&
+                part.TryGetProperty("image_url", out var urlObj) &&
+                urlObj.ValueKind == JsonValueKind.Object &&
+                urlObj.TryGetProperty("url", out var urlProp) &&
+                urlProp.ValueKind == JsonValueKind.String)
+            {
+                imageUrl = urlProp.GetString();
+                return !string.IsNullOrEmpty(imageUrl);
+            }
+
+            return false;
+        }
+
+        private static bool TryParseDataUri(string uri, out string mediaType, out string base64Data)
+        {
+            mediaType = "image/png";
+            base64Data = string.Empty;
+            if (!uri.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var markerIndex = uri.IndexOf(";base64,", StringComparison.OrdinalIgnoreCase);
+            if (markerIndex < 0)
+            {
+                return false;
+            }
+
+            var parsedMediaType = uri.Substring(5, markerIndex - 5).Trim();
+            if (!string.IsNullOrEmpty(parsedMediaType))
+            {
+                mediaType = parsedMediaType;
+            }
+
+            base64Data = uri[(markerIndex + ";base64,".Length)..];
+            return base64Data.Length > 0;
+        }
 
         private static bool IsAnthropicToolUseBlock(JsonElement block)
             => block.ValueKind == JsonValueKind.Object

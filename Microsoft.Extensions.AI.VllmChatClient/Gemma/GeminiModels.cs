@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
@@ -149,6 +150,9 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
 
         [JsonPropertyName("parameters")]
         public object? Parameters { get; set; }
+
+        [JsonPropertyName("parametersJsonSchema")]
+        public JsonElement? ParametersJsonSchema { get; set; }
     }
 
     /// <summary>

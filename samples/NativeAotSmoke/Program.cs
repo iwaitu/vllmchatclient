@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.AI.VllmChatClient.Gemma;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
@@ -17,12 +18,32 @@ await SmokeArrayTextAndMediaPartsAsync(handler);
 await SmokeResponsesAsync(httpClient, handler);
 await SmokeAnthropicMessagesAsync(httpClient, handler);
 await SmokeAnthropicJsonSchemaAsync(httpClient, handler);
+await SmokeGeminiFunctionSchemaAsync();
 await SmokeDeepseekV4HistoryAsync();
 await SmokeSonnet55OpaqueAsync();
 await SmokeDeepseekJsonObjectAsync();
 await SmokePromptCacheAndUsageAsync();
 
 Console.WriteLine("NativeAOT smoke completed.");
+
+static async Task SmokeGeminiFunctionSchemaAsync()
+{
+    var handler = new QueueingHandler();
+    using var httpClient = new HttpClient(handler);
+    using var client = new VllmGemini3ChatClient(
+        "https://generativelanguage.googleapis.com/v1beta", "offline-only", "gemini-4-hydrogen", httpClient);
+    using var schema = JsonDocument.Parse("""{"type":"object","properties":{},"additionalProperties":false}""");
+    handler.Enqueue(Json("""{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}"""));
+    var result = await client.GetResponseAsync(
+        [new ChatMessage(ChatRole.User, "go")],
+        new ChatOptions { Tools = [new GeminiSchemaSmokeFunction(schema.RootElement)] });
+    using var wire = JsonDocument.Parse(handler.LastRequestBody!);
+    var tool = wire.RootElement.GetProperty("tools")[0].GetProperty("functionDeclarations")[0];
+    if (result.Text != "ok" || tool.TryGetProperty("parameters", out _) ||
+        !JsonElement.DeepEquals(schema.RootElement, tool.GetProperty("parametersJsonSchema")))
+        throw new InvalidOperationException("NativeAOT Gemini tool JSON Schema was not serialized exactly.");
+    Console.WriteLine("Gemini native tool JSON Schema passed.");
+}
 
 static async Task SmokePromptCacheAndUsageAsync()
 {
@@ -424,6 +445,16 @@ static string NormalizeSse(string content)
     }
 
     return builder.ToString();
+}
+
+internal sealed class GeminiSchemaSmokeFunction(JsonElement schema) : AIFunction
+{
+    public override string Name => "schema_probe";
+    public override string Description => "Return a test result.";
+    public override JsonElement JsonSchema => schema;
+
+    protected override ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
+        => ValueTask.FromResult<object?>(null);
 }
 
 internal sealed class QueueingHandler : HttpMessageHandler

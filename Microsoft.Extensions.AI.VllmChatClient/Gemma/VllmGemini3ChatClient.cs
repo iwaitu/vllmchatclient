@@ -289,6 +289,7 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                 using var geminiStreamReader = new StreamReader(geminiHttpResponseStream);
                 string? lastThoughtSignature = null; // 追踪最近的思维签名供首个函数调用附加
                 bool firstFunctionCallSeen = false;
+                string? nativeFinishReason = null;
 
 #if NET
                 while ((await geminiStreamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is { } line)
@@ -305,7 +306,11 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     var jsonData = line.Substring(6); // 移除 "data: " 前缀
 
                     // 检查是否是结束标记
-                    if (jsonData == "[DONE]" || string.IsNullOrWhiteSpace(jsonData))
+                    if (jsonData == "[DONE]")
+                    {
+                        break;
+                    }
+                    if (string.IsNullOrWhiteSpace(jsonData))
                     {
                         continue;
                     }
@@ -326,6 +331,10 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                     if (geminiStreamChunk?.Candidates != null && geminiStreamChunk.Candidates.Length > 0)
                     {
                         var candidate = geminiStreamChunk.Candidates[0];
+                        if (candidate.FinishReason is { Length: > 0 } reason && reason != "FINISH_REASON_UNSPECIFIED")
+                        {
+                            nativeFinishReason = reason;
+                        }
                         var content = candidate.Content;
 
                         if (content?.Parts != null)
@@ -366,7 +375,6 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                                     yield return new ReasoningChatResponseUpdate
                                     {
                                         CreatedAt = DateTimeOffset.UtcNow,
-                                        FinishReason = ChatFinishReason.ToolCalls,
                                         ModelId = options?.ModelId ?? _metadata.DefaultModelId,
                                         ResponseId = responseId,
                                         Role = ChatRole.Assistant,
@@ -396,7 +404,6 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                                     yield return new ReasoningChatResponseUpdate
                                     {
                                         CreatedAt = DateTimeOffset.UtcNow,
-                                        FinishReason = candidate.FinishReason == "STOP" ? ChatFinishReason.Stop : null,
                                         ModelId = options?.ModelId ?? _metadata.DefaultModelId,
                                         ResponseId = responseId,
                                         Role = ChatRole.Assistant,
@@ -408,6 +415,28 @@ namespace Microsoft.Extensions.AI.VllmChatClient.Gemma
                             }
                         }
                     }
+                }
+
+                // One Gemini turn can contain several tool calls or text parts before the stream ends.
+                var finishReason = nativeFinishReason switch
+                {
+                    "STOP" or null when firstFunctionCallSeen => ChatFinishReason.ToolCalls,
+                    "STOP" => ChatFinishReason.Stop,
+                    "MAX_TOKENS" => ChatFinishReason.Length,
+                    "SAFETY" or "RECITATION" => ChatFinishReason.ContentFilter,
+                    null => (ChatFinishReason?)null,
+                    _ => new ChatFinishReason(nativeFinishReason.ToLowerInvariant())
+                };
+                if (finishReason.HasValue)
+                {
+                    yield return new ChatResponseUpdate
+                    {
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        FinishReason = finishReason,
+                        ModelId = options?.ModelId ?? _metadata.DefaultModelId,
+                        ResponseId = responseId,
+                        Role = ChatRole.Assistant
+                    };
                 }
 
                 yield break;

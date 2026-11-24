@@ -136,6 +136,86 @@ public class Gemini3ProviderCompatibilityTests
     }
 
     [Fact]
+    public async Task GeminiNative_StreamingEmitsBothToolCallsBeforeOneFinish()
+    {
+        const string sse = """
+            data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"list_business_skills","args":{}},"thoughtSignature":"signed-first"}]}}]}
+
+            data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"tool_search","args":{"query":"skill"}}}]}}]}
+
+            data: {"candidates":[{"finishReason":"STOP"}]}
+
+            """;
+        using var httpClient = new HttpClient(new CaptureHandler(sse));
+        using var client = new VllmGemini3ChatClient(
+            "https://generativelanguage.googleapis.com/v1beta", "gemini-key", "gemini-4-hydrogen", httpClient);
+        var updates = new List<ChatResponseUpdate>();
+
+        await foreach (var update in client.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "Find a skill.")]))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Collection(updates,
+            first =>
+            {
+                Assert.Null(first.FinishReason);
+                var call = Assert.IsType<FunctionCallContent>(Assert.Single(first.Contents));
+                Assert.Equal("list_business_skills", call.Name);
+                Assert.Equal("signed-first", call.AdditionalProperties!["thoughtSignature"]);
+            },
+            second =>
+            {
+                Assert.Null(second.FinishReason);
+                var call = Assert.IsType<FunctionCallContent>(Assert.Single(second.Contents));
+                Assert.Equal("tool_search", call.Name);
+                Assert.Equal("skill", Assert.IsType<JsonElement>(call.Arguments!["query"]).GetString());
+            },
+            finish =>
+            {
+                Assert.Empty(finish.Contents);
+                Assert.Equal(ChatFinishReason.ToolCalls, finish.FinishReason);
+            });
+    }
+
+    [Theory]
+    [InlineData("STOP")]
+    [InlineData("MAX_TOKENS")]
+    public async Task GeminiNative_StreamingEmitsAllPartsBeforeFinish(string finishReason)
+    {
+        var sse = $$"""
+            data: {"candidates":[{"content":{"parts":[{"text":"First "},{"text":"second"}]},"finishReason":"{{finishReason}}"}]}
+
+            """;
+        using var httpClient = new HttpClient(new CaptureHandler(sse));
+        using var client = new VllmGemini3ChatClient(
+            "https://generativelanguage.googleapis.com/v1beta", "gemini-key", "gemini-4-hydrogen", httpClient);
+        var updates = new List<ChatResponseUpdate>();
+
+        await foreach (var update in client.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "Reply.")]))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Collection(updates,
+            first =>
+            {
+                Assert.Null(first.FinishReason);
+                Assert.Equal("First ", first.Text);
+            },
+            second =>
+            {
+                Assert.Null(second.FinishReason);
+                Assert.Equal("second", second.Text);
+            },
+            finish =>
+            {
+                Assert.Empty(finish.Contents);
+                Assert.Equal(finishReason == "STOP" ? ChatFinishReason.Stop : ChatFinishReason.Length, finish.FinishReason);
+            });
+    }
+
+    [Fact]
     public async Task OpenRouter_Request_UsesBearerAndReasoningEnabled()
     {
         const string responseJson = """
